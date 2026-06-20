@@ -2,6 +2,7 @@ package styles
 
 import (
 	"fmt"
+	"strings"
 )
 
 type Item struct {
@@ -12,15 +13,25 @@ type Item struct {
 }
 
 func (i Item) Title() string {
-	title := i.Name
+	parts := []string{ItemVersionStyle.Render(i.Name)}
 	if i.Active {
-		title = fmt.Sprintf("%s %s", title, SuccessStyle.Render("(active)"))
+		parts = append(parts, ActiveBadgeStyle.Render("active"))
 	}
 	if i.Installed {
-		title = fmt.Sprintf("%s %s", title, HighlightStyle.Render("(installed)"))
+		parts = append(parts, InstalledBadgeStyle.Render("installed"))
 	}
-	return title
+	return strings.Join(parts, " ")
 }
 
 func (i Item) FilterValue() string { return i.Name }
-func (i Item) Description() string { return i.DescriptionText }
+func (i Item) Description() string {
+	if i.DescriptionText == "" {
+		return fmt.Sprintf("go%s", i.Name)
+	}
+
+	desc := i.DescriptionText
+	if len(desc) > 50 {
+		return desc[:47] + "..."
+	}
+	return desc
+}

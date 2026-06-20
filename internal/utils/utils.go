@@ -1,9 +1,9 @@
 package utils
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"encoding/json"
 	"fmt"
-	tea "github.com/charmbracelet/bubbletea"
 	"io"
 	"net/http"
 	"os"

@@ -1,15 +1,15 @@
 package main
 
 import (
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
 	"fmt"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/melkeydev/govm/internal/cli"
 	"github.com/melkeydev/govm/internal/model"
 	"github.com/melkeydev/govm/internal/setup"
+	"github.com/melkeydev/govm/internal/styles"
 	"github.com/melkeydev/govm/internal/utils"
 	"os"
 	"path/filepath"
@@ -94,7 +94,7 @@ func printUsage() {
 func launchTUI() {
 	if !setup.IsShimInPath() {
 		setupModel := setup.New()
-		p := tea.NewProgram(setupModel, tea.WithAltScreen())
+		p := tea.NewProgram(setupModel)
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("Error in setup: %v\n", err)
 			os.Exit(1)
@@ -102,7 +102,7 @@ func launchTUI() {
 	}
 	s := spinner.New()
 	s.Spinner = spinner.Dot
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#3c71a8"))
+	s.Style = styles.SpinnerStyle
 	columns := []table.Column{
 		{Title: "Version", Width: 10},
 		{Title: "Path", Width: 40},
@@ -114,18 +114,9 @@ func launchTUI() {
 		table.WithHeight(10),
 	)
 	t.SetStyles(table.Styles{
-		Header: lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#3c71a8")).
-			Padding(0, 1),
-		Selected: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#3c71a8")).
-			Bold(true).
-			Padding(0, 1),
-		Cell: lipgloss.NewStyle().
-			Padding(0, 1),
+		Header:   styles.TableHeaderStyle,
+		Selected: styles.TableSelectedStyle,
+		Cell:     styles.TableCellStyle,
 	})
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -134,16 +125,15 @@ func launchTUI() {
 	}
 	goVersionsDir := filepath.Join(homeDir, ".govm", "versions")
 	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#3c71a8")).
-		Bold(true)
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-		Foreground(lipgloss.Color("#DDDDDD")).
-		Background(lipgloss.Color("#3c71a8"))
+	delegate.Styles.SelectedTitle = styles.TableSelectedStyle
+	delegate.Styles.SelectedDesc = styles.TableSelectedStyle
+	delegate.Styles.NormalDesc = styles.MutedStyle
 	l := list.New([]list.Item{}, delegate, 0, 0)
-	l.Title = "Go Versions"
+	l.Title = "Available Versions"
+	l.SetShowTitle(false)
+	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
+	l.SetShowPagination(false)
 	initialModel := model.Model{
 		List:           l,
 		Versions:       []utils.GoVersion{},
@@ -152,11 +142,11 @@ func launchTUI() {
 		HomeDir:        homeDir,
 		GoVersionsDir:  goVersionsDir,
 		InstalledTable: t,
+		Layout:         styles.LayoutNormal,
 	}
-	p := tea.NewProgram(initialModel, tea.WithAltScreen())
+	p := tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)
 		os.Exit(1)
 	}
 }
-

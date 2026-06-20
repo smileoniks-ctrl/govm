@@ -2,12 +2,13 @@ package model
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/table"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/melkeydev/govm/internal/styles"
 	"github.com/melkeydev/govm/internal/utils"
 )
@@ -28,6 +29,11 @@ type Model struct {
 	InstalledTable    table.Model
 	ConfirmingDelete  bool
 	DeleteVersion     string
+	Width             int
+	Height            int
+	TermWidth         int
+	TermHeight        int
+	Layout            styles.LayoutMode
 }
 
 func (m Model) Init() tea.Cmd {
@@ -40,11 +46,11 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
-		case tea.KeyCtrlC.String(), "q":
+		case "ctrl+c", "q":
 			return m, tea.Quit
-		case tea.KeyTab.String():
+		case "tab":
 			// Switch between tabs
 			m.CurrentTab = (m.CurrentTab + 1) % 2
 			return m, nil
@@ -128,10 +134,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.WindowSizeMsg:
-		h, v := styles.DocStyle.GetFrameSize()
-		m.List.SetSize(msg.Width-h, msg.Height-v-6)
-		m.InstalledTable.SetWidth(msg.Width - h)
-		m.InstalledTable.SetHeight(msg.Height - v - 10)
+		m.TermWidth = msg.Width
+		m.TermHeight = msg.Height
+		m.Layout = styles.GetLayoutMode(msg.Width)
+
+		frameH, frameV := styles.FrameOverhead(m.Layout)
+		contentWidth := msg.Width - frameH
+		if contentWidth < styles.MinTermWidth {
+			contentWidth = styles.MinTermWidth
+		}
+
+		const fixedUIElements = 6
+		contentHeight := msg.Height - frameV - fixedUIElements
+		if contentHeight < styles.MinTermHeight {
+			contentHeight = styles.MinTermHeight
+		}
+
+		m.Width = contentWidth
+		m.Height = contentHeight
+		m.List.SetSize(contentWidth, contentHeight)
+		m.InstalledTable.SetWidth(contentWidth)
+		m.InstalledTable.SetHeight(contentHeight)
+		m.InstalledTable.SetColumns(installedTableColumns(contentWidth, m.Layout))
 		return m, nil
 	case utils.ErrMsg:
 		m.Err = msg
@@ -252,63 +276,212 @@ func (m *Model) updateInstalledTable() {
 	m.InstalledTable.SetRows(rows)
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	appStyle := styles.AppStyleFor(m.Layout)
+	width := m.viewWidth()
+
 	if m.Err != nil {
-		return fmt.Sprintf("Error: %s\n\nPress any key to quit.", m.Err)
+		return tea.NewView(appStyle.Render(renderStatus("error", fmt.Sprintf("Error: %s", m.Err), width)))
 	}
-	// Build components
-	components := []string{}
-	header := styles.TitleStyle.Render("GoVM - Go Version Manager")
-	components = append(components, header)
+
+	components := []string{
+		renderHeader(width, m.Layout),
+		renderTabs(m.CurrentTab, m.Layout),
+	}
+
 	if !utils.IsShimInPath() {
-		warningStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("#FFCC00")).
-			Foreground(lipgloss.Color("#000000")).
-			Bold(true).
-			Padding(1, 2).
-			Align(lipgloss.Left)
 		instructions := utils.GetShimPathInstructions()
-		warningBanner := warningStyle.Render("⚠️  GoVM is not in your PATH  ⚠️\n\n" + instructions)
-		components = append(components, warningBanner)
+		components = append(components, renderStatus("warning", "GoVM is not in your PATH. "+instructions, width))
 	}
-	tabs := []string{"Available Versions", "Installed Versions"}
-	tabContent := ""
-	for i, tab := range tabs {
-		if i == m.CurrentTab {
-			tabContent += styles.HighlightStyle.Render("[ "+tab+" ]") + " "
-		} else {
-			tabContent += fmt.Sprintf("[ %s ]", tab) + " "
+
+	if m.CurrentTab == 0 {
+		components = append(components, m.List.View())
+	} else {
+		components = append(components, m.InstalledTable.View())
+	}
+
+	status := m.Message
+	statusType := m.MessageType
+	if m.Loading {
+		statusType = "info"
+		if m.InstallingVersion != "" {
+			status = fmt.Sprintf("%s Downloading Go %s", m.Spinner.View(), m.InstallingVersion)
+		} else if status == "" {
+			status = fmt.Sprintf("%s Loading versions", m.Spinner.View())
 		}
 	}
-	components = append(components, tabContent)
-	if m.CurrentTab == 0 {
-		listView := m.List.View()
-		components = append(components, listView)
-		if m.Loading {
-			spinnerDisplay := ""
-			if m.InstallingVersion != "" {
-				progressBar := fmt.Sprintf("[downloading Go %s]", m.InstallingVersion)
-				spinnerDisplay = fmt.Sprintf("%s %s", m.Spinner.View(), progressBar)
-			} else {
-				spinnerDisplay = fmt.Sprintf("%s Loading versions...", m.Spinner.View())
+	if status != "" {
+		components = append(components, renderStatus(statusType, status, width))
+	}
+
+	components = append(components, renderHelp(m.CurrentTab, m.ConfirmingDelete, width, m.Layout))
+	v := tea.NewView(appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...)))
+	v.AltScreen = true
+	return v
+}
+
+func (m Model) viewWidth() int {
+	if m.Width > 0 {
+		return m.Width
+	}
+	if m.List.Width() > 0 {
+		return m.List.Width()
+	}
+	return 80
+}
+
+func installedTableColumns(width int, layout styles.LayoutMode) []table.Column {
+	var versionWidth, statusWidth, minWidth int
+	switch layout {
+	case styles.LayoutCompact:
+		versionWidth, statusWidth, minWidth = 8, 6, 8
+	default:
+		versionWidth, statusWidth, minWidth = 10, 10, 18
+	}
+
+	pathWidth := width - versionWidth - statusWidth - 6
+	if pathWidth < minWidth {
+		pathWidth = minWidth
+	}
+
+	return []table.Column{
+		{Title: "Version", Width: versionWidth},
+		{Title: "Path", Width: pathWidth},
+		{Title: "Status", Width: statusWidth},
+	}
+}
+
+func renderHeader(width int, layout styles.LayoutMode) string {
+	title := styles.TitleStyle.Render("GoVM")
+
+	if layout == styles.LayoutCompact {
+		return title
+	}
+
+	meta := styles.HeaderMetaStyle.Render("Go Version Manager")
+	spacerWidth := maxInt(1, width-lipgloss.Width(title)-lipgloss.Width(meta))
+	return lipgloss.JoinHorizontal(lipgloss.Top, title, strings.Repeat(" ", spacerWidth), meta)
+}
+
+func renderTabs(currentTab int, layout styles.LayoutMode) string {
+	var availableLabel, installedLabel string
+	if layout == styles.LayoutCompact {
+		availableLabel, installedLabel = "All", "Local"
+	} else {
+		availableLabel, installedLabel = "Available", "Installed"
+	}
+
+	tabs := []string{
+		renderTab(availableLabel, currentTab == 0),
+		renderTab(installedLabel, currentTab == 1),
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Left, tabs...)
+}
+
+func renderTab(label string, active bool) string {
+	if active {
+		return styles.ActiveTabStyle.Render("● " + label)
+	}
+	return styles.InactiveTabStyle.Render("○ " + label)
+}
+
+func renderStatus(messageType, message string, width int) string {
+	if message == "" {
+		return ""
+	}
+
+	icon := "•"
+	style := styles.StatusInfoStyle
+	switch messageType {
+	case "success":
+		icon = "✓"
+		style = styles.StatusSuccessStyle
+	case "error":
+		icon = "✕"
+		style = styles.StatusErrorStyle
+	case "warning":
+		icon = "!"
+		style = styles.StatusWarningStyle
+	case "info":
+		icon = "•"
+		style = styles.StatusInfoStyle
+	}
+
+	return style.Width(width).Render(fmt.Sprintf("%s %s", icon, message))
+}
+
+func renderHelp(currentTab int, confirmingDelete bool, width int, layout styles.LayoutMode) string {
+	var hints [][2]string
+
+	if confirmingDelete {
+		hints = [][2]string{
+			{"y", "confirm"},
+			{"n", "cancel"},
+			{"q", "quit"},
+		}
+	} else if currentTab == 0 {
+		if layout == styles.LayoutCompact {
+			hints = [][2]string{
+				{"i", "inst"},
+				{"u", "use"},
+				{"d", "del"},
+				{"tab", "sw"},
+				{"q", "quit"},
 			}
-			components = append(components, spinnerDisplay)
-		}
-	} else {
-		tableView := m.InstalledTable.View()
-		components = append(components, tableView)
-	}
-	if m.Message != "" {
-		if m.MessageType == "success" {
-			components = append(components, styles.SuccessStyle.Render(m.Message))
 		} else {
-			components = append(components, styles.ErrorStyle.Render(m.Message))
+			hints = [][2]string{
+				{"i", "install"},
+				{"u", "use"},
+				{"d", "delete"},
+				{"r", "refresh"},
+				{"tab", "switch"},
+				{"q", "quit"},
+			}
+		}
+	} else {
+		if layout == styles.LayoutCompact {
+			hints = [][2]string{
+				{"u", "use"},
+				{"d", "del"},
+				{"tab", "sw"},
+				{"q", "quit"},
+			}
+		} else {
+			hints = [][2]string{
+				{"u", "use"},
+				{"d", "delete"},
+				{"tab", "switch"},
+				{"q", "quit"},
+			}
 		}
 	}
-	if m.CurrentTab == 0 {
-		components = append(components, styles.HelpStyle("\nPress 'i' to install, 'u' to use/switch, 'd' to delete, 'r' to refresh, 'tab' to switch tabs, 'q' to quit"))
-	} else {
-		components = append(components, styles.HelpStyle("\nPress 'u' to use/switch, 'd' to delete, 'tab' to switch tabs, 'q' to quit"))
+
+	return renderKeyHints(hints, width, layout)
+}
+
+func renderKeyHints(hints [][2]string, width int, layout styles.LayoutMode) string {
+	parts := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		parts = append(parts, fmt.Sprintf("%s %s", styles.HelpKeyStyle.Render(hint[0]), styles.HelpTextStyle.Render(hint[1])))
 	}
-	return styles.AppStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
+
+	helpText := strings.Join(parts, "  ")
+
+	if layout == styles.LayoutCompact && lipgloss.Width(helpText) > width {
+		separator := " "
+		helpText = strings.Join(parts, separator)
+	}
+
+	if lipgloss.Width(helpText) > width {
+		helpText = styles.TruncateText(helpText, width)
+	}
+
+	return helpText
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

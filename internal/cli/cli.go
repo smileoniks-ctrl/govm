@@ -273,4 +273,3 @@ func DeleteVersion(version string) {
 		fmt.Printf("✅ Successfully deleted Go %s\n", matchedVersion.Version)
 	}
 }
-

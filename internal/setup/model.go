@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type Model struct {
@@ -54,9 +54,9 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
-		case "enter", " ":
+		case "enter", "space":
 			m.done = true
 			return m, tea.Quit
 		case "q", "ctrl+c":
@@ -69,7 +69,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#3c71a8")).
@@ -142,11 +142,11 @@ After adding to PATH, restart your terminal or run:
 	paddingTop := max(0, (m.height-lipgloss.Height(title)-lipgloss.Height(box)-lipgloss.Height(footer)-4)/2)
 	padTopStr := strings.Repeat("\n", paddingTop)
 
-	return padTopStr + lipgloss.JoinVertical(lipgloss.Center,
+	return tea.NewView(padTopStr + lipgloss.JoinVertical(lipgloss.Center,
 		title,
 		box,
 		footer,
-	)
+	))
 }
 
 func min(a, b int) int {
