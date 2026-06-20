@@ -123,6 +123,11 @@ func launchTUI() {
 		fmt.Println("Error getting home directory:", err)
 		os.Exit(1)
 	}
+	moduleDir, err := os.Getwd()
+	if err != nil {
+		fmt.Println("Error getting working directory:", err)
+		os.Exit(1)
+	}
 	goVersionsDir := filepath.Join(homeDir, ".govm", "versions")
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = styles.TableSelectedStyle
@@ -134,15 +139,35 @@ func launchTUI() {
 	l.SetShowStatusBar(false)
 	l.SetShowHelp(false)
 	l.SetShowPagination(false)
+
+	depsColumns := []table.Column{
+		{Title: "Dependency", Width: 24},
+		{Title: "Current", Width: 9},
+		{Title: "Latest", Width: 9},
+		{Title: "Status", Width: 10},
+	}
+	depTable := table.New(
+		table.WithColumns(depsColumns),
+		table.WithFocused(true),
+		table.WithHeight(15),
+	)
+	depTable.SetStyles(table.Styles{
+		Header:   styles.TableHeaderStyle,
+		Selected: styles.TableSelectedStyle,
+		Cell:     styles.TableCellStyle,
+	})
+
 	initialModel := model.Model{
-		List:           l,
-		Versions:       []utils.GoVersion{},
-		Spinner:        s,
-		Loading:        true,
-		HomeDir:        homeDir,
-		GoVersionsDir:  goVersionsDir,
-		InstalledTable: t,
-		Layout:         styles.LayoutNormal,
+		List:            l,
+		Versions:        []utils.GoVersion{},
+		Spinner:         s,
+		Loading:         true,
+		HomeDir:         homeDir,
+		GoVersionsDir:   goVersionsDir,
+		InstalledTable:  t,
+		Layout:          styles.LayoutNormal,
+		ModuleDir:       moduleDir,
+		DependencyTable: depTable,
 	}
 	p := tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {
