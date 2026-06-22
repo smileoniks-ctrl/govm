@@ -200,12 +200,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.DependencyTable.SetColumns(dependencyTableColumns(contentWidth, m.Layout))
 		return m, nil
 	case utils.ErrMsg:
-		m.Err = msg
+		m.Err = nil
 		m.Loading = false
 		m.Message = msg.Error()
 		m.MessageType = "error"
 		return m, nil
 	case utils.VersionsMsg:
+		m.Err = nil
 		m.Versions = msg
 		items := make([]list.Item, len(m.Versions))
 		for i, v := range m.Versions {

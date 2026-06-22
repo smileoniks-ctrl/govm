@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -78,6 +79,21 @@ func TestViewUsesModernZones(t *testing.T) {
 
 	if strings.Contains(view, "Press 'i'") || strings.Contains(view, "[ Available Versions ]") {
 		t.Fatalf("expected modern tabs and help text, got:\n%s", view)
+	}
+}
+
+func TestGoDevErrorKeepsTUIClosable(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, _ := m.Update(utils.ErrMsg(errors.New("failed to connect to go.dev: context deadline exceeded")))
+	m = updated.(Model)
+
+	view := stripANSI(m.View().Content)
+
+	for _, want := range []string{"GoVM", "Available", "failed to connect to go.dev", "r refresh", "q quit"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected view to contain %q, got:\n%s", want, view)
+		}
 	}
 }
 
