@@ -79,7 +79,7 @@ func handleCommandLine() {
 	}
 }
 func printUsage() {
-	fmt.Println("GoVM - Go Version Manager")
+	fmt.Printf("GoVM - Go Version Manager (version %s)\n", utils.GetVersion())
 	fmt.Println("\nUsage:")
 	fmt.Println("  govm                   Launch the interactive TUI")
 	fmt.Println("  govm install <version> Install a specific Go version")

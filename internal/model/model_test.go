@@ -69,9 +69,13 @@ func newTestModel(t *testing.T) Model {
 func TestViewUsesModernZones(t *testing.T) {
 	m := newTestModel(t)
 
+	prev := utils.Version
+	utils.Version = "v9.9.9-test"
+	defer func() { utils.Version = prev }()
+
 	view := stripANSI(m.View().Content)
 
-	for _, want := range []string{"GoVM", "Go Version Manager", "● Available", "○ Installed", "✓ Successfully installed Go 1.24.4", "i install", "u use", "d delete", "r refresh", "q quit"} {
+	for _, want := range []string{"GoVM", "Go Version Manager", "v9.9.9-test", "● Available", "○ Installed", "✓ Successfully installed Go 1.24.4", "i install", "u use", "d delete", "r refresh", "q quit"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected view to contain %q, got:\n%s", want, view)
 		}

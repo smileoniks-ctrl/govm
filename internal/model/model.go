@@ -534,7 +534,7 @@ func renderHeader(width int, layout styles.LayoutMode) string {
 		return title
 	}
 
-	meta := styles.HeaderMetaStyle.Render("Go Version Manager")
+	meta := styles.HeaderMetaStyle.Render(fmt.Sprintf("Go Version Manager %s", utils.GetVersion()))
 	spacerWidth := maxInt(1, width-lipgloss.Width(title)-lipgloss.Width(meta))
 	return lipgloss.JoinHorizontal(lipgloss.Top, title, strings.Repeat(" ", spacerWidth), meta)
 }

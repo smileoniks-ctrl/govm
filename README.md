@@ -122,7 +122,7 @@ govm list
 # Print govm version
 govm version
 
-# Show help
+# Show help and version information
 govm help
 
 # Launch the TUI
