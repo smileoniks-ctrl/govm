@@ -496,3 +496,227 @@ func TestDialogRendersOverDepsView(t *testing.T) {
 		t.Fatal("expected deps tab content to still be visible behind dialog")
 	}
 }
+
+func TestInstalledTableColumns_AllLayouts(t *testing.T) {
+	cases := []struct {
+		name   string
+		width  int
+		layout styles.LayoutMode
+	}{
+		{"compact-min", 20, styles.LayoutCompact},
+		{"compact-wide", 120, styles.LayoutCompact},
+		{"normal", 100, styles.LayoutNormal},
+		{"wide", 160, styles.LayoutWide},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cols := installedTableColumns(tc.width, tc.layout)
+			if len(cols) != 3 {
+				t.Fatalf("expected 3 columns, got %d", len(cols))
+			}
+			for i, c := range cols {
+				if c.Width <= 0 {
+					t.Fatalf("column %d (%s) has non-positive width %d", i, c.Title, c.Width)
+				}
+			}
+		})
+	}
+}
+
+func TestDependencyTableColumns_AllLayouts(t *testing.T) {
+	cases := []struct {
+		name   string
+		width  int
+		layout styles.LayoutMode
+	}{
+		{"compact-min", 20, styles.LayoutCompact},
+		{"compact-wide", 120, styles.LayoutCompact},
+		{"normal", 100, styles.LayoutNormal},
+		{"wide", 160, styles.LayoutWide},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cols := dependencyTableColumns(tc.width, tc.layout)
+			if len(cols) != 4 {
+				t.Fatalf("expected 4 columns, got %d", len(cols))
+			}
+			for i, c := range cols {
+				if c.Width < 5 {
+					t.Fatalf("column %d (%s) too narrow: %d", i, c.Title, c.Width)
+				}
+			}
+		})
+	}
+}
+
+func TestUpdateDependencyTable_StatusPriorities(t *testing.T) {
+	m := newTestModel(t)
+
+	deps := utils.DependenciesMsg{
+		{Path: "err", Version: "v1.0.0", Latest: "v1.1.0", Error: "boom"},
+		{Path: "dep", Version: "v1.0.0", Latest: "v1.1.0", Deprecated: "use v2"},
+		{Path: "indirect-update", Version: "v1.0.0", Latest: "v1.1.0", Indirect: true},
+		{Path: "direct-update", Version: "v1.0.0", Latest: "v1.1.0"},
+		{Path: "indirect-only", Version: "v1.0.0", Indirect: true},
+		{Path: "current", Version: "v1.0.0", Latest: "v1.0.0"},
+	}
+	updated, _ := m.Update(deps)
+	got := updated.(Model)
+	rows := got.DependencyTable.Rows()
+	if len(rows) != len(deps) {
+		t.Fatalf("expected %d rows, got %d", len(deps), len(rows))
+	}
+	want := []string{"error", "deprecated", "indirect update", "update avail", "indirect", "current"}
+	for i, w := range want {
+		if rows[i][3] != w {
+			t.Fatalf("row %d: expected %q, got %q", i, w, rows[i][3])
+		}
+	}
+}
+
+func TestUpdateInstalledTable_SkipsUninstalled(t *testing.T) {
+	m := newTestModel(t)
+	m.Versions = []utils.GoVersion{
+		{Version: "1.20.0", Installed: true, Path: "/p/1.20", Active: true},
+		{Version: "1.21.0", Installed: false},
+		{Version: "1.22.0", Installed: true, Path: "/p/1.22"},
+	}
+	m.updateInstalledTable()
+	rows := m.InstalledTable.Rows()
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 installed rows, got %d", len(rows))
+	}
+	if rows[0][0] != "1.20.0" || rows[0][2] != "active" {
+		t.Fatalf("row 0 mismatch: %v", rows[0])
+	}
+	if rows[1][0] != "1.22.0" || rows[1][2] != "" {
+		t.Fatalf("row 1 mismatch: %v", rows[1])
+	}
+}
+
+func TestSpliceCentered_Basic(t *testing.T) {
+	got := spliceCentered("hello world", "ABC", 3)
+	want := "helABCworld"
+	if got != want {
+		t.Fatalf("spliceCentered: got %q, want %q", got, want)
+	}
+}
+
+func TestSpliceCentered_EdgeCases(t *testing.T) {
+	cases := []struct {
+		name        string
+		bg, overlay string
+		col         int
+		want        string
+	}{
+		{"overlay-shorter-than-bg", "abcdef", "XY", 1, "aXYdef"},
+		{"col-zero", "abcdef", "XY", 0, "XYcdef"},
+		{"col-negative-clamped", "abcdef", "XY", -5, "XYcdef"},
+		{"col-beyond-bg-clamped", "abc", "XYZ", 100, "abcXYZ"},
+		{"col-at-end", "abc", "XY", 3, "abcXY"},
+		{"unicode-runes", "привет мир", "OK", 6, "приветOKир"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := spliceCentered(tc.bg, tc.overlay, tc.col)
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPluralize(t *testing.T) {
+	if pluralize(1, "dep", "deps") != "dep" {
+		t.Fatal("expected singular for n=1")
+	}
+	if pluralize(0, "dep", "deps") != "deps" {
+		t.Fatal("expected plural for n=0")
+	}
+	if pluralize(5, "dep", "deps") != "deps" {
+		t.Fatal("expected plural for n>1")
+	}
+}
+
+func TestMaxInt(t *testing.T) {
+	if maxInt(3, 7) != 7 {
+		t.Fatal("expected 7")
+	}
+	if maxInt(7, 3) != 7 {
+		t.Fatal("expected 7")
+	}
+	if maxInt(4, 4) != 4 {
+		t.Fatal("expected 4")
+	}
+}
+
+func TestOverlayDialog_ReplacesCenterRegion(t *testing.T) {
+	bg := strings.Repeat("line\n", 9) + "line"
+	dlg := "AAA\nBBB\nCCC"
+	out := overlayDialog(bg, dlg, 20, 10)
+	stripped := stripANSI(out)
+	for _, want := range []string{"AAA", "BBB", "CCC"} {
+		if !strings.Contains(stripped, want) {
+			t.Fatalf("expected %q in output, got:\n%s", want, out)
+		}
+	}
+	lines := strings.Split(out, "\n")
+	if len(lines) != 10 {
+		t.Fatalf("expected 10 lines preserved, got %d", len(lines))
+	}
+}
+
+func TestOverlayDialog_ClampsToSize(t *testing.T) {
+	bg := strings.Repeat("bg\n", 15) + "bg"
+	dlg := "VISIBLE"
+	out := overlayDialog(bg, dlg, 0, 0)
+	stripped := stripANSI(out)
+	if !strings.Contains(stripped, "VISIBLE") {
+		t.Fatalf("expected dialog content in output, got:\n%s", out)
+	}
+}
+
+func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
+	got := renderHelp(0, true, false, 80, styles.LayoutNormal)
+	if !strings.Contains(stripANSI(got), "confirm") {
+		t.Fatalf("expected confirm hint, got: %s", got)
+	}
+	if !strings.Contains(stripANSI(got), "cancel") {
+		t.Fatalf("expected cancel hint, got: %s", got)
+	}
+}
+
+func TestRenderHelp_DepsCompactTruncates(t *testing.T) {
+	got := renderHelp(2, false, false, 20, styles.LayoutCompact)
+	if got == "" {
+		t.Fatal("expected non-empty help for deps compact")
+	}
+}
+
+func TestRenderStatus_EmptyMessage(t *testing.T) {
+	if renderStatus("info", "", 80) != "" {
+		t.Fatal("expected empty result for empty message")
+	}
+}
+
+func TestRenderStatus_AllTypes(t *testing.T) {
+	types := []string{"success", "error", "warning", "info", "unknown"}
+	for _, ty := range types {
+		got := renderStatus(ty, "msg", 80)
+		if !strings.Contains(stripANSI(got), "msg") {
+			t.Fatalf("status type %q should include message, got: %s", ty, got)
+		}
+	}
+}
+
+func TestView_NoPanicWhenListEmpty(t *testing.T) {
+	m := newTestModel(t)
+	m.List.SetItems([]list.Item{})
+	m.Versions = nil
+	view := m.View()
+	if view.Content == "" {
+		t.Fatal("expected non-empty view")
+	}
+}
