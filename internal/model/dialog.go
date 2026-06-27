@@ -1,16 +1,18 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
+	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
-// Static styles for the dependency update dialog. These are computed
-// once at package init rather than on every renderDependencyUpdateDialog
-// call, which previously recreated four `lipgloss.NewStyle()` values
-// plus the wrapper border per View().
+// Static styles for the dependency update dialogs. These are computed
+// once at package init rather than on every render call, which
+// previously recreated four `lipgloss.NewStyle()` values plus the
+// wrapper border per View().
 var (
 	dialogTitleStyle = lipgloss.NewStyle().
 				Bold(true).
@@ -19,6 +21,9 @@ var (
 
 	dialogWarningStyle = styles.StatusWarningStyle
 	dialogBodyStyle    = lipgloss.NewStyle().Padding(0, 1)
+	dialogMutedStyle   = lipgloss.NewStyle().
+				Foreground(styles.Muted).
+				Padding(0, 1)
 
 	dialogActiveStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FFFFFF")).
@@ -34,10 +39,18 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(styles.Warning).
 			Padding(1, 2).
-			Width(54)
+			Width(64)
+
+	dialogErrorBoxStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(styles.Error).
+				Padding(1, 2).
+				Width(64)
 )
 
-func renderDependencyUpdateDialog(yesSelected bool) string {
+const maxDependencyListLines = 6
+
+func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.DependencyUpdateEntry) string {
 	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
 	if yesSelected {
 		yesBtn = dialogActiveStyle
@@ -51,15 +64,101 @@ func renderDependencyUpdateDialog(yesSelected bool) string {
 		noBtn.Render("Нет"),
 	)
 
-	dialog := lipgloss.JoinVertical(lipgloss.Center,
-		dialogTitleStyle.Render(dialogWarningStyle.Render("⚠ Warning")),
-		"",
-		dialogBodyStyle.Render("Вы уверены что хотите обновить зависимости?"),
-		"",
-		buttons,
+	lines := make([]string, 0, 6+len(updatable))
+	lines = append(lines, dialogTitleStyle.Render(dialogWarningStyle.Render("⚠ Warning")))
+	lines = append(lines, "")
+	lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf(
+		"Будут обновлены %d %s:",
+		len(updatable),
+		pluralize(len(updatable), "прямая зависимость", "прямые зависимости"),
+	)))
+
+	visible := updatable
+	extra := 0
+	if len(visible) > maxDependencyListLines {
+		extra = len(visible) - maxDependencyListLines
+		visible = visible[:maxDependencyListLines]
+	}
+	for _, e := range visible {
+		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf(
+			"  %s: %s -> %s", e.Path, e.OldVersion, e.NewVersion,
+		)))
+	}
+	if extra > 0 {
+		lines = append(lines, dialogBodyStyle.Render(
+			fmt.Sprintf("  …и ещё %d", extra),
+		))
+	}
+	lines = append(lines, "")
+	lines = append(lines, dialogBodyStyle.Render("Файлы go.mod и go.sum будут изменены."))
+	lines = append(lines, dialogBodyStyle.Render("Перед обновлением сохраняется снимок, чтобы можно было откатить изменения."))
+	lines = append(lines, "")
+	lines = append(lines, buttons)
+
+	return dialogBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+}
+
+func renderDependencyChecksDialog(yesSelected bool) string {
+	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
+	if yesSelected {
+		yesBtn = dialogActiveStyle
+	} else {
+		noBtn = dialogActiveStyle
+	}
+
+	buttons := lipgloss.JoinHorizontal(lipgloss.Center,
+		yesBtn.Render("Да"),
+		"  ",
+		noBtn.Render("Нет"),
 	)
 
-	return dialogBoxStyle.Render(dialog)
+	lines := []string{
+		dialogTitleStyle.Render(styles.StatusInfoStyle.Render("✓ Запустить проверки?")),
+		"",
+		dialogBodyStyle.Render("После обновления будут выполнены:"),
+		dialogBodyStyle.Render("  • go test ./..."),
+		dialogBodyStyle.Render("  • go vet ./..."),
+		"",
+		dialogMutedStyle.Render("При провале будет предложено откатить зависимости."),
+		"",
+		buttons,
+	}
+
+	return dialogBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+}
+
+func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCheckResultMsg) string {
+	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
+	if yesSelected {
+		yesBtn = dialogActiveStyle
+	} else {
+		noBtn = dialogActiveStyle
+	}
+
+	buttons := lipgloss.JoinHorizontal(lipgloss.Center,
+		yesBtn.Render("Откатить"),
+		"  ",
+		noBtn.Render("Оставить"),
+	)
+
+	lines := []string{
+		dialogTitleStyle.Render(dialogWarningStyle.Render("⚠ Проверки провалились")),
+		"",
+	}
+	if result != nil {
+		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf("Команда: %s", result.Command)))
+		if result.Output != "" {
+			for _, l := range strings.Split(result.Output, "\n") {
+				lines = append(lines, dialogMutedStyle.Render(l))
+			}
+		}
+		lines = append(lines, "")
+	}
+	lines = append(lines, dialogBodyStyle.Render("Откатить зависимости к состоянию до обновления?"))
+	lines = append(lines, "")
+	lines = append(lines, buttons)
+
+	return dialogErrorBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 func overlayDialog(background, dialog string, width, height int) string {

@@ -40,6 +40,36 @@ type Model struct {
 	ConfirmingDependencyUpdate bool
 	UpdateChoiceYes            bool
 	UpdatingDependencies       bool
+
+	// LastDependencySnapshot holds the pre-update state of go.mod
+	// and go.sum together with the list of modules that were
+	// upgraded. It is populated by DependenciesUpdatedMsg and
+	// consumed by RollbackModuleDependencies.
+	LastDependencySnapshot *utils.DependencySnapshot
+
+	// ConfirmingDependencyChecks is true when the user is being
+	// asked whether to run post-update checks.
+	ConfirmingDependencyChecks bool
+	// CheckChoiceYes tracks the current toggle in the checks dialog.
+	// Yes means "run checks now", No means "skip them".
+	CheckChoiceYes bool
+	// RunningDependencyChecks is true while go test / go vet run.
+	RunningDependencyChecks bool
+
+	// ConfirmingDependencyRollback is true when the user is being
+	// asked whether to roll back after a failed check.
+	ConfirmingDependencyRollback bool
+	// RollbackChoiceYes tracks the current toggle in the rollback
+	// dialog. Yes means "restore the snapshot", No means "keep the
+	// updated dependencies as is".
+	RollbackChoiceYes bool
+	// RollingBackDependencies is true while the module files are
+	// being restored from the snapshot.
+	RollingBackDependencies bool
+
+	// LastCheckResult retains the most recent DependencyCheckResultMsg
+	// so the rollback dialog can show what failed.
+	LastCheckResult *utils.DependencyCheckResultMsg
 }
 
 func (m Model) Init() tea.Cmd {

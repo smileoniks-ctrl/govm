@@ -174,10 +174,15 @@ func BenchmarkSpliceCentered(b *testing.B) {
 }
 
 func BenchmarkRenderDependencyUpdateDialog(b *testing.B) {
+	entries := []utils.DependencyUpdateEntry{
+		{Path: "github.com/example/dep1", OldVersion: "v1.0.0", NewVersion: "v1.1.0"},
+		{Path: "github.com/example/dep2", OldVersion: "v2.0.0", NewVersion: "v2.1.0"},
+		{Path: "github.com/example/dep3", OldVersion: "v3.0.0", NewVersion: "v3.1.0"},
+	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = renderDependencyUpdateDialog(true)
-		_ = renderDependencyUpdateDialog(false)
+		_ = renderDependencyUpdateDialog(true, entries)
+		_ = renderDependencyUpdateDialog(false, entries)
 	}
 }

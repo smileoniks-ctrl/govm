@@ -40,11 +40,24 @@ func (m Model) View() tea.View {
 		components = append(components, renderStatus(statusType, status, width))
 	}
 
-	components = append(components, renderHelp(m.CurrentTab, m.ConfirmingDelete, m.ConfirmingDependencyUpdate, width, m.Layout))
+	components = append(components, renderHelp(m.CurrentTab, m.ConfirmingDelete, m.ConfirmingDependencyUpdate, m.ConfirmingDependencyChecks, m.ConfirmingDependencyRollback, width, m.Layout))
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
 
 	if m.ConfirmingDependencyUpdate {
-		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.UpdateChoiceYes), width, height)
+		updatable := utils.UpdatableDirectDependencies(m.Dependencies)
+		entries := make([]utils.DependencyUpdateEntry, 0, len(updatable))
+		for _, d := range updatable {
+			entries = append(entries, utils.DependencyUpdateEntry{
+				Path:       d.Path,
+				OldVersion: d.Version,
+				NewVersion: d.Latest,
+			})
+		}
+		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.UpdateChoiceYes, entries), width, height)
+	} else if m.ConfirmingDependencyChecks {
+		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.CheckChoiceYes), width, height)
+	} else if m.ConfirmingDependencyRollback {
+		rendered = overlayDialog(rendered, renderDependencyRollbackDialog(m.RollbackChoiceYes, m.LastCheckResult), width, height)
 	}
 
 	v := tea.NewView(rendered)
@@ -57,10 +70,14 @@ func (m Model) View() tea.View {
 func (m Model) composeStatus() (string, string) {
 	status := m.Message
 	statusType := m.MessageType
-	if m.Loading || m.CheckingDependencies || m.UpdatingDependencies {
+	if m.Loading || m.CheckingDependencies || m.UpdatingDependencies || m.RunningDependencyChecks || m.RollingBackDependencies {
 		statusType = "info"
 		if m.InstallingVersion != "" {
 			status = fmt.Sprintf("%s Downloading Go %s", m.Spinner.View(), m.InstallingVersion)
+		} else if m.RollingBackDependencies {
+			status = fmt.Sprintf("%s Rolling back dependencies", m.Spinner.View())
+		} else if m.RunningDependencyChecks {
+			status = fmt.Sprintf("%s Running checks", m.Spinner.View())
 		} else if status == "" {
 			status = fmt.Sprintf("%s Loading", m.Spinner.View())
 		}
@@ -128,14 +145,30 @@ func renderStatus(messageType, message string, width int) string {
 	return style.Width(width).Render(fmt.Sprintf("%s %s", icon, message))
 }
 
-func renderHelp(currentTab int, confirmingDelete bool, confirmingDeps bool, width int, layout styles.LayoutMode) string {
+func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChecks, confirmingRollback bool, width int, layout styles.LayoutMode) string {
 	var hints [][2]string
 
-	if confirmingDeps {
+	switch {
+	case confirmingDeps:
 		hints = [][2]string{
 			{"←/→", "choose"},
 			{"enter", "confirm"},
 			{"esc", "cancel"},
+			{"q", "quit"},
+		}
+		return renderKeyHints(hints, width, layout)
+	case confirmingChecks:
+		hints = [][2]string{
+			{"←/→", "choose"},
+			{"enter", "confirm"},
+			{"esc", "skip"},
+			{"q", "quit"},
+		}
+		return renderKeyHints(hints, width, layout)
+	case confirmingRollback:
+		hints = [][2]string{
+			{"←/→", "choose"},
+			{"enter", "confirm"},
 			{"q", "quit"},
 		}
 		return renderKeyHints(hints, width, layout)

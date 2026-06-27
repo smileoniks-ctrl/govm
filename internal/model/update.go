@@ -17,6 +17,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ConfirmingDependencyUpdate {
 			return m.handleUpdateConfirmKey(msg)
 		}
+		if m.ConfirmingDependencyChecks {
+			return m.handleChecksConfirmKey(msg)
+		}
+		if m.ConfirmingDependencyRollback {
+			return m.handleRollbackConfirmKey(msg)
+		}
 		return m.handleKey(msg)
 
 	case tea.WindowSizeMsg:
@@ -83,8 +89,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case utils.DependenciesUpdatedMsg:
 		m.UpdatingDependencies = false
 		m.Dependencies = msg.Dependencies
+		m.LastDependencySnapshot = msg.Snapshot
+		m.LastCheckResult = nil
 		m.updateDependencyTable()
-		m.Message = fmt.Sprintf("Updated %d direct %s", msg.Updated, pluralize(msg.Updated, "dependency", "dependencies"))
+		m.Message = fmt.Sprintf("Updated %d direct %s. Run checks?", msg.Updated, pluralize(msg.Updated, "dependency", "dependencies"))
+		m.MessageType = "success"
+		m.ConfirmingDependencyChecks = true
+		m.CheckChoiceYes = true
+		return m, nil
+
+	case utils.DependencyCheckResultMsg:
+		m.RunningDependencyChecks = false
+		m.ConfirmingDependencyChecks = false
+		if msg.OK {
+			m.Message = "Checks passed."
+			m.MessageType = "success"
+			m.LastCheckResult = &msg
+			return m, nil
+		}
+		m.LastCheckResult = &msg
+		m.ConfirmingDependencyRollback = true
+		m.RollbackChoiceYes = true
+		m.Message = fmt.Sprintf("Checks failed: %s", msg.Command)
+		m.MessageType = "error"
+		return m, nil
+
+	case utils.DependenciesRolledBackMsg:
+		m.RollingBackDependencies = false
+		m.Dependencies = msg.Dependencies
+		m.LastDependencySnapshot = msg.Snapshot
+		m.LastCheckResult = nil
+		m.updateDependencyTable()
+		m.Message = "Rolled back to pre-update state."
 		m.MessageType = "success"
 		return m, nil
 
@@ -94,6 +130,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.CheckingDependencies {
 			m.CheckingDependencies = false
+		}
+		if m.RunningDependencyChecks {
+			m.RunningDependencyChecks = false
+		}
+		if m.RollingBackDependencies {
+			m.RollingBackDependencies = false
 		}
 		if msg.Err != nil {
 			m.Message = msg.Err.Error()

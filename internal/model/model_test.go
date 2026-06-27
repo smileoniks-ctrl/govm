@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -466,9 +467,64 @@ func TestDependencyTableIndirectUpdateStatus(t *testing.T) {
 }
 
 func TestRenderDependencyUpdateDialogContainsWarning(t *testing.T) {
-	dialog := stripANSI(renderDependencyUpdateDialog(true))
+	dialog := stripANSI(renderDependencyUpdateDialog(true, nil))
 
-	for _, want := range []string{"Warning", "Вы уверены", "Да", "Нет"} {
+	for _, want := range []string{"Warning", "Будут обновлены", "Да", "Нет"} {
+		if !strings.Contains(dialog, want) {
+			t.Fatalf("expected dialog to contain %q, got:\n%s", want, dialog)
+		}
+	}
+}
+
+func TestRenderDependencyUpdateDialogListsModules(t *testing.T) {
+	entries := []utils.DependencyUpdateEntry{
+		{Path: "github.com/example/lib", OldVersion: "v1.0.0", NewVersion: "v1.1.0"},
+		{Path: "github.com/example/other", OldVersion: "v2.0.0", NewVersion: "v2.1.0"},
+	}
+	dialog := stripANSI(renderDependencyUpdateDialog(true, entries))
+
+	for _, want := range []string{"github.com/example/lib", "v1.0.0", "v1.1.0", "github.com/example/other"} {
+		if !strings.Contains(dialog, want) {
+			t.Fatalf("expected dialog to contain %q, got:\n%s", want, dialog)
+		}
+	}
+}
+
+func TestRenderDependencyUpdateDialogTruncatesLongLists(t *testing.T) {
+	entries := make([]utils.DependencyUpdateEntry, 0, 12)
+	for i := 0; i < 12; i++ {
+		entries = append(entries, utils.DependencyUpdateEntry{
+			Path:       fmt.Sprintf("github.com/example/dep%d", i),
+			OldVersion: "v1.0.0",
+			NewVersion: "v1.1.0",
+		})
+	}
+	dialog := stripANSI(renderDependencyUpdateDialog(true, entries))
+
+	if !strings.Contains(dialog, "и ещё") {
+		t.Fatalf("expected truncation hint in dialog, got:\n%s", dialog)
+	}
+}
+
+func TestRenderDependencyChecksDialogContainsCommands(t *testing.T) {
+	dialog := stripANSI(renderDependencyChecksDialog(true))
+
+	for _, want := range []string{"Запустить проверки", "go test", "go vet", "Да", "Нет"} {
+		if !strings.Contains(dialog, want) {
+			t.Fatalf("expected dialog to contain %q, got:\n%s", want, dialog)
+		}
+	}
+}
+
+func TestRenderDependencyRollbackDialogContainsCommand(t *testing.T) {
+	result := &utils.DependencyCheckResultMsg{
+		OK:      false,
+		Command: "go test ./...",
+		Output:  "FAIL: example_test.go:10: expected 1, got 2",
+	}
+	dialog := stripANSI(renderDependencyRollbackDialog(true, result))
+
+	for _, want := range []string{"Проверки провалились", "go test ./...", "FAIL: example_test", "Откатить", "Оставить"} {
 		if !strings.Contains(dialog, want) {
 			t.Fatalf("expected dialog to contain %q, got:\n%s", want, dialog)
 		}
@@ -679,7 +735,7 @@ func TestOverlayDialog_ClampsToSize(t *testing.T) {
 }
 
 func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
-	got := renderHelp(0, true, false, 80, styles.LayoutNormal)
+	got := renderHelp(0, true, false, false, false, 80, styles.LayoutNormal)
 	if !strings.Contains(stripANSI(got), "confirm") {
 		t.Fatalf("expected confirm hint, got: %s", got)
 	}
@@ -689,7 +745,7 @@ func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
 }
 
 func TestRenderHelp_DepsCompactTruncates(t *testing.T) {
-	got := renderHelp(2, false, false, 20, styles.LayoutCompact)
+	got := renderHelp(2, false, false, false, false, 20, styles.LayoutCompact)
 	if got == "" {
 		t.Fatal("expected non-empty help for deps compact")
 	}
@@ -718,5 +774,256 @@ func TestView_NoPanicWhenListEmpty(t *testing.T) {
 	view := m.View()
 	if view.Content == "" {
 		t.Fatal("expected non-empty view")
+	}
+}
+
+func TestDependenciesUpdatedMsgStoresSnapshotAndOpensChecksDialog(t *testing.T) {
+	m := newTestModel(t)
+
+	msg := utils.DependenciesUpdatedMsg{
+		Updated: 1,
+		Dependencies: []utils.ModuleDependency{
+			{Path: "github.com/example/lib", Version: "v1.1.0", Latest: "v1.1.0"},
+		},
+		Snapshot: &utils.DependencySnapshot{
+			ModFile: utils.ModuleFileSnapshot{Exists: true, Content: "old"},
+			SumFile: utils.ModuleFileSnapshot{Exists: true, Content: "oldsum"},
+		},
+	}
+
+	updated, _ := m.Update(msg)
+	got := updated.(Model)
+
+	if got.UpdatingDependencies {
+		t.Fatal("expected UpdatingDependencies to be false")
+	}
+	if got.LastDependencySnapshot == nil {
+		t.Fatal("expected LastDependencySnapshot to be set")
+	}
+	if !got.ConfirmingDependencyChecks {
+		t.Fatal("expected ConfirmingDependencyChecks to be true")
+	}
+	if !got.CheckChoiceYes {
+		t.Fatal("expected CheckChoiceYes default to be Yes")
+	}
+	if got.MessageType != "success" {
+		t.Fatalf("expected success message, got %q", got.MessageType)
+	}
+}
+
+func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
+	m := newTestModel(t)
+	m.ConfirmingDependencyChecks = true
+	m.CheckChoiceYes = true
+
+	updated, _ := m.Update(utils.DependencyCheckResultMsg{OK: true})
+	got := updated.(Model)
+
+	if got.ConfirmingDependencyChecks {
+		t.Fatal("expected ConfirmingDependencyChecks to close after success")
+	}
+	if got.RunningDependencyChecks {
+		t.Fatal("expected RunningDependencyChecks to be false")
+	}
+	if got.MessageType != "success" {
+		t.Fatalf("expected success status, got %q", got.MessageType)
+	}
+	if got.LastCheckResult == nil {
+		t.Fatal("expected LastCheckResult to be stored")
+	}
+}
+
+func TestDependencyCheckResultFailOpensRollbackDialog(t *testing.T) {
+	m := newTestModel(t)
+	m.ConfirmingDependencyChecks = true
+	m.CheckChoiceYes = true
+	m.RunningDependencyChecks = true
+
+	msg := utils.DependencyCheckResultMsg{
+		OK:      false,
+		Command: "go test ./...",
+		Output:  "FAIL",
+	}
+
+	updated, _ := m.Update(msg)
+	got := updated.(Model)
+
+	if got.ConfirmingDependencyChecks {
+		t.Fatal("expected ConfirmingDependencyChecks to close on failure")
+	}
+	if !got.ConfirmingDependencyRollback {
+		t.Fatal("expected ConfirmingDependencyRollback to be true")
+	}
+	if !got.RollbackChoiceYes {
+		t.Fatal("expected RollbackChoiceYes default to be Yes")
+	}
+	if got.MessageType != "error" {
+		t.Fatalf("expected error status, got %q", got.MessageType)
+	}
+	if got.LastCheckResult == nil || got.LastCheckResult.Command != "go test ./..." {
+		t.Fatalf("expected LastCheckResult to capture failing command, got %+v", got.LastCheckResult)
+	}
+}
+
+func TestRollbackCmdTriggeredByRollbackYes(t *testing.T) {
+	m := newTestModel(t)
+	m.ConfirmingDependencyRollback = true
+	m.RollbackChoiceYes = true
+	m.LastDependencySnapshot = &utils.DependencySnapshot{
+		ModFile: utils.ModuleFileSnapshot{Exists: true, Content: "old"},
+		SumFile: utils.ModuleFileSnapshot{Exists: true, Content: "oldsum"},
+	}
+	m.LastCheckResult = &utils.DependencyCheckResultMsg{OK: false, Command: "go test ./..."}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(Model)
+
+	if got.ConfirmingDependencyRollback {
+		t.Fatal("expected ConfirmingDependencyRollback to close")
+	}
+	if !got.RollingBackDependencies {
+		t.Fatal("expected RollingBackDependencies to be true")
+	}
+	if cmd == nil {
+		t.Fatal("expected a command to be returned for rollback")
+	}
+}
+
+func TestKeepCmdClearsRollbackDialog(t *testing.T) {
+	m := newTestModel(t)
+	m.ConfirmingDependencyRollback = true
+	m.RollbackChoiceYes = true
+	m.LastDependencySnapshot = &utils.DependencySnapshot{}
+	m.LastCheckResult = &utils.DependencyCheckResultMsg{OK: false, Command: "go test"}
+
+	// Toggle to No then confirm.
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(Model)
+
+	if got.ConfirmingDependencyRollback {
+		t.Fatal("expected ConfirmingDependencyRollback to close when keeping updates")
+	}
+	if got.RollingBackDependencies {
+		t.Fatal("expected RollingBackDependencies to remain false")
+	}
+	if got.MessageType != "warning" {
+		t.Fatalf("expected warning status, got %q", got.MessageType)
+	}
+}
+
+func TestEscOnChecksDialogSkipsChecks(t *testing.T) {
+	m := newTestModel(t)
+	m.ConfirmingDependencyChecks = true
+	m.CheckChoiceYes = true
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got := updated.(Model)
+
+	if got.ConfirmingDependencyChecks {
+		t.Fatal("expected dialog to close on esc")
+	}
+	if got.RunningDependencyChecks {
+		t.Fatal("expected RunningDependencyChecks to remain false")
+	}
+}
+
+func TestEscOnRollbackDialogKeepsUpdates(t *testing.T) {
+	m := newTestModel(t)
+	m.ConfirmingDependencyRollback = true
+	m.RollbackChoiceYes = true
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got := updated.(Model)
+
+	if got.ConfirmingDependencyRollback {
+		t.Fatal("expected dialog to close on esc")
+	}
+	if got.RollingBackDependencies {
+		t.Fatal("expected RollingBackDependencies to remain false")
+	}
+}
+
+func TestDependenciesRolledBackMsgUpdatesState(t *testing.T) {
+	m := newTestModel(t)
+	m.RollingBackDependencies = true
+	m.LastDependencySnapshot = &utils.DependencySnapshot{}
+
+	msg := utils.DependenciesRolledBackMsg{
+		Snapshot: &utils.DependencySnapshot{
+			ModFile: utils.ModuleFileSnapshot{Exists: true, Content: "old"},
+		},
+		Dependencies: []utils.ModuleDependency{
+			{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
+		},
+	}
+
+	updated, _ := m.Update(msg)
+	got := updated.(Model)
+
+	if got.RollingBackDependencies {
+		t.Fatal("expected RollingBackDependencies to be false")
+	}
+	if len(got.Dependencies) != 1 {
+		t.Fatalf("expected 1 dependency, got %d", len(got.Dependencies))
+	}
+	if got.MessageType != "success" {
+		t.Fatalf("expected success status, got %q", got.MessageType)
+	}
+}
+
+func TestDependencyErrDuringRollbackClearsState(t *testing.T) {
+	m := newTestModel(t)
+	m.RollingBackDependencies = true
+
+	updated, _ := m.Update(utils.DependencyErrMsg{Err: errors.New("boom")})
+	got := updated.(Model)
+
+	if got.RollingBackDependencies {
+		t.Fatal("expected RollingBackDependencies to be false after err")
+	}
+	if got.MessageType != "error" {
+		t.Fatalf("expected error status, got %q", got.MessageType)
+	}
+}
+
+func TestViewShowsRollbackDialog(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
+	m = updated.(Model)
+
+	m.ConfirmingDependencyRollback = true
+	m.RollbackChoiceYes = true
+	m.LastCheckResult = &utils.DependencyCheckResultMsg{
+		OK:      false,
+		Command: "go test ./...",
+		Output:  "FAIL: foo_test.go:42",
+	}
+
+	view := stripANSI(m.View().Content)
+	if !strings.Contains(view, "Проверки провалились") {
+		t.Fatalf("expected rollback dialog in view, got:\n%s", view)
+	}
+	if !strings.Contains(view, "Откатить") {
+		t.Fatal("expected rollback button in view")
+	}
+}
+
+func TestViewShowsChecksDialog(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
+	m = updated.(Model)
+	m.ConfirmingDependencyChecks = true
+	m.CheckChoiceYes = true
+
+	view := stripANSI(m.View().Content)
+	if !strings.Contains(view, "Запустить проверки") {
+		t.Fatalf("expected checks dialog in view, got:\n%s", view)
 	}
 }
