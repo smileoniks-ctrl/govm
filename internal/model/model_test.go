@@ -13,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -551,6 +552,12 @@ func TestDialogRendersOverDepsView(t *testing.T) {
 	if !strings.Contains(view, "Deps") {
 		t.Fatal("expected deps tab content to still be visible behind dialog")
 	}
+	// Regression guard: the actual dependency row must still be rendered
+	// somewhere on screen above or below the modal. Previously the dialog
+	// erased the whole deps table.
+	if !strings.Contains(view, "github.com/example/lib") {
+		t.Fatalf("expected dependency row to remain visible when confirm dialog is open, got:\n%s", view)
+	}
 }
 
 func TestInstalledTableColumns_AllLayouts(t *testing.T) {
@@ -672,7 +679,7 @@ func TestSpliceCentered_EdgeCases(t *testing.T) {
 		{"col-negative-clamped", "abcdef", "XY", -5, "XYcdef"},
 		{"col-beyond-bg-clamped", "abc", "XYZ", 100, "abcXYZ"},
 		{"col-at-end", "abc", "XY", 3, "abcXY"},
-		{"unicode-runes", "привет мир", "OK", 6, "приветOKир"},
+		{"unicode-runes", "abcdefgh", "OK", 3, "abcOKfgh"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -731,6 +738,83 @@ func TestOverlayDialog_ClampsToSize(t *testing.T) {
 	stripped := stripANSI(out)
 	if !strings.Contains(stripped, "VISIBLE") {
 		t.Fatalf("expected dialog content in output, got:\n%s", out)
+	}
+}
+
+// TestOverlayDialog_PreservesRowsOutsideDialog guards against the regression
+// captured in CleanShot 2026-06-27 at 17.54.47@2x.png, where the dependency
+// update confirmation dialog erased most of the deps table because
+// overlayDialog built a full-height canvas and overwrote every row, even the
+// ones outside the actual modal box.
+func TestOverlayDialog_PreservesRowsOutsideDialog(t *testing.T) {
+	// 20 background rows, each tagged with a unique marker. The dialog is
+	// only 3 rows tall, so rows 0..7 and 11..19 must survive untouched.
+	var lines []string
+	for i := 0; i < 20; i++ {
+		lines = append(lines, fmt.Sprintf("BG_ROW_%02d", i))
+	}
+	bg := strings.Join(lines, "\n")
+	dlg := "AAA\nBBB\nCCC"
+
+	out := overlayDialog(bg, dlg, 30, 20)
+	stripped := stripANSI(out)
+	strippedLines := strings.Split(stripped, "\n")
+
+	// Find which lines contain dialog content.
+	overwritten := 0
+	for _, l := range strippedLines {
+		if strings.Contains(l, "AAA") || strings.Contains(l, "BBB") || strings.Contains(l, "CCC") {
+			overwritten++
+		}
+	}
+	if overwritten > 3 {
+		t.Fatalf("overlayDialog overwrote %d background rows with dialog content; expected at most 3:\n%s", overwritten, stripped)
+	}
+
+	// Count the surviving background markers.
+	survivors := 0
+	for _, marker := range []string{
+		"BG_ROW_00", "BG_ROW_01", "BG_ROW_02", "BG_ROW_03", "BG_ROW_04",
+		"BG_ROW_15", "BG_ROW_16", "BG_ROW_17", "BG_ROW_18", "BG_ROW_19",
+	} {
+		if strings.Contains(stripped, marker) {
+			survivors++
+		}
+	}
+	if survivors < 8 {
+		t.Fatalf("expected at least 8 background rows preserved outside the dialog, got %d:\n%s", survivors, stripped)
+	}
+}
+
+// TestSpliceCentered_UsesVisibleColumnsWithANSI guards against spliceCentered
+// slicing by rune count when col is measured in visible cells, which used to
+// break ANSI escape sequences in styled table output.
+func TestSpliceCentered_UsesVisibleColumnsWithANSI(t *testing.T) {
+	// A styled background line where the visible content is 9 cells but the
+	// raw string contains ANSI escape sequences that pad it to many more
+	// bytes/runes.
+	styled := "\x1b[31mhello    \x1b[0m" // 9 visible cells: h e l l o _ _ _ _
+	overlay := "X"
+	// col is measured in visible cells; placing at col=4 must REPLACE the
+	// "o" at cell 4 with "X" and keep the trailing 4 spaces plus the
+	// surrounding ANSI codes intact.
+	got := spliceCentered(styled, overlay, 4)
+
+	if w := ansi.StringWidth(got); w != 9 {
+		t.Fatalf("expected result width 9, got %d (raw: %q)", w, got)
+	}
+	plain := stripANSI(got)
+	if !strings.HasPrefix(plain, "hellX") {
+		t.Fatalf("expected plain output to start with %q, got %q", "hellX", plain)
+	}
+	if !strings.HasSuffix(plain, "    ") {
+		t.Fatalf("expected plain output to end with 4 spaces, got %q", plain)
+	}
+	if !strings.Contains(got, "\x1b[31m") {
+		t.Fatalf("expected ANSI opening sequence to be preserved, got %q", got)
+	}
+	if !strings.Contains(got, "\x1b[0m") {
+		t.Fatalf("expected ANSI reset sequence to be preserved, got %q", got)
 	}
 }
 

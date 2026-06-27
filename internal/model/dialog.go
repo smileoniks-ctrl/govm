@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -168,18 +169,34 @@ func overlayDialog(background, dialog string, width, height int) string {
 	if height <= 0 {
 		height = 24
 	}
+	_ = width
 
-	placed := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, dialog,
-		lipgloss.WithWhitespaceChars(" "),
-	)
-
+	// The dialog already has its own border/padding rendered by
+	// dialogBoxStyle; we must not pad it out to a full-height canvas,
+	// otherwise every background line outside the modal gets overwritten
+	// with whitespace (the bug behind CleanShot 2026-06-27 at 17.54.47@2x.png
+	// where the deps table was shredded by the confirm dialog).
+	dialogLines := strings.Split(strings.TrimRight(dialog, "\n"), "\n")
 	bgLines := strings.Split(background, "\n")
-	dialogLines := strings.Split(placed, "\n")
+	if len(bgLines) == 0 {
+		return background
+	}
 
-	// Center the dialog lines over the background lines.
+	if height > len(bgLines) {
+		height = len(bgLines)
+	}
+
+	// Center the actual dialog lines vertically on the background.
 	startRow := 0
 	if len(bgLines) > len(dialogLines) {
 		startRow = (len(bgLines) - len(dialogLines)) / 2
+	}
+	if startRow+len(dialogLines) > height {
+		// Keep the dialog inside the visible viewport.
+		startRow = height - len(dialogLines)
+		if startRow < 0 {
+			startRow = 0
+		}
 	}
 	endRow := startRow + len(dialogLines)
 	if endRow > len(bgLines) {
@@ -190,8 +207,8 @@ func overlayDialog(background, dialog string, width, height int) string {
 	for i, dline := range dialogLines {
 		row := startRow + i
 		bgLine := bgLines[row]
-		bgW := lipgloss.Width(bgLine)
-		dW := lipgloss.Width(dline)
+		bgW := ansi.StringWidth(bgLine)
+		dW := ansi.StringWidth(dline)
 		col := 0
 		if bgW > dW {
 			col = (bgW - dW) / 2
@@ -206,16 +223,21 @@ func spliceCentered(bg, overlay string, col int) string {
 	if col < 0 {
 		col = 0
 	}
-	bgRunes := []rune(bg)
-	ovRunes := []rune(overlay)
-	if col > len(bgRunes) {
-		col = len(bgRunes)
+	// col is a column index measured in visible cells (the value the caller
+	// got from ansi.StringWidth / lipgloss.Width). Slicing by []rune would
+	// (a) drop a wide rune that straddles the cut point and (b) chop ANSI
+	// escape sequences in half, which corrupts the surrounding styled
+	// table output. Use ANSI-aware cuts instead.
+	bgW := ansi.StringWidth(bg)
+	if col > bgW {
+		col = bgW
 	}
+	ovW := ansi.StringWidth(overlay)
 
-	prefix := string(bgRunes[:col])
+	prefix := ansi.Cut(bg, 0, col)
 	suffix := ""
-	if col+len(ovRunes) < len(bgRunes) {
-		suffix = string(bgRunes[col+len(ovRunes):])
+	if col+ovW < bgW {
+		suffix = ansi.Cut(bg, col+ovW, bgW)
 	}
 	return prefix + overlay + suffix
 }

@@ -14,10 +14,10 @@ func (m Model) handleUpdateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	case "enter":
 		return m.applyUpdateChoice()
-	case "y", "Y", "д", "Д":
+	case "y", "Y":
 		m.UpdateChoiceYes = true
 		return m.applyUpdateChoice()
-	case "n", "N", "н", "Н", "esc":
+	case "n", "N", "esc":
 		m.ConfirmingDependencyUpdate = false
 		m.UpdateChoiceYes = false
 		m.Message = "Update canceled."
@@ -54,10 +54,10 @@ func (m Model) handleChecksConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 	case "enter":
 		return m.applyChecksChoice()
-	case "y", "Y", "д", "Д":
+	case "y", "Y":
 		m.CheckChoiceYes = true
 		return m.applyChecksChoice()
-	case "n", "N", "н", "Н", "esc":
+	case "n", "N", "esc":
 		m.ConfirmingDependencyChecks = false
 		m.CheckChoiceYes = false
 		m.Message = "Update complete. Checks skipped."
@@ -94,10 +94,10 @@ func (m Model) handleRollbackConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 		return m, nil
 	case "enter":
 		return m.applyRollbackChoice()
-	case "y", "Y", "д", "Д":
+	case "y", "Y":
 		m.RollbackChoiceYes = true
 		return m.applyRollbackChoice()
-	case "n", "N", "н", "Н", "esc":
+	case "n", "N", "esc":
 		return m.keepUpdatedDependencies()
 	}
 	return m, nil
