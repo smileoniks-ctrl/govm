@@ -137,6 +137,76 @@ func TestRestoreModuleFiles_RemovesGoSumWhenOriginallyMissing(t *testing.T) {
 	}
 }
 
+func TestRollbackModuleDependenciesTidiesRestoredFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	// Snapshot represents a clean state without any require blocks.
+	// go.sum carries stale entries that should not be there after tidy.
+	originalMod := "module example.com/rollback-tidy\n\ngo 1.20\n"
+	originalSum := strings.Join([]string{
+		"github.com/sahilm/fuzzy v0.1.3 h1:juByESSS32nVD81vr6tHmKmA/8zde7gE+x5CLxrzXPU=",
+		"github.com/sahilm/fuzzy v0.1.3/go.mod h1:au6//VbVSqu6DFrkL2CfjlJ5iURpNCPeE+1GwY3XsT8=",
+		"",
+	}, "\n")
+	writeFile(t, dir, "go.mod", originalMod)
+	writeFile(t, dir, "go.sum", originalSum)
+
+	snap, err := SnapshotModuleFiles(dir)
+	if err != nil {
+		t.Fatalf("SnapshotModuleFiles: %v", err)
+	}
+
+	// Simulate go get mutating the files; then restore the snapshot
+	// so we end up with go.sum holding stale entries that tidy
+	// must drop on rollback.
+	changedMod := "module example.com/rollback-tidy\n\ngo 1.20\n\nrequire github.com/x/y v2.0.0\n"
+	changedSum := "github.com/x/y v2.0.0 h1:def=\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(changedMod), 0644); err != nil {
+		t.Fatalf("overwrite go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.sum"), []byte(changedSum), 0644); err != nil {
+		t.Fatalf("overwrite go.sum: %v", err)
+	}
+	if err := RestoreModuleFiles(dir, snap); err != nil {
+		t.Fatalf("RestoreModuleFiles: %v", err)
+	}
+
+	// Sanity check: after restoring, the stale sum should still be
+	// present so the test really exercises go mod tidy.
+	beforeSum, err := os.ReadFile(filepath.Join(dir, "go.sum"))
+	if err != nil {
+		t.Fatalf("read go.sum before rollback: %v", err)
+	}
+	if !strings.Contains(string(beforeSum), "github.com/sahilm/fuzzy") {
+		t.Fatalf("precondition failed: expected stale entry in go.sum, got %q", beforeSum)
+	}
+
+	cmd := RollbackModuleDependencies(dir, snap)
+	if cmd == nil {
+		t.Fatal("expected a non-nil tea.Cmd")
+	}
+	msg := cmd()
+	rolled, ok := msg.(DependenciesRolledBackMsg)
+	if !ok {
+		t.Fatalf("expected DependenciesRolledBackMsg, got %T: %+v", msg, msg)
+	}
+
+	afterSum, err := os.ReadFile(filepath.Join(dir, "go.sum"))
+	if err != nil {
+		// go mod tidy may delete the file if there are no dependencies;
+		// treat that as success.
+		if !os.IsNotExist(err) {
+			t.Fatalf("read go.sum after rollback: %v", err)
+		}
+	} else if strings.Contains(string(afterSum), "github.com/sahilm/fuzzy") {
+		t.Fatalf("expected go mod tidy to drop stale entries, got %q", afterSum)
+	}
+
+	if rolled.Snapshot == nil {
+		t.Fatal("expected snapshot to be propagated in DependenciesRolledBackMsg")
+	}
+}
+
 func TestTrimOutput_LongOutput(t *testing.T) {
 	lines := make([]string, 0, 50)
 	for i := 0; i < 50; i++ {

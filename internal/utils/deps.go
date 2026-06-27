@@ -275,12 +275,19 @@ func RunModuleDependencyChecks(moduleDir string) tea.Cmd {
 	}
 }
 
-// RollbackModuleDependencies restores go.mod and go.sum from snap
-// and refreshes the dependency list.
+// RollbackModuleDependencies restores go.mod and go.sum from snap,
+// runs `go mod tidy` so the module cache and the restored files stay
+// consistent, and refreshes the dependency list.
 func RollbackModuleDependencies(moduleDir string, snap *DependencySnapshot) tea.Cmd {
 	return func() tea.Msg {
 		if err := RestoreModuleFiles(moduleDir, snap); err != nil {
 			return DependencyErrMsg{Err: err}
+		}
+
+		tidyCmd := exec.Command("go", "mod", "tidy")
+		tidyCmd.Dir = moduleDir
+		if out, err := tidyCmd.CombinedOutput(); err != nil {
+			return DependencyErrMsg{Err: fmt.Errorf("rollback go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
 		}
 
 		fresh := loadDependencies(moduleDir, true)
