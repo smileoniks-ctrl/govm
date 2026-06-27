@@ -470,7 +470,7 @@ func TestDependencyTableIndirectUpdateStatus(t *testing.T) {
 func TestRenderDependencyUpdateDialogContainsWarning(t *testing.T) {
 	dialog := stripANSI(renderDependencyUpdateDialog(true, nil))
 
-	for _, want := range []string{"Warning", "Будут обновлены", "Да", "Нет"} {
+	for _, want := range []string{"Warning", "will be updated", "Yes", "No"} {
 		if !strings.Contains(dialog, want) {
 			t.Fatalf("expected dialog to contain %q, got:\n%s", want, dialog)
 		}
@@ -502,7 +502,7 @@ func TestRenderDependencyUpdateDialogTruncatesLongLists(t *testing.T) {
 	}
 	dialog := stripANSI(renderDependencyUpdateDialog(true, entries))
 
-	if !strings.Contains(dialog, "и ещё") {
+	if !strings.Contains(dialog, "and") || !strings.Contains(dialog, "more") {
 		t.Fatalf("expected truncation hint in dialog, got:\n%s", dialog)
 	}
 }
@@ -510,7 +510,7 @@ func TestRenderDependencyUpdateDialogTruncatesLongLists(t *testing.T) {
 func TestRenderDependencyChecksDialogContainsCommands(t *testing.T) {
 	dialog := stripANSI(renderDependencyChecksDialog(true))
 
-	for _, want := range []string{"Запустить проверки", "go test", "go vet", "Да", "Нет"} {
+	for _, want := range []string{"Run checks?", "go test", "go vet", "Yes", "No"} {
 		if !strings.Contains(dialog, want) {
 			t.Fatalf("expected dialog to contain %q, got:\n%s", want, dialog)
 		}
@@ -525,7 +525,7 @@ func TestRenderDependencyRollbackDialogContainsCommand(t *testing.T) {
 	}
 	dialog := stripANSI(renderDependencyRollbackDialog(true, result))
 
-	for _, want := range []string{"Проверки провалились", "go test ./...", "FAIL: example_test", "Откатить", "Оставить"} {
+	for _, want := range []string{"Checks failed", "go test ./...", "FAIL: example_test", "Roll back", "Keep"} {
 		if !strings.Contains(dialog, want) {
 			t.Fatalf("expected dialog to contain %q, got:\n%s", want, dialog)
 		}
@@ -1088,10 +1088,10 @@ func TestViewShowsRollbackDialog(t *testing.T) {
 	}
 
 	view := stripANSI(m.View().Content)
-	if !strings.Contains(view, "Проверки провалились") {
+	if !strings.Contains(view, "Checks failed") {
 		t.Fatalf("expected rollback dialog in view, got:\n%s", view)
 	}
-	if !strings.Contains(view, "Откатить") {
+	if !strings.Contains(view, "Roll back") {
 		t.Fatal("expected rollback button in view")
 	}
 }
@@ -1107,7 +1107,7 @@ func TestViewShowsChecksDialog(t *testing.T) {
 	m.CheckChoiceYes = true
 
 	view := stripANSI(m.View().Content)
-	if !strings.Contains(view, "Запустить проверки") {
+	if !strings.Contains(view, "Run checks?") {
 		t.Fatalf("expected checks dialog in view, got:\n%s", view)
 	}
 }

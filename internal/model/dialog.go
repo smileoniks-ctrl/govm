@@ -60,18 +60,18 @@ func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.Dependency
 	}
 
 	buttons := lipgloss.JoinHorizontal(lipgloss.Center,
-		yesBtn.Render("Да"),
+		yesBtn.Render("Yes"),
 		"  ",
-		noBtn.Render("Нет"),
+		noBtn.Render("No"),
 	)
 
 	lines := make([]string, 0, 6+len(updatable))
 	lines = append(lines, dialogTitleStyle.Render(dialogWarningStyle.Render("⚠ Warning")))
 	lines = append(lines, "")
 	lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf(
-		"Будут обновлены %d %s:",
+		"%d direct %s will be updated:",
 		len(updatable),
-		pluralize(len(updatable), "прямая зависимость", "прямые зависимости"),
+		pluralize(len(updatable), "dependency", "dependencies"),
 	)))
 
 	visible := updatable
@@ -87,12 +87,12 @@ func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.Dependency
 	}
 	if extra > 0 {
 		lines = append(lines, dialogBodyStyle.Render(
-			fmt.Sprintf("  …и ещё %d", extra),
+			fmt.Sprintf("  …and %d more", extra),
 		))
 	}
 	lines = append(lines, "")
-	lines = append(lines, dialogBodyStyle.Render("Файлы go.mod и go.sum будут изменены."))
-	lines = append(lines, dialogBodyStyle.Render("Перед обновлением сохраняется снимок, чтобы можно было откатить изменения."))
+	lines = append(lines, dialogBodyStyle.Render("go.mod and go.sum will be modified."))
+	lines = append(lines, dialogBodyStyle.Render("A snapshot is taken before the update so changes can be rolled back."))
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
@@ -108,19 +108,19 @@ func renderDependencyChecksDialog(yesSelected bool) string {
 	}
 
 	buttons := lipgloss.JoinHorizontal(lipgloss.Center,
-		yesBtn.Render("Да"),
+		yesBtn.Render("Yes"),
 		"  ",
-		noBtn.Render("Нет"),
+		noBtn.Render("No"),
 	)
 
 	lines := []string{
-		dialogTitleStyle.Render(styles.StatusInfoStyle.Render("✓ Запустить проверки?")),
+		dialogTitleStyle.Render(styles.StatusInfoStyle.Render("✓ Run checks?")),
 		"",
-		dialogBodyStyle.Render("После обновления будут выполнены:"),
+		dialogBodyStyle.Render("After the update the following will be executed:"),
 		dialogBodyStyle.Render("  • go test ./..."),
 		dialogBodyStyle.Render("  • go vet ./..."),
 		"",
-		dialogMutedStyle.Render("При провале будет предложено откатить зависимости."),
+		dialogMutedStyle.Render("If a check fails you will be offered to roll back the dependencies."),
 		"",
 		buttons,
 	}
@@ -137,17 +137,17 @@ func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCh
 	}
 
 	buttons := lipgloss.JoinHorizontal(lipgloss.Center,
-		yesBtn.Render("Откатить"),
+		yesBtn.Render("Roll back"),
 		"  ",
-		noBtn.Render("Оставить"),
+		noBtn.Render("Keep"),
 	)
 
 	lines := []string{
-		dialogTitleStyle.Render(dialogWarningStyle.Render("⚠ Проверки провалились")),
+		dialogTitleStyle.Render(dialogWarningStyle.Render("⚠ Checks failed")),
 		"",
 	}
 	if result != nil {
-		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf("Команда: %s", result.Command)))
+		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf("Command: %s", result.Command)))
 		if result.Output != "" {
 			for _, l := range strings.Split(result.Output, "\n") {
 				lines = append(lines, dialogMutedStyle.Render(l))
@@ -155,7 +155,7 @@ func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCh
 		}
 		lines = append(lines, "")
 	}
-	lines = append(lines, dialogBodyStyle.Render("Откатить зависимости к состоянию до обновления?"))
+	lines = append(lines, dialogBodyStyle.Render("Roll back the dependencies to their pre-update state?"))
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
