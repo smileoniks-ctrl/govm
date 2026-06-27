@@ -8,13 +8,16 @@ GoVM is a modern tool for managing multiple Go versions on your system. It featu
 
 ## Features
 
-- Beautiful TUI built with [Charm Bubbletea v2](https://charm.land/bubbletea/v2) with responsive layout
+- Beautiful TUI built with [Charm Bubbletea v2](https://charm.land/bubbletea/v2) with a responsive layout that adapts to your terminal size (compact, normal, and wide breakpoints)
+- Version string shown in the TUI header and CLI help output
 - Command-line interface for quick operations
 - Install any available Go version directly from go.dev
 - Switch between installed versions with a single command
 - Delete installed versions (with safety check for the active version)
 - Supports partial version numbers (e.g., `1.21` for latest 1.21.x) and `go` prefix (e.g., `go1.21`)
-- Go module dependency viewer and updater built into the TUI
+- Go module dependency viewer built into the TUI
+- Dependency update flow with a pre-update snapshot, optional `go test ./...` and `go vet ./...` checks, and one-key rollback to the pre-update state if checks fail
+- Resilient error handling: the TUI remains responsive (and closable) when go.dev is unreachable
 - Works on macOS, Linux, and Windows (darwin/linux/windows, amd64/arm64)
 
 ## Installation
@@ -89,18 +92,37 @@ The TUI has three tabs that you cycle through with `Tab`:
 - **Installed** - Go versions installed locally on your system
 - **Deps** - Go module dependencies of the current working directory
 
+The TUI layout is responsive and adjusts to your terminal width:
+
+| Width | Mode | Behavior |
+|---|---|---|
+| `< 60` | Compact | Minimal padding, short tab labels (`All`, `Local`, `Deps`), short help hints |
+| `60-129` | Normal | Bordered layout, full labels |
+| `>= 130` | Wide | Larger padding, full borders |
+
+The TUI header shows the GoVM version so you always know which build is running.
+
 #### Navigation
 
 | Key | Action |
 |---|---|
 | `Tab` | Cycle between Available, Installed, and Deps tabs |
 | `i` | Install the selected version (Available tab) |
-| `u` | Switch to the selected version (Available/Installed tabs), or update dependencies (Deps tab) |
+| `u` | Switch to the selected version (Available tab) or update direct dependencies (Deps tab) |
 | `d` | Delete the selected installed version with confirmation (Available/Installed tabs) |
-| `r` | Refresh available versions (Available tab), or check for dependency updates (Deps tab) |
-| `q` | Quit |
+| `r` | Refresh available versions from go.dev (Available tab) or check for dependency updates online (Deps tab) |
+| `q`, `ctrl+c` | Quit |
 
 When deleting a version, you will be prompted to confirm with `y` or cancel with `n`. The active version cannot be deleted.
+
+Confirmation dialogs (for dependency updates, post-update checks, and rollback) use the following keys:
+
+| Key | Action |
+|---|---|
+| `←/→`, `Tab`, `h/l` | Switch the highlighted choice |
+| `enter` | Confirm the highlighted choice |
+| `y` | Accept |
+| `n` / `esc` | Cancel or skip (context dependent) |
 
 ### Command Line Interface
 
@@ -129,6 +151,8 @@ govm help
 govm
 ```
 
+The `govm help` and `govm version` commands print the current GoVM version so you can confirm which build is installed.
+
 ### Go Dependencies Tab
 
 The **Deps** tab in the TUI displays the Go module dependencies of the current working directory. It reads dependencies via `go list -mod=readonly -m -json all` and shows:
@@ -138,10 +162,50 @@ The **Deps** tab in the TUI displays the Go module dependencies of the current w
 | Dependency | Module path |
 | Current | Currently pinned version |
 | Latest | Latest available version (after refresh) |
-| Status | `current`, `update avail`, `indirect`, `deprecated`, or `error` |
+| Status | `current`, `update avail`, `indirect`, `indirect update`, `deprecated`, or `error` |
 
-- Press `r` on the Deps tab to check for available updates online.
-- Press `u` on the Deps tab to update all direct dependencies with available updates. A confirmation dialog appears before running `go get` and `go mod tidy`.
+The Deps table mirrors the data in the **Installed** tab, which shows three columns: **Version**, **Path**, and **Status** (where Status is `active` for the version currently wired through the shim).
+
+#### Refreshing and updating dependencies
+
+| Key | Action |
+|---|---|
+| `r` | Check for available updates online (runs `go list -u`) |
+| `u` | Open the dependency update confirmation dialog |
+
+Pressing `u` on the Deps tab opens a confirmation dialog that lists every direct dependency that will be upgraded, e.g.:
+
+```
+⚠ Warning
+
+3 direct dependencies will be updated:
+  github.com/foo/bar: v1.2.3 -> v1.3.0
+  github.com/baz/qux: v0.4.1 -> v0.5.0
+  …and 1 more
+
+go.mod and go.sum will be modified.
+A snapshot is taken before the update so changes can be rolled back.
+```
+
+Once you confirm, GoVM:
+
+1. Snapshots `go.mod` and `go.sum`.
+2. Runs `go get` for each direct dependency that has an update, then `go mod tidy`.
+3. Refreshes the dependency list and shows a **Run checks?** dialog with the default choice set to **Yes**:
+   ```
+   ✓ Run checks?
+
+   After the update the following will be executed:
+     • go test ./...
+     • go vet ./...
+
+   If a check fails you will be offered to roll back the dependencies.
+   ```
+4. If you accept, runs `go test ./...` and `go vet ./...` in the module directory.
+   - On success, GoVM reports `Checks passed.` and the updated table is kept.
+   - On failure, GoVM opens a **Rollback** dialog that shows the failing command and a trimmed excerpt of its output. Choosing **Roll back** restores `go.mod` and `go.sum` from the snapshot, runs `go mod tidy`, and refreshes the dependency list. Choosing **Keep** dismisses the dialog and leaves the updated files in place.
+
+`esc` cancels or skips each dialog, and you can quit at any time with `q`/`ctrl+c`.
 
 ## How It Works
 
