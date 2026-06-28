@@ -70,6 +70,21 @@ func TestSnapshotModuleFiles_MissingGoMod(t *testing.T) {
 	}
 }
 
+func TestSnapshotModuleFiles_TrailingSeparator(t *testing.T) {
+	dir := t.TempDir()
+	wantMod := "module example.com/test\n\ngo 1.26\n"
+	writeFile(t, dir, "go.mod", wantMod)
+
+	withSep := dir + string(os.PathSeparator)
+	snap, err := SnapshotModuleFiles(withSep)
+	if err != nil {
+		t.Fatalf("SnapshotModuleFiles with trailing separator: %v", err)
+	}
+	if snap.ModFile.Content != wantMod {
+		t.Fatalf("ModFile.Content mismatch: got %q, want %q", snap.ModFile.Content, wantMod)
+	}
+}
+
 func TestRestoreModuleFiles_RestoresGoSumAndGoMod(t *testing.T) {
 	dir := t.TempDir()
 	originalMod := "module example.com/test\n\ngo 1.26\n\nrequire github.com/x/y v1.0.0\n"

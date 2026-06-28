@@ -14,13 +14,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if m.ConfirmingDependencyUpdate {
+		if m.Deps.Dialog.ConfirmingUpdate {
 			return m.handleUpdateConfirmKey(msg)
 		}
-		if m.ConfirmingDependencyChecks {
+		if m.Deps.Dialog.ConfirmingChecks {
 			return m.handleChecksConfirmKey(msg)
 		}
-		if m.ConfirmingDependencyRollback {
+		if m.Deps.Dialog.ConfirmingRollback {
 			return m.handleRollbackConfirmKey(msg)
 		}
 		return m.handleKey(msg)
@@ -48,9 +48,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.InstalledTable.SetWidth(contentWidth)
 		m.InstalledTable.SetHeight(contentHeight)
 		m.InstalledTable.SetColumns(installedTableColumns(contentWidth, m.Layout))
-		m.DependencyTable.SetWidth(contentWidth)
-		m.DependencyTable.SetHeight(contentHeight)
-		m.DependencyTable.SetColumns(dependencyTableColumns(contentWidth, m.Layout))
+		m.Deps.Table.SetWidth(contentWidth)
+		m.Deps.Table.SetHeight(contentHeight)
+		m.Deps.Table.SetColumns(dependencyTableColumns(contentWidth, m.Layout))
 		return m, nil
 
 	case utils.ErrMsg:
@@ -78,64 +78,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependenciesMsg:
-		m.Dependencies = msg
-		m.DependenciesLoaded = true
-		m.CheckingDependencies = false
+		m.Deps.Dependencies = msg
+		m.Deps.Loaded = true
+		m.Deps.Checking = false
 		m.updateDependencyTable()
 		m.Message = ""
 		m.MessageType = ""
 		return m, nil
 
 	case utils.DependenciesUpdatedMsg:
-		m.UpdatingDependencies = false
-		m.Dependencies = msg.Dependencies
-		m.LastDependencySnapshot = msg.Snapshot
-		m.LastCheckResult = nil
+		m.Deps.Updating = false
+		m.Deps.Dependencies = msg.Dependencies
+		m.Deps.Snapshot = msg.Snapshot
+		m.Deps.LastCheckResult = nil
 		m.updateDependencyTable()
 		m.Message = fmt.Sprintf("Updated %d direct %s. Run checks?", msg.Updated, pluralize(msg.Updated, "dependency", "dependencies"))
 		m.MessageType = "success"
-		m.ConfirmingDependencyChecks = true
-		m.CheckChoiceYes = true
+		m.Deps.Dialog.ConfirmingChecks = true
+		m.Deps.Dialog.CheckChoiceYes = true
 		return m, nil
 
 	case utils.DependencyCheckResultMsg:
-		m.RunningDependencyChecks = false
-		m.ConfirmingDependencyChecks = false
+		m.Deps.RunningChecks = false
+		m.Deps.Dialog.ConfirmingChecks = false
 		if msg.OK {
 			m.Message = "Checks passed."
 			m.MessageType = "success"
-			m.LastCheckResult = &msg
+			m.Deps.LastCheckResult = &msg
 			return m, nil
 		}
-		m.LastCheckResult = &msg
-		m.ConfirmingDependencyRollback = true
-		m.RollbackChoiceYes = true
+		m.Deps.LastCheckResult = &msg
+		m.Deps.Dialog.ConfirmingRollback = true
+		m.Deps.Dialog.RollbackChoiceYes = true
 		m.Message = fmt.Sprintf("Checks failed: %s", msg.Command)
 		m.MessageType = "error"
 		return m, nil
 
 	case utils.DependenciesRolledBackMsg:
-		m.RollingBackDependencies = false
-		m.Dependencies = msg.Dependencies
-		m.LastDependencySnapshot = msg.Snapshot
-		m.LastCheckResult = nil
+		m.Deps.RollingBack = false
+		m.Deps.Dependencies = msg.Dependencies
+		m.Deps.Snapshot = msg.Snapshot
+		m.Deps.LastCheckResult = nil
 		m.updateDependencyTable()
 		m.Message = "Rolled back to pre-update state."
 		m.MessageType = "success"
 		return m, nil
 
 	case utils.DependencyErrMsg:
-		if m.UpdatingDependencies {
-			m.UpdatingDependencies = false
+		if m.Deps.Updating {
+			m.Deps.Updating = false
 		}
-		if m.CheckingDependencies {
-			m.CheckingDependencies = false
+		if m.Deps.Checking {
+			m.Deps.Checking = false
 		}
-		if m.RunningDependencyChecks {
-			m.RunningDependencyChecks = false
+		if m.Deps.RunningChecks {
+			m.Deps.RunningChecks = false
 		}
-		if m.RollingBackDependencies {
-			m.RollingBackDependencies = false
+		if m.Deps.RollingBack {
+			m.Deps.RollingBack = false
 		}
 		if msg.Err != nil {
 			m.Message = msg.Err.Error()
@@ -224,8 +224,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	newTableModel, tableCmd := m.InstalledTable.Update(msg)
 	m.InstalledTable = newTableModel
 	cmds = append(cmds, tableCmd)
-	newDepsTableModel, depsTableCmd := m.DependencyTable.Update(msg)
-	m.DependencyTable = newDepsTableModel
+	newDepsTableModel, depsTableCmd := m.Deps.Table.Update(msg)
+	m.Deps.Table = newDepsTableModel
 	cmds = append(cmds, depsTableCmd)
 	return m, tea.Batch(cmds...)
 }

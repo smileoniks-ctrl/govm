@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// This file reports the version of the govm binary itself, distinct
+// from the versions of Go that govm manages (see go_versions.go).
+
 var Version = "dev"
 
 func GetVersion() string {

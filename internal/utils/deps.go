@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -90,7 +91,8 @@ type DependencySnapshot struct {
 func SnapshotModuleFiles(moduleDir string) (*DependencySnapshot, error) {
 	snap := &DependencySnapshot{}
 
-	modBytes, err := os.ReadFile(moduleFilePath(moduleDir, "go.mod"))
+	modPath := filepath.Join(moduleDir, "go.mod")
+	modBytes, err := os.ReadFile(modPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("snapshot: go.mod not found in %s", moduleDir)
@@ -99,7 +101,7 @@ func SnapshotModuleFiles(moduleDir string) (*DependencySnapshot, error) {
 	}
 	snap.ModFile = ModuleFileSnapshot{Exists: true, Content: string(modBytes)}
 
-	sumBytes, err := os.ReadFile(moduleFilePath(moduleDir, "go.sum"))
+	sumBytes, err := os.ReadFile(filepath.Join(moduleDir, "go.sum"))
 	switch {
 	case err == nil:
 		snap.SumFile = ModuleFileSnapshot{Exists: true, Content: string(sumBytes)}
@@ -121,11 +123,11 @@ func RestoreModuleFiles(moduleDir string, snap *DependencySnapshot) error {
 		return fmt.Errorf("restore: nil snapshot")
 	}
 
-	if err := os.WriteFile(moduleFilePath(moduleDir, "go.mod"), []byte(snap.ModFile.Content), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte(snap.ModFile.Content), 0644); err != nil {
 		return fmt.Errorf("restore go.mod: %w", err)
 	}
 
-	sumPath := moduleFilePath(moduleDir, "go.sum")
+	sumPath := filepath.Join(moduleDir, "go.sum")
 	if snap.SumFile.Exists {
 		if err := os.WriteFile(sumPath, []byte(snap.SumFile.Content), 0644); err != nil {
 			return fmt.Errorf("restore go.sum: %w", err)
@@ -137,10 +139,6 @@ func RestoreModuleFiles(moduleDir string, snap *DependencySnapshot) error {
 	}
 
 	return nil
-}
-
-func moduleFilePath(moduleDir, name string) string {
-	return fmt.Sprintf("%s%c%s", strings.TrimRight(moduleDir, string(os.PathSeparator)), os.PathSeparator, name)
 }
 
 // UpdatableDirectDependencies returns direct dependencies that have

@@ -33,18 +33,18 @@ func (m Model) View() tea.View {
 	case 1:
 		components = append(components, m.InstalledTable.View())
 	case 2:
-		components = append(components, m.DependencyTable.View())
+		components = append(components, m.Deps.Table.View())
 	}
 
 	if status, statusType := m.composeStatus(); status != "" {
 		components = append(components, renderStatus(statusType, status, width))
 	}
 
-	components = append(components, renderHelp(m.CurrentTab, m.ConfirmingDelete, m.ConfirmingDependencyUpdate, m.ConfirmingDependencyChecks, m.ConfirmingDependencyRollback, width, m.Layout))
+	components = append(components, renderHelp(m.CurrentTab, m.ConfirmingDelete, m.Deps.Dialog.ConfirmingUpdate, m.Deps.Dialog.ConfirmingChecks, m.Deps.Dialog.ConfirmingRollback, width, m.Layout))
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
 
-	if m.ConfirmingDependencyUpdate {
-		updatable := utils.UpdatableDirectDependencies(m.Dependencies)
+	if m.Deps.Dialog.ConfirmingUpdate {
+		updatable := utils.UpdatableDirectDependencies(m.Deps.Dependencies)
 		entries := make([]utils.DependencyUpdateEntry, 0, len(updatable))
 		for _, d := range updatable {
 			entries = append(entries, utils.DependencyUpdateEntry{
@@ -53,11 +53,11 @@ func (m Model) View() tea.View {
 				NewVersion: d.Latest,
 			})
 		}
-		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.UpdateChoiceYes, entries), width, height)
-	} else if m.ConfirmingDependencyChecks {
-		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.CheckChoiceYes), width, height)
-	} else if m.ConfirmingDependencyRollback {
-		rendered = overlayDialog(rendered, renderDependencyRollbackDialog(m.RollbackChoiceYes, m.LastCheckResult), width, height)
+		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.Deps.Dialog.UpdateChoiceYes, entries), width, height)
+	} else if m.Deps.Dialog.ConfirmingChecks {
+		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.Deps.Dialog.CheckChoiceYes), width, height)
+	} else if m.Deps.Dialog.ConfirmingRollback {
+		rendered = overlayDialog(rendered, renderDependencyRollbackDialog(m.Deps.Dialog.RollbackChoiceYes, m.Deps.LastCheckResult), width, height)
 	}
 
 	v := tea.NewView(rendered)
@@ -70,13 +70,13 @@ func (m Model) View() tea.View {
 func (m Model) composeStatus() (string, string) {
 	status := m.Message
 	statusType := m.MessageType
-	if m.Loading || m.CheckingDependencies || m.UpdatingDependencies || m.RunningDependencyChecks || m.RollingBackDependencies {
+	if m.Loading || m.Deps.Checking || m.Deps.Updating || m.Deps.RunningChecks || m.Deps.RollingBack {
 		statusType = "info"
 		if m.InstallingVersion != "" {
 			status = fmt.Sprintf("%s Downloading Go %s", m.Spinner.View(), m.InstallingVersion)
-		} else if m.RollingBackDependencies {
+		} else if m.Deps.RollingBack {
 			status = fmt.Sprintf("%s Rolling back dependencies", m.Spinner.View())
-		} else if m.RunningDependencyChecks {
+		} else if m.Deps.RunningChecks {
 			status = fmt.Sprintf("%s Running checks", m.Spinner.View())
 		} else if status == "" {
 			status = fmt.Sprintf("%s Loading", m.Spinner.View())

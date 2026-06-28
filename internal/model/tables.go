@@ -28,11 +28,11 @@ func (m *Model) updateInstalledTable() {
 }
 
 func (m *Model) updateDependencyTable() {
-	rows := make([]table.Row, 0, len(m.Dependencies))
-	for _, d := range m.Dependencies {
+	rows := make([]table.Row, 0, len(m.Deps.Dependencies))
+	for _, d := range m.Deps.Dependencies {
 		rows = append(rows, table.Row{d.Path, d.Version, d.Latest, dependencyStatus(d)})
 	}
-	m.DependencyTable.SetRows(rows)
+	m.Deps.Table.SetRows(rows)
 }
 
 // dependencyStatus returns a short status string for a module dependency

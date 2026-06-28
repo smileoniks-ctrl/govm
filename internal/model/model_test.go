@@ -54,6 +54,10 @@ func newTestModel(t *testing.T) Model {
 		}),
 		table.WithHeight(8),
 	)
+	depTbl := table.New(
+		table.WithColumns(dependencyTableColumns(80, styles.LayoutNormal)),
+		table.WithHeight(20),
+	)
 
 	return Model{
 		List:           l,
@@ -62,6 +66,7 @@ func newTestModel(t *testing.T) Model {
 		HomeDir:        home,
 		GoVersionsDir:  filepath.Join(home, ".govm", "versions"),
 		InstalledTable: tbl,
+		Deps:           NewDepsState("", depTbl),
 		Message:        "Successfully installed Go 1.24.4",
 		MessageType:    "success",
 		Layout:         styles.LayoutWide,
@@ -172,8 +177,8 @@ func TestWindowSizeMsgResizesDepsTable(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	got := updated.(Model)
 
-	if got.DependencyTable.Width() <= 0 || got.DependencyTable.Height() <= 0 {
-		t.Fatalf("expected positive deps table size, got %dx%d", got.DependencyTable.Width(), got.DependencyTable.Height())
+	if got.Deps.Table.Width() <= 0 || got.Deps.Table.Height() <= 0 {
+		t.Fatalf("expected positive deps table size, got %dx%d", got.Deps.Table.Width(), got.Deps.Table.Height())
 	}
 }
 
@@ -189,7 +194,7 @@ func TestRefreshOnDepsTabTriggersCheckCmd(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r'})
 	m = updated.(Model)
 
-	if !m.CheckingDependencies {
+	if !m.Deps.Checking {
 		t.Fatal("expected CheckingDependencies to be true after pressing r on deps tab")
 	}
 
@@ -210,15 +215,15 @@ func TestDependenciesMsgPopulatesTable(t *testing.T) {
 	updated, _ := m.Update(deps)
 	got := updated.(Model)
 
-	if !got.DependenciesLoaded {
+	if !got.Deps.Loaded {
 		t.Fatal("expected DependenciesLoaded to be true")
 	}
 
-	if len(got.Dependencies) != 3 {
-		t.Fatalf("expected 3 dependencies, got %d", len(got.Dependencies))
+	if len(got.Deps.Dependencies) != 3 {
+		t.Fatalf("expected 3 dependencies, got %d", len(got.Deps.Dependencies))
 	}
 
-	rows := got.DependencyTable.Rows()
+	rows := got.Deps.Table.Rows()
 	if len(rows) != 3 {
 		t.Fatalf("expected 3 rows in table, got %d", len(rows))
 	}
@@ -285,10 +290,10 @@ func TestPressUOnDepsOpensConfirmDialog(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
 
-	if !m.ConfirmingDependencyUpdate {
+	if !m.Deps.Dialog.ConfirmingUpdate {
 		t.Fatal("expected ConfirmingDependencyUpdate to be true after pressing u on deps tab")
 	}
-	if !m.UpdateChoiceYes {
+	if !m.Deps.Dialog.UpdateChoiceYes {
 		t.Fatal("expected default choice to be Yes")
 	}
 }
@@ -310,7 +315,7 @@ func TestPressUOnDepsWithoutUpdatesShowsMessage(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
 
-	if m.ConfirmingDependencyUpdate {
+	if m.Deps.Dialog.ConfirmingUpdate {
 		t.Fatal("expected dialog to stay closed when no updates available")
 	}
 	if m.MessageType != "warning" {
@@ -337,7 +342,7 @@ func TestEscClosesConfirmDialog(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 
-	if m.ConfirmingDependencyUpdate {
+	if m.Deps.Dialog.ConfirmingUpdate {
 		t.Fatal("expected dialog to close on esc")
 	}
 }
@@ -358,14 +363,14 @@ func TestRightArrowTogglesDialogChoice(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
 
-	if !m.UpdateChoiceYes {
+	if !m.Deps.Dialog.UpdateChoiceYes {
 		t.Fatal("expected default to be Yes")
 	}
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = updated.(Model)
 
-	if m.UpdateChoiceYes {
+	if m.Deps.Dialog.UpdateChoiceYes {
 		t.Fatal("expected right arrow to toggle choice to No")
 	}
 }
@@ -388,10 +393,10 @@ func TestConfirmOnNoClosesDialogWithoutUpdate(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 
-	if m.ConfirmingDependencyUpdate {
+	if m.Deps.Dialog.ConfirmingUpdate {
 		t.Fatal("expected dialog to close after confirm on No")
 	}
-	if m.UpdatingDependencies {
+	if m.Deps.Updating {
 		t.Fatal("expected UpdatingDependencies to be false after choosing No")
 	}
 }
@@ -413,10 +418,10 @@ func TestConfirmOnYesTriggersUpdateCmd(t *testing.T) {
 	updated, cmd := updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 
-	if m.ConfirmingDependencyUpdate {
+	if m.Deps.Dialog.ConfirmingUpdate {
 		t.Fatal("expected dialog to close after confirm on Yes")
 	}
-	if !m.UpdatingDependencies {
+	if !m.Deps.Updating {
 		t.Fatal("expected UpdatingDependencies to be true after choosing Yes")
 	}
 	if cmd == nil {
@@ -437,11 +442,11 @@ func TestDependenciesUpdatedMsgUpdatesState(t *testing.T) {
 	updated, _ := m.Update(msg)
 	got := updated.(Model)
 
-	if got.UpdatingDependencies {
+	if got.Deps.Updating {
 		t.Fatal("expected UpdatingDependencies to be false after update complete")
 	}
-	if len(got.Dependencies) != 1 {
-		t.Fatalf("expected 1 dependency, got %d", len(got.Dependencies))
+	if len(got.Deps.Dependencies) != 1 {
+		t.Fatalf("expected 1 dependency, got %d", len(got.Deps.Dependencies))
 	}
 	if got.MessageType != "success" {
 		t.Fatalf("expected success message, got type %q", got.MessageType)
@@ -458,7 +463,7 @@ func TestDependencyTableIndirectUpdateStatus(t *testing.T) {
 	updated, _ := m.Update(deps)
 	got := updated.(Model)
 
-	rows := got.DependencyTable.Rows()
+	rows := got.Deps.Table.Rows()
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
@@ -627,7 +632,7 @@ func TestUpdateDependencyTable_StatusPriorities(t *testing.T) {
 	}
 	updated, _ := m.Update(deps)
 	got := updated.(Model)
-	rows := got.DependencyTable.Rows()
+	rows := got.Deps.Table.Rows()
 	if len(rows) != len(deps) {
 		t.Fatalf("expected %d rows, got %d", len(deps), len(rows))
 	}
@@ -878,16 +883,16 @@ func TestDependenciesUpdatedMsgStoresSnapshotAndOpensChecksDialog(t *testing.T) 
 	updated, _ := m.Update(msg)
 	got := updated.(Model)
 
-	if got.UpdatingDependencies {
+	if got.Deps.Updating {
 		t.Fatal("expected UpdatingDependencies to be false")
 	}
-	if got.LastDependencySnapshot == nil {
+	if got.Deps.Snapshot == nil {
 		t.Fatal("expected LastDependencySnapshot to be set")
 	}
-	if !got.ConfirmingDependencyChecks {
+	if !got.Deps.Dialog.ConfirmingChecks {
 		t.Fatal("expected ConfirmingDependencyChecks to be true")
 	}
-	if !got.CheckChoiceYes {
+	if !got.Deps.Dialog.CheckChoiceYes {
 		t.Fatal("expected CheckChoiceYes default to be Yes")
 	}
 	if got.MessageType != "success" {
@@ -897,31 +902,31 @@ func TestDependenciesUpdatedMsgStoresSnapshotAndOpensChecksDialog(t *testing.T) 
 
 func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
 	m := newTestModel(t)
-	m.ConfirmingDependencyChecks = true
-	m.CheckChoiceYes = true
+	m.Deps.Dialog.ConfirmingChecks = true
+	m.Deps.Dialog.CheckChoiceYes = true
 
 	updated, _ := m.Update(utils.DependencyCheckResultMsg{OK: true})
 	got := updated.(Model)
 
-	if got.ConfirmingDependencyChecks {
+	if got.Deps.Dialog.ConfirmingChecks {
 		t.Fatal("expected ConfirmingDependencyChecks to close after success")
 	}
-	if got.RunningDependencyChecks {
+	if got.Deps.RunningChecks {
 		t.Fatal("expected RunningDependencyChecks to be false")
 	}
 	if got.MessageType != "success" {
 		t.Fatalf("expected success status, got %q", got.MessageType)
 	}
-	if got.LastCheckResult == nil {
+	if got.Deps.LastCheckResult == nil {
 		t.Fatal("expected LastCheckResult to be stored")
 	}
 }
 
 func TestDependencyCheckResultFailOpensRollbackDialog(t *testing.T) {
 	m := newTestModel(t)
-	m.ConfirmingDependencyChecks = true
-	m.CheckChoiceYes = true
-	m.RunningDependencyChecks = true
+	m.Deps.Dialog.ConfirmingChecks = true
+	m.Deps.Dialog.CheckChoiceYes = true
+	m.Deps.RunningChecks = true
 
 	msg := utils.DependencyCheckResultMsg{
 		OK:      false,
@@ -932,40 +937,40 @@ func TestDependencyCheckResultFailOpensRollbackDialog(t *testing.T) {
 	updated, _ := m.Update(msg)
 	got := updated.(Model)
 
-	if got.ConfirmingDependencyChecks {
+	if got.Deps.Dialog.ConfirmingChecks {
 		t.Fatal("expected ConfirmingDependencyChecks to close on failure")
 	}
-	if !got.ConfirmingDependencyRollback {
+	if !got.Deps.Dialog.ConfirmingRollback {
 		t.Fatal("expected ConfirmingDependencyRollback to be true")
 	}
-	if !got.RollbackChoiceYes {
+	if !got.Deps.Dialog.RollbackChoiceYes {
 		t.Fatal("expected RollbackChoiceYes default to be Yes")
 	}
 	if got.MessageType != "error" {
 		t.Fatalf("expected error status, got %q", got.MessageType)
 	}
-	if got.LastCheckResult == nil || got.LastCheckResult.Command != "go test ./..." {
-		t.Fatalf("expected LastCheckResult to capture failing command, got %+v", got.LastCheckResult)
+	if got.Deps.LastCheckResult == nil || got.Deps.LastCheckResult.Command != "go test ./..." {
+		t.Fatalf("expected LastCheckResult to capture failing command, got %+v", got.Deps.LastCheckResult)
 	}
 }
 
 func TestRollbackCmdTriggeredByRollbackYes(t *testing.T) {
 	m := newTestModel(t)
-	m.ConfirmingDependencyRollback = true
-	m.RollbackChoiceYes = true
-	m.LastDependencySnapshot = &utils.DependencySnapshot{
+	m.Deps.Dialog.ConfirmingRollback = true
+	m.Deps.Dialog.RollbackChoiceYes = true
+	m.Deps.Snapshot = &utils.DependencySnapshot{
 		ModFile: utils.ModuleFileSnapshot{Exists: true, Content: "old"},
 		SumFile: utils.ModuleFileSnapshot{Exists: true, Content: "oldsum"},
 	}
-	m.LastCheckResult = &utils.DependencyCheckResultMsg{OK: false, Command: "go test ./..."}
+	m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{OK: false, Command: "go test ./..."}
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(Model)
 
-	if got.ConfirmingDependencyRollback {
+	if got.Deps.Dialog.ConfirmingRollback {
 		t.Fatal("expected ConfirmingDependencyRollback to close")
 	}
-	if !got.RollingBackDependencies {
+	if !got.Deps.RollingBack {
 		t.Fatal("expected RollingBackDependencies to be true")
 	}
 	if cmd == nil {
@@ -975,20 +980,20 @@ func TestRollbackCmdTriggeredByRollbackYes(t *testing.T) {
 
 func TestKeepCmdClearsRollbackDialog(t *testing.T) {
 	m := newTestModel(t)
-	m.ConfirmingDependencyRollback = true
-	m.RollbackChoiceYes = true
-	m.LastDependencySnapshot = &utils.DependencySnapshot{}
-	m.LastCheckResult = &utils.DependencyCheckResultMsg{OK: false, Command: "go test"}
+	m.Deps.Dialog.ConfirmingRollback = true
+	m.Deps.Dialog.RollbackChoiceYes = true
+	m.Deps.Snapshot = &utils.DependencySnapshot{}
+	m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{OK: false, Command: "go test"}
 
 	// Toggle to No then confirm.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(Model)
 
-	if got.ConfirmingDependencyRollback {
+	if got.Deps.Dialog.ConfirmingRollback {
 		t.Fatal("expected ConfirmingDependencyRollback to close when keeping updates")
 	}
-	if got.RollingBackDependencies {
+	if got.Deps.RollingBack {
 		t.Fatal("expected RollingBackDependencies to remain false")
 	}
 	if got.MessageType != "warning" {
@@ -998,40 +1003,40 @@ func TestKeepCmdClearsRollbackDialog(t *testing.T) {
 
 func TestEscOnChecksDialogSkipsChecks(t *testing.T) {
 	m := newTestModel(t)
-	m.ConfirmingDependencyChecks = true
-	m.CheckChoiceYes = true
+	m.Deps.Dialog.ConfirmingChecks = true
+	m.Deps.Dialog.CheckChoiceYes = true
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	got := updated.(Model)
 
-	if got.ConfirmingDependencyChecks {
+	if got.Deps.Dialog.ConfirmingChecks {
 		t.Fatal("expected dialog to close on esc")
 	}
-	if got.RunningDependencyChecks {
+	if got.Deps.RunningChecks {
 		t.Fatal("expected RunningDependencyChecks to remain false")
 	}
 }
 
 func TestEscOnRollbackDialogKeepsUpdates(t *testing.T) {
 	m := newTestModel(t)
-	m.ConfirmingDependencyRollback = true
-	m.RollbackChoiceYes = true
+	m.Deps.Dialog.ConfirmingRollback = true
+	m.Deps.Dialog.RollbackChoiceYes = true
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	got := updated.(Model)
 
-	if got.ConfirmingDependencyRollback {
+	if got.Deps.Dialog.ConfirmingRollback {
 		t.Fatal("expected dialog to close on esc")
 	}
-	if got.RollingBackDependencies {
+	if got.Deps.RollingBack {
 		t.Fatal("expected RollingBackDependencies to remain false")
 	}
 }
 
 func TestDependenciesRolledBackMsgUpdatesState(t *testing.T) {
 	m := newTestModel(t)
-	m.RollingBackDependencies = true
-	m.LastDependencySnapshot = &utils.DependencySnapshot{}
+	m.Deps.RollingBack = true
+	m.Deps.Snapshot = &utils.DependencySnapshot{}
 
 	msg := utils.DependenciesRolledBackMsg{
 		Snapshot: &utils.DependencySnapshot{
@@ -1045,11 +1050,11 @@ func TestDependenciesRolledBackMsgUpdatesState(t *testing.T) {
 	updated, _ := m.Update(msg)
 	got := updated.(Model)
 
-	if got.RollingBackDependencies {
+	if got.Deps.RollingBack {
 		t.Fatal("expected RollingBackDependencies to be false")
 	}
-	if len(got.Dependencies) != 1 {
-		t.Fatalf("expected 1 dependency, got %d", len(got.Dependencies))
+	if len(got.Deps.Dependencies) != 1 {
+		t.Fatalf("expected 1 dependency, got %d", len(got.Deps.Dependencies))
 	}
 	if got.MessageType != "success" {
 		t.Fatalf("expected success status, got %q", got.MessageType)
@@ -1058,12 +1063,12 @@ func TestDependenciesRolledBackMsgUpdatesState(t *testing.T) {
 
 func TestDependencyErrDuringRollbackClearsState(t *testing.T) {
 	m := newTestModel(t)
-	m.RollingBackDependencies = true
+	m.Deps.RollingBack = true
 
 	updated, _ := m.Update(utils.DependencyErrMsg{Err: errors.New("boom")})
 	got := updated.(Model)
 
-	if got.RollingBackDependencies {
+	if got.Deps.RollingBack {
 		t.Fatal("expected RollingBackDependencies to be false after err")
 	}
 	if got.MessageType != "error" {
@@ -1079,9 +1084,9 @@ func TestViewShowsRollbackDialog(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
 
-	m.ConfirmingDependencyRollback = true
-	m.RollbackChoiceYes = true
-	m.LastCheckResult = &utils.DependencyCheckResultMsg{
+	m.Deps.Dialog.ConfirmingRollback = true
+	m.Deps.Dialog.RollbackChoiceYes = true
+	m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
 		OK:      false,
 		Command: "go test ./...",
 		Output:  "FAIL: foo_test.go:42",
@@ -1103,8 +1108,8 @@ func TestViewShowsChecksDialog(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
-	m.ConfirmingDependencyChecks = true
-	m.CheckChoiceYes = true
+	m.Deps.Dialog.ConfirmingChecks = true
+	m.Deps.Dialog.CheckChoiceYes = true
 
 	view := stripANSI(m.View().Content)
 	if !strings.Contains(view, "Run checks?") {

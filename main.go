@@ -158,16 +158,15 @@ func launchTUI() {
 	})
 
 	initialModel := model.Model{
-		List:            l,
-		Versions:        []utils.GoVersion{},
-		Spinner:         s,
-		Loading:         true,
-		HomeDir:         homeDir,
-		GoVersionsDir:   goVersionsDir,
-		InstalledTable:  t,
-		Layout:          styles.LayoutNormal,
-		ModuleDir:       moduleDir,
-		DependencyTable: depTable,
+		List:           l,
+		Versions:       []utils.GoVersion{},
+		Spinner:        s,
+		Loading:        true,
+		HomeDir:        homeDir,
+		GoVersionsDir:  goVersionsDir,
+		InstalledTable: t,
+		Layout:         styles.LayoutNormal,
+		Deps:           model.NewDepsState(moduleDir, depTable),
 	}
 	p := tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {

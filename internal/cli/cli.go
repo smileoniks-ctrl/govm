@@ -5,7 +5,6 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -109,6 +108,10 @@ func ListVersions() {
 	fmt.Println("\nTo install a new version: govm install <version>")
 	fmt.Println("To switch versions: govm use <version>")
 }
+
+// findMatchingVersion looks up a Go version available on go.dev.
+// It first checks for an exact match, then falls back to the highest
+// version that starts with query (with or without a separating dot).
 func findMatchingVersion(version string) (utils.GoVersion, error) {
 	msg := utils.FetchGoVersions()
 	versions, ok := msg.(utils.VersionsMsg)
@@ -118,115 +121,71 @@ func findMatchingVersion(version string) (utils.GoVersion, error) {
 		}
 		return utils.GoVersion{}, fmt.Errorf("failed to fetch versions")
 	}
+
+	query := utils.NormalizeGoVersionQuery(version)
+	versionStrings := make([]string, len(versions))
+	for i, v := range versions {
+		versionStrings[i] = v.Version
+	}
+	matched, ok := utils.FindLatestGoVersion(versionStrings, query)
+	if !ok {
+		return utils.GoVersion{}, fmt.Errorf("no version matching '%s' found", version)
+	}
 	for _, v := range versions {
-		if v.Version == version {
+		if v.Version == matched {
 			return v, nil
 		}
 	}
-	prefix := version + "."
-	var matchedVersion utils.GoVersion
-	found := false
-	for _, v := range versions {
-		if strings.HasPrefix(v.Version, prefix) {
-			if !found || compareVersions(v.Version, matchedVersion.Version) > 0 {
-				matchedVersion = v
-				found = true
-			}
-		}
-	}
-	if !found && !strings.Contains(version, ".") {
-		prefix = version + "."
-		for _, v := range versions {
-			if strings.HasPrefix(v.Version, prefix) {
-				if !found || compareVersions(v.Version, matchedVersion.Version) > 0 {
-					matchedVersion = v
-					found = true
-				}
-			}
-		}
-	}
-	if found {
-		return matchedVersion, nil
-	}
 	return utils.GoVersion{}, fmt.Errorf("no version matching '%s' found", version)
 }
+
+// findInstalledVersion mirrors findMatchingVersion but reads the
+// installed govm versions directly from disk so the CLI works
+// without contacting go.dev.
 func findInstalledVersion(version string) (utils.GoVersion, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return utils.GoVersion{}, fmt.Errorf("failed to get home directory: %v", err)
 	}
 	goVersionsDir := filepath.Join(homeDir, ".govm", "versions")
-	versionDir := filepath.Join(goVersionsDir, "go"+version)
-	if _, err := os.Stat(versionDir); err == nil {
+
+	query := utils.NormalizeGoVersionQuery(version)
+	exactPath := filepath.Join(goVersionsDir, "go"+query)
+	if _, err := os.Stat(exactPath); err == nil {
 		return utils.GoVersion{
-			Version:   version,
-			Path:      versionDir,
+			Version:   query,
+			Path:      exactPath,
 			Installed: true,
 		}, nil
 	}
+
 	entries, err := os.ReadDir(goVersionsDir)
 	if err != nil {
 		return utils.GoVersion{}, fmt.Errorf("failed to read versions directory: %v", err)
 	}
-	prefix := "go" + version + "."
-	var matchedVersion utils.GoVersion
-	found := false
+
+	var versions []string
+	var paths []string
+	versionToPath := make(map[string]string)
 	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), prefix) {
-			versionPath := filepath.Join(goVersionsDir, entry.Name())
-			versionStr := strings.TrimPrefix(entry.Name(), "go")
-			if !found || compareVersions(versionStr, matchedVersion.Version) > 0 {
-				matchedVersion = utils.GoVersion{
-					Version:   versionStr,
-					Path:      versionPath,
-					Installed: true,
-				}
-				found = true
-			}
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "go") {
+			continue
 		}
+		versionStr := strings.TrimPrefix(entry.Name(), "go")
+		versions = append(versions, versionStr)
+		paths = append(paths, filepath.Join(goVersionsDir, entry.Name()))
+		versionToPath[versionStr] = paths[len(paths)-1]
 	}
-	if !found && !strings.Contains(version, ".") {
-		prefix = "go" + version + "."
-		for _, entry := range entries {
-			if entry.IsDir() && strings.HasPrefix(entry.Name(), prefix) {
-				versionPath := filepath.Join(goVersionsDir, entry.Name())
-				versionStr := strings.TrimPrefix(entry.Name(), "go")
-				if !found || compareVersions(versionStr, matchedVersion.Version) > 0 {
-					matchedVersion = utils.GoVersion{
-						Version:   versionStr,
-						Path:      versionPath,
-						Installed: true,
-					}
-					found = true
-				}
-			}
-		}
+
+	matched, ok := utils.FindLatestGoVersion(versions, query)
+	if !ok {
+		return utils.GoVersion{}, fmt.Errorf("no installed version matching '%s' found", version)
 	}
-	if found {
-		return matchedVersion, nil
-	}
-	return utils.GoVersion{}, fmt.Errorf("no installed version matching '%s' found", version)
-}
-func compareVersions(v1, v2 string) int {
-	parts1 := strings.Split(v1, ".")
-	parts2 := strings.Split(v2, ".")
-	for i := 0; i < len(parts1) && i < len(parts2); i++ {
-		p1, _ := strconv.Atoi(parts1[i])
-		p2, _ := strconv.Atoi(parts2[i])
-		if p1 < p2 {
-			return -1
-		}
-		if p1 > p2 {
-			return 1
-		}
-	}
-	if len(parts1) < len(parts2) {
-		return -1
-	}
-	if len(parts1) > len(parts2) {
-		return 1
-	}
-	return 0
+	return utils.GoVersion{
+		Version:   matched,
+		Path:      versionToPath[matched],
+		Installed: true,
+	}, nil
 }
 
 func DeleteVersion(version string) {

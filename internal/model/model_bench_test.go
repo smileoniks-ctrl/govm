@@ -59,18 +59,20 @@ func benchModel(b *testing.B) Model {
 		})
 	}
 
+	depsState := NewDepsState("", deps)
+	depsState.Dependencies = depItems
+	depsState.Loaded = true
+
 	return Model{
-		List:               l,
-		Versions:           versions,
-		Spinner:            spinner.New(),
-		InstalledTable:     installed,
-		DependencyTable:    deps,
-		Dependencies:       depItems,
-		DependenciesLoaded: true,
-		CurrentTab:         0,
-		Layout:             styles.LayoutNormal,
-		Width:              80,
-		Height:             24,
+		List:           l,
+		Versions:       versions,
+		Spinner:        spinner.New(),
+		InstalledTable: installed,
+		Deps:           depsState,
+		CurrentTab:     0,
+		Layout:         styles.LayoutNormal,
+		Width:          80,
+		Height:         24,
 	}
 }
 
@@ -106,8 +108,8 @@ func BenchmarkView_DepsTab(b *testing.B) {
 func BenchmarkView_DepsTabWithDialog(b *testing.B) {
 	m := benchModel(b)
 	m.CurrentTab = 2
-	m.ConfirmingDependencyUpdate = true
-	m.UpdateChoiceYes = true
+	m.Deps.Dialog.ConfirmingUpdate = true
+	m.Deps.Dialog.UpdateChoiceYes = true
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

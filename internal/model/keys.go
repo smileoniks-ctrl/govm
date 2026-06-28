@@ -36,9 +36,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleTabKey() (tea.Model, tea.Cmd) {
 	m.CurrentTab = (m.CurrentTab + 1) % 3
 	// Lazy-load deps on first visit.
-	if m.CurrentTab == 2 && !m.DependenciesLoaded {
-		m.CheckingDependencies = true
-		return m, utils.ListModuleDependencies(m.ModuleDir)
+	if m.CurrentTab == 2 && !m.Deps.Loaded {
+		m.Deps.Checking = true
+		return m, utils.ListModuleDependencies(m.Deps.ModuleDir)
 	}
 	return m, nil
 }
@@ -78,15 +78,15 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 		m.MessageType = "error"
 		return m, nil
 	}
-	if m.CurrentTab == 2 && m.DependenciesLoaded && !m.UpdatingDependencies {
-		updatable := utils.UpdatableDirectDependencies(m.Dependencies)
+	if m.CurrentTab == 2 && m.Deps.Loaded && !m.Deps.Updating {
+		updatable := utils.UpdatableDirectDependencies(m.Deps.Dependencies)
 		if len(updatable) == 0 {
 			m.Message = "No direct dependency updates available."
 			m.MessageType = "warning"
 			return m, nil
 		}
-		m.ConfirmingDependencyUpdate = true
-		m.UpdateChoiceYes = true
+		m.Deps.Dialog.ConfirmingUpdate = true
+		m.Deps.Dialog.UpdateChoiceYes = true
 		m.Message = ""
 		m.MessageType = ""
 		return m, nil
@@ -96,10 +96,10 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 
 func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab == 2 {
-		m.CheckingDependencies = true
+		m.Deps.Checking = true
 		m.Message = "Checking for dependency updates..."
 		m.MessageType = "info"
-		return m, utils.CheckModuleDependencyUpdates(m.ModuleDir)
+		return m, utils.CheckModuleDependencyUpdates(m.Deps.ModuleDir)
 	}
 	m.Loading = true
 	m.Message = ""
