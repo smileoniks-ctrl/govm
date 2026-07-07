@@ -232,3 +232,52 @@ func DeleteVersion(version string) {
 		fmt.Printf("✅ Successfully deleted Go %s\n", matchedVersion.Version)
 	}
 }
+
+// DepsCommand routes `govm deps <subcommand>`.
+func DepsCommand(subcommand string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("❌ Error getting working directory: %v\n", err)
+		return
+	}
+	switch subcommand {
+	case "list":
+		DepsList(cwd)
+	case "check":
+		DepsCheck(cwd)
+	case "update":
+		DepsUpdate(cwd)
+	case "help", "-h", "--help":
+		fmt.Println("Usage:")
+		fmt.Println("  govm deps list     List current module dependencies")
+		fmt.Println("  govm deps check    Check for available dependency updates")
+		fmt.Println("  govm deps update   Update direct dependencies (interactive)")
+	default:
+		fmt.Printf("Unknown deps subcommand: %s\n", subcommand)
+		fmt.Println("Run 'govm deps help' for usage.")
+	}
+}
+
+// DepsList prints the current dependencies of moduleDir.
+func DepsList(moduleDir string) {
+	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err := svc.RunList(); err != nil {
+		fmt.Printf("❌ %s\n", err)
+	}
+}
+
+// DepsCheck prints the dependencies along with any available updates.
+func DepsCheck(moduleDir string) {
+	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err := svc.RunCheck(); err != nil {
+		fmt.Printf("❌ %s\n", err)
+	}
+}
+
+// DepsUpdate runs the interactive update workflow.
+func DepsUpdate(moduleDir string) {
+	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err := svc.RunUpdate(); err != nil {
+		fmt.Printf("❌ %s\n", err)
+	}
+}
