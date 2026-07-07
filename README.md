@@ -2,7 +2,10 @@
 
 # GoVM - Go Version Manager
 
-> **Fork** of [Melkeydev/govm](https://github.com/melkeydev/govm). Original repository: [github.com/melkeydev/govm](https://github.com/melkeydev/govm)
+> [!NOTE]
+> **govm** is a fork of [govm](https://github.com/melkeydev/govm). by MelkeyDev.
+> As the original project appears to be inactive, I'm endeavoring to sustain its vitality by meticulously rectifying its flaws.
+
 
 GoVM is a modern tool for managing multiple Go versions on your system. It features both a clean Terminal UI (TUI) and a command-line interface for easy installation and switching between Go versions.
 
