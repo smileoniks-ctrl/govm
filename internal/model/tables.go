@@ -2,6 +2,7 @@ package model
 
 import (
 	"charm.land/bubbles/v2/table"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -29,7 +30,11 @@ func (m *Model) updateInstalledTable() {
 
 func (m *Model) updateDependencyTable() {
 	rows := make([]table.Row, 0, len(m.Deps.Dependencies))
+	settings := m.normalizedSettings()
 	for _, d := range m.Deps.Dependencies {
+		if settings.DepsDisplay == config.DepsDisplayDirect && d.Indirect {
+			continue
+		}
 		rows = append(rows, table.Row{d.Path, d.Version, d.Latest, dependencyStatus(d)})
 	}
 	m.Deps.Table.SetRows(rows)

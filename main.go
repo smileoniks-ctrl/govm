@@ -7,10 +7,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"fmt"
 	"github.com/smileoniks-ctrl/govm/internal/cli"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/model"
 	"github.com/smileoniks-ctrl/govm/internal/setup"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,6 +93,23 @@ func printUsage() {
 	fmt.Println("  govm install 1.21      Install Go 1.21.x (latest)")
 	fmt.Println("  govm use 1.20          Switch to Go 1.20.x (latest)")
 }
+
+func loadTUISettings(stderr io.Writer, defaultPath func() (string, error), load func(string) (config.Settings, error)) (string, config.Settings) {
+	settingsPath, err := defaultPath()
+	if err != nil {
+		fmt.Fprintf(stderr, "Warning: Failed to resolve settings path: %v\n", err)
+		return "", config.DefaultSettings()
+	}
+
+	settings, err := load(settingsPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "Warning: Failed to load settings from %s: %v\n", settingsPath, err)
+		return settingsPath, config.DefaultSettings()
+	}
+
+	return settingsPath, settings
+}
+
 func launchTUI() {
 	if !setup.IsShimInPath() {
 		setupModel := setup.New()
@@ -100,6 +119,9 @@ func launchTUI() {
 			os.Exit(1)
 		}
 	}
+	settingsPath, settings := loadTUISettings(os.Stderr, config.DefaultPath, config.Load)
+	model.ApplyTheme(styles.ThemeName(settings.Theme))
+
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = styles.SpinnerStyle
@@ -167,6 +189,7 @@ func launchTUI() {
 		InstalledTable: t,
 		Layout:         styles.LayoutNormal,
 		Deps:           model.NewDepsState(moduleDir, depTable),
+		Settings:       model.NewSettingsState(settingsPath, settings),
 	}
 	p := tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {

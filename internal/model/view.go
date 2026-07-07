@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -28,12 +29,14 @@ func (m Model) View() tea.View {
 	}
 
 	switch m.CurrentTab {
-	case 0:
+	case AvailableTab:
 		components = append(components, m.List.View())
-	case 1:
+	case InstalledTab:
 		components = append(components, m.InstalledTable.View())
-	case 2:
+	case DepsTab:
 		components = append(components, m.Deps.Table.View())
+	case SettingsTab:
+		components = append(components, renderSettingsView(m.Settings))
 	}
 
 	if status, statusType := m.composeStatus(); status != "" {
@@ -98,17 +101,18 @@ func renderHeader(width int, layout styles.LayoutMode) string {
 }
 
 func renderTabs(currentTab int, layout styles.LayoutMode) string {
-	var availableLabel, installedLabel, depsLabel string
+	var availableLabel, installedLabel, depsLabel, settingsLabel string
 	if layout == styles.LayoutCompact {
-		availableLabel, installedLabel, depsLabel = "All", "Local", "Deps"
+		availableLabel, installedLabel, depsLabel, settingsLabel = "All", "Local", "Deps", "Set"
 	} else {
-		availableLabel, installedLabel, depsLabel = "Available", "Installed", "Deps"
+		availableLabel, installedLabel, depsLabel, settingsLabel = "Available", "Installed", "Deps", "Settings"
 	}
 
 	tabs := []string{
-		renderTab(availableLabel, currentTab == 0),
-		renderTab(installedLabel, currentTab == 1),
-		renderTab(depsLabel, currentTab == 2),
+		renderTab(availableLabel, currentTab == AvailableTab),
+		renderTab(installedLabel, currentTab == InstalledTab),
+		renderTab(depsLabel, currentTab == DepsTab),
+		renderTab(settingsLabel, currentTab == SettingsTab),
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Left, tabs...)
 }
@@ -143,6 +147,36 @@ func renderStatus(messageType, message string, width int) string {
 	}
 
 	return style.Width(width).Render(fmt.Sprintf("%s %s", icon, message))
+}
+
+func renderSettingsView(settings SettingsState) string {
+	values := config.Normalize(settings.Values)
+	rows := []string{
+		fmt.Sprintf("Deps display: %s", depsDisplayLabel(values.DepsDisplay)),
+		fmt.Sprintf("Theme: %s", themeLabel(values.Theme)),
+	}
+	for i, row := range rows {
+		prefix := "  "
+		if i == settings.Cursor {
+			prefix = "> "
+		}
+		rows[i] = prefix + row
+	}
+	return strings.Join(rows, "\n")
+}
+
+func depsDisplayLabel(mode config.DepsDisplayMode) string {
+	if mode == config.DepsDisplayAll {
+		return "All"
+	}
+	return "Direct only"
+}
+
+func themeLabel(name config.ThemeName) string {
+	if name == config.ThemeLight {
+		return "Light"
+	}
+	return "Current"
 }
 
 func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChecks, confirmingRollback bool, width int, layout styles.LayoutMode) string {
@@ -180,7 +214,7 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			{"n", "cancel"},
 			{"q", "quit"},
 		}
-	} else if currentTab == 0 {
+	} else if currentTab == AvailableTab {
 		if layout == styles.LayoutCompact {
 			hints = [][2]string{
 				{"i", "inst"},
@@ -199,7 +233,7 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 				{"q", "quit"},
 			}
 		}
-	} else if currentTab == 2 {
+	} else if currentTab == DepsTab {
 		if layout == styles.LayoutCompact {
 			hints = [][2]string{
 				{"r", "check"},
@@ -211,6 +245,22 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			hints = [][2]string{
 				{"r", "check updates"},
 				{"u", "update"},
+				{"tab", "switch"},
+				{"q", "quit"},
+			}
+		}
+	} else if currentTab == SettingsTab {
+		if layout == styles.LayoutCompact {
+			hints = [][2]string{
+				{"↑/↓", "move"},
+				{"enter", "tog"},
+				{"tab", "sw"},
+				{"q", "quit"},
+			}
+		} else {
+			hints = [][2]string{
+				{"↑/↓", "move"},
+				{"enter", "toggle"},
 				{"tab", "switch"},
 				{"q", "quit"},
 			}

@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -67,6 +68,7 @@ func newTestModel(t *testing.T) Model {
 		GoVersionsDir:  filepath.Join(home, ".govm", "versions"),
 		InstalledTable: tbl,
 		Deps:           NewDepsState("", depTbl),
+		Settings:       NewSettingsState(filepath.Join(home, ".config", "govm", "settings.json"), config.DefaultSettings()),
 		Message:        "Successfully installed Go 1.24.4",
 		MessageType:    "success",
 		Layout:         styles.LayoutWide,
@@ -123,32 +125,140 @@ func TestWindowSizeMsgKeepsContentSizesPositive(t *testing.T) {
 	}
 }
 
-func TestTabSwitchingCyclesThroughThreeTabs(t *testing.T) {
+func TestTabSwitchingCyclesThroughFourTabs(t *testing.T) {
 	m := newTestModel(t)
 
-	if m.CurrentTab != 0 {
-		t.Fatalf("expected initial tab 0, got %d", m.CurrentTab)
+	if m.CurrentTab != AvailableTab {
+		t.Fatalf("expected initial tab %d, got %d", AvailableTab, m.CurrentTab)
 	}
 
-	// tab → 1
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
-	if m.CurrentTab != 1 {
-		t.Fatalf("expected tab 1 after first switch, got %d", m.CurrentTab)
+	if m.CurrentTab != InstalledTab {
+		t.Fatalf("expected installed tab after first switch, got %d", m.CurrentTab)
 	}
 
-	// tab → 2
 	updated, _ = m.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
-	if m.CurrentTab != 2 {
-		t.Fatalf("expected tab 2 after second switch, got %d", m.CurrentTab)
+	if m.CurrentTab != DepsTab {
+		t.Fatalf("expected deps tab after second switch, got %d", m.CurrentTab)
 	}
 
-	// tab → 0
 	updated, _ = m.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
-	if m.CurrentTab != 0 {
-		t.Fatalf("expected tab 0 after third switch, got %d", m.CurrentTab)
+	if m.CurrentTab != SettingsTab {
+		t.Fatalf("expected settings tab after third switch, got %d", m.CurrentTab)
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: '\t'})
+	m = updated.(Model)
+	if m.CurrentTab != AvailableTab {
+		t.Fatalf("expected available tab after fourth switch, got %d", m.CurrentTab)
+	}
+}
+
+func TestSettingsTabRendersRowsAndHelp(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+
+	view := stripANSI(m.View().Content)
+
+	for _, want := range []string{
+		"Settings",
+		"Deps display: Direct only",
+		"Theme: Current",
+		"↑/↓",
+		"enter",
+		"tab",
+		"q",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected settings view to contain %q, got:\n%s", want, view)
+		}
+	}
+}
+
+func TestSettingsToggleDepsDisplayUpdatesDependencyRows(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+	updated, _ := m.Update(utils.DependenciesMsg{
+		{Path: "github.com/example/direct", Version: "v1.0.0"},
+		{Path: "github.com/example/indirect", Version: "v1.0.0", Indirect: true},
+	})
+	m = updated.(Model)
+
+	if rows := m.Deps.Table.Rows(); len(rows) != 1 {
+		t.Fatalf("expected default direct-only view to show 1 row, got %d", len(rows))
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.Settings.Values.DepsDisplay != config.DepsDisplayAll {
+		t.Fatalf("expected deps display all, got %q", m.Settings.Values.DepsDisplay)
+	}
+	if rows := m.Deps.Table.Rows(); len(rows) != 2 {
+		t.Fatalf("expected all deps view to show 2 rows, got %d", len(rows))
+	}
+	if m.MessageType == "error" {
+		t.Fatalf("expected non-error message after save, got %q: %s", m.MessageType, m.Message)
+	}
+}
+
+func TestSettingsToggleThemeChangesStateAndMessage(t *testing.T) {
+	t.Cleanup(func() {
+		ApplyTheme(styles.ThemeCurrent)
+	})
+	ApplyTheme(styles.ThemeCurrent)
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+	m.Settings.Cursor = 1
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: ' '})
+	m = updated.(Model)
+
+	if m.Settings.Values.Theme != config.ThemeLight {
+		t.Fatalf("expected theme light, got %q", m.Settings.Values.Theme)
+	}
+	if m.MessageType == "error" || m.Message == "" {
+		t.Fatalf("expected non-error message after theme save, got %q: %s", m.MessageType, m.Message)
+	}
+	if got := styles.CurrentTheme(); got != styles.ThemeLight {
+		t.Fatalf("expected runtime theme light, got %q", got)
+	}
+}
+
+func TestApplyThemeRebuildsDependencyDialogStyles(t *testing.T) {
+	t.Cleanup(func() {
+		ApplyTheme(styles.ThemeCurrent)
+	})
+
+	ApplyTheme(styles.ThemeCurrent)
+	currentDialog := renderDependencyChecksDialog(true)
+
+	if got := ApplyTheme(styles.ThemeLight); got != styles.ThemeLight {
+		t.Fatalf("expected light theme, got %q", got)
+	}
+
+	lightDialog := renderDependencyChecksDialog(true)
+	if lightDialog == currentDialog {
+		t.Fatal("expected light theme to change dependency dialog output")
+	}
+}
+
+func TestSettingsSaveErrorShowsErrorMessage(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+	m.Settings.Path = t.TempDir()
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+
+	if m.MessageType != "error" {
+		t.Fatalf("expected error message type, got %q", m.MessageType)
+	}
+	if !strings.Contains(m.Message, "settings") {
+		t.Fatalf("expected settings save error message, got %q", m.Message)
 	}
 }
 
@@ -224,19 +334,15 @@ func TestDependenciesMsgPopulatesTable(t *testing.T) {
 	}
 
 	rows := got.Deps.Table.Rows()
-	if len(rows) != 3 {
-		t.Fatalf("expected 3 rows in table, got %d", len(rows))
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 direct rows in table, got %d", len(rows))
 	}
 
-	// Check statuses
 	if rows[0][3] != "update avail" {
 		t.Fatalf("expected 'update avail' status, got %q", rows[0][3])
 	}
-	if rows[1][3] != "indirect" {
-		t.Fatalf("expected 'indirect' status, got %q", rows[1][3])
-	}
-	if rows[2][3] != "current" {
-		t.Fatalf("expected 'current' status, got %q", rows[2][3])
+	if rows[1][3] != "current" {
+		t.Fatalf("expected 'current' status, got %q", rows[1][3])
 	}
 }
 
@@ -455,6 +561,7 @@ func TestDependenciesUpdatedMsgUpdatesState(t *testing.T) {
 
 func TestDependencyTableIndirectUpdateStatus(t *testing.T) {
 	m := newTestModel(t)
+	m.Settings.Values.DepsDisplay = config.DepsDisplayAll
 
 	deps := utils.DependenciesMsg{
 		{Path: "indirect-with-update", Version: "v0.5.0", Latest: "v0.6.0", Indirect: true},
@@ -621,6 +728,7 @@ func TestDependencyTableColumns_AllLayouts(t *testing.T) {
 
 func TestUpdateDependencyTable_StatusPriorities(t *testing.T) {
 	m := newTestModel(t)
+	m.Settings.Values.DepsDisplay = config.DepsDisplayAll
 
 	deps := utils.DependenciesMsg{
 		{Path: "err", Version: "v1.0.0", Latest: "v1.1.0", Error: "boom"},

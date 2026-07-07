@@ -10,44 +10,57 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
-// Static styles for the dependency update dialogs. These are computed
-// once at package init rather than on every render call, which
-// previously recreated four `lipgloss.NewStyle()` values plus the
-// wrapper border per View().
+// Static styles for the dependency update dialogs. They are recomputed only
+// when the user changes the active theme.
 var (
+	dialogTitleStyle    lipgloss.Style
+	dialogWarningStyle  lipgloss.Style
+	dialogBodyStyle     lipgloss.Style
+	dialogMutedStyle    lipgloss.Style
+	dialogActiveStyle   lipgloss.Style
+	dialogInactiveStyle lipgloss.Style
+	dialogBoxStyle      lipgloss.Style
+	dialogErrorBoxStyle lipgloss.Style
+)
+
+func init() {
+	rebuildDialogStyles()
+}
+
+func rebuildDialogStyles() {
 	dialogTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(styles.Warning).
-				Padding(0, 1)
+		Bold(true).
+		Foreground(styles.Warning).
+		Padding(0, 1)
 
 	dialogWarningStyle = styles.StatusWarningStyle
-	dialogBodyStyle    = lipgloss.NewStyle().Padding(0, 1)
-	dialogMutedStyle   = lipgloss.NewStyle().
-				Foreground(styles.Muted).
-				Padding(0, 1)
+	dialogBodyStyle = lipgloss.NewStyle().Padding(0, 1)
+	dialogMutedStyle = lipgloss.NewStyle().
+		Foreground(styles.Muted).
+		Padding(0, 1)
 
 	dialogActiveStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(styles.Primary).
-				Bold(true).
-				Padding(0, 2)
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(styles.Primary).
+		Bold(true).
+		Padding(0, 2)
 
 	dialogInactiveStyle = lipgloss.NewStyle().
-				Foreground(styles.Muted).
-				Padding(0, 2)
+		Foreground(styles.Muted).
+		Padding(0, 2)
 
 	dialogBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(styles.Warning).
-			Padding(1, 2).
-			Width(64)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Warning).
+		Padding(1, 2).
+		Width(64)
 
 	dialogErrorBoxStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(styles.Error).
-				Padding(1, 2).
-				Width(64)
-)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(styles.Error).
+		Padding(1, 2).
+		Width(64)
+}
 
 const maxDependencyListLines = 6
 

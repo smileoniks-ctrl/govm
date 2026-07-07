@@ -5,8 +5,17 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
+)
+
+const (
+	AvailableTab = iota
+	InstalledTab
+	DepsTab
+	SettingsTab
+	tabCount
 )
 
 type Model struct {
@@ -34,7 +43,8 @@ type Model struct {
 	// Deps groups every field and state machine flag related to the
 	// "Deps" tab. Use the helpers in deps_state.go to keep the
 	// main Model surface small.
-	Deps DepsState
+	Deps     DepsState
+	Settings SettingsState
 }
 
 func (m Model) Init() tea.Cmd {
@@ -62,4 +72,8 @@ func (m Model) viewWidth() int {
 		return m.List.Width()
 	}
 	return 80
+}
+
+func (m Model) normalizedSettings() config.Settings {
+	return config.Normalize(m.Settings.Values)
 }

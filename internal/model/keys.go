@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -17,6 +18,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "tab":
 		return m.handleTabKey()
+	}
+	if m.CurrentTab == SettingsTab {
+		return m.handleSettingsKey(msg)
+	}
+	switch msg.String() {
 	case "i":
 		return m.handleInstallKey()
 	case "u":
@@ -34,9 +40,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleTabKey() (tea.Model, tea.Cmd) {
-	m.CurrentTab = (m.CurrentTab + 1) % 3
+	m.CurrentTab = (m.CurrentTab + 1) % tabCount
 	// Lazy-load deps on first visit.
-	if m.CurrentTab == 2 && !m.Deps.Loaded {
+	if m.CurrentTab == DepsTab && !m.Deps.Loaded {
 		m.Deps.Checking = true
 		return m, utils.ListModuleDependencies(m.Deps.ModuleDir)
 	}
@@ -44,7 +50,7 @@ func (m Model) handleTabKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleInstallKey() (tea.Model, tea.Cmd) {
-	if m.CurrentTab != 0 {
+	if m.CurrentTab != AvailableTab {
 		return m, nil
 	}
 	selected := m.selectedItem()
@@ -63,7 +69,7 @@ func (m Model) handleInstallKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
-	if m.CurrentTab == 0 {
+	if m.CurrentTab == AvailableTab {
 		selected := m.selectedItem()
 		if selected != nil {
 			for _, v := range m.Versions {
@@ -78,7 +84,7 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 		m.MessageType = "error"
 		return m, nil
 	}
-	if m.CurrentTab == 2 && m.Deps.Loaded && !m.Deps.Updating {
+	if m.CurrentTab == DepsTab && m.Deps.Loaded && !m.Deps.Updating {
 		updatable := utils.UpdatableDirectDependencies(m.Deps.Dependencies)
 		if len(updatable) == 0 {
 			m.Message = "No direct dependency updates available."
@@ -95,7 +101,7 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
-	if m.CurrentTab == 2 {
+	if m.CurrentTab == DepsTab {
 		m.Deps.Checking = true
 		m.Message = "Checking for dependency updates..."
 		m.MessageType = "info"
@@ -107,7 +113,7 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleDeleteKey() (tea.Model, tea.Cmd) {
-	if m.CurrentTab != 0 && m.CurrentTab != 1 {
+	if m.CurrentTab != AvailableTab && m.CurrentTab != InstalledTab {
 		return m, nil
 	}
 	selected := m.selectedItem()
@@ -128,11 +134,63 @@ func (m Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if m.CurrentTab == 0 {
+	if m.CurrentTab == AvailableTab {
 		m.Message = "This version is not installed."
 		m.MessageType = "error"
 	}
 	return m, nil
+}
+
+func (m Model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		m.Settings.MoveUp()
+	case "down", "j":
+		m.Settings.MoveDown()
+	case "enter", "space", "left", "right", "h", "l":
+		m.toggleSelectedSetting()
+	}
+	return m, nil
+}
+
+func (m *Model) toggleSelectedSetting() {
+	m.Settings.Values = config.Normalize(m.Settings.Values)
+	switch m.Settings.Cursor {
+	case 0:
+		if m.Settings.Values.DepsDisplay == config.DepsDisplayDirect {
+			m.Settings.Values.DepsDisplay = config.DepsDisplayAll
+		} else {
+			m.Settings.Values.DepsDisplay = config.DepsDisplayDirect
+		}
+		m.updateDependencyTable()
+	case 1:
+		if m.Settings.Values.Theme == config.ThemeCurrent {
+			m.Settings.Values.Theme = config.ThemeLight
+		} else {
+			m.Settings.Values.Theme = config.ThemeCurrent
+		}
+		m.applyRuntimeTheme()
+	}
+	m.saveSettings()
+}
+
+func (m *Model) applyRuntimeTheme() {
+	ApplyTheme(styles.ThemeName(m.Settings.Values.Theme))
+	m.Spinner.Style = styles.SpinnerStyle
+	m.InstalledTable.SetStyles(tableStyles())
+	m.Deps.Table.SetStyles(tableStyles())
+	delegate := listDefaultDelegate()
+	m.List.SetDelegate(delegate)
+}
+
+func (m *Model) saveSettings() {
+	if err := config.Save(m.Settings.Path, m.Settings.Values); err != nil {
+		m.Message = fmt.Sprintf("Failed to save settings: %v", err)
+		m.MessageType = "error"
+		return
+	}
+	m.Message = "Settings saved."
+	m.MessageType = "info"
 }
 
 func (m Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
