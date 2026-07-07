@@ -215,6 +215,29 @@ Once you confirm, GoVM:
 
 `esc` cancels or skips each dialog, and you can quit at any time with `q`/`ctrl+c`.
 
+#### Go dependency commands
+
+The same dependency workflow is also available from the command line as
+`govm deps <list|check|update>`. The commands run in the current working
+directory and follow the same snapshot/update/checks/rollback model that
+the TUI uses.
+
+```bash
+# List current module dependencies
+govm deps list
+
+# Check for available updates (no changes)
+govm deps check
+
+# Interactively update direct dependencies, run checks, and roll back
+# on failure (mirrors the TUI Deps tab)
+govm deps update
+```
+
+`govm deps update` prompts for confirmation before each step. The default
+for every prompt is `Y` (yes), including the rollback prompt, matching
+the TUI behaviour where the safe option is the default.
+
 ### Settings
 
 The **Settings** tab lets you customise GoVM's behaviour. Settings are saved automatically whenever you change them and persist between sessions.
