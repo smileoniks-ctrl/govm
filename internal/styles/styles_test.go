@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -37,5 +39,58 @@ func TestItemDescriptionReturnsSecondaryText(t *testing.T) {
 
 	if got := item.Description(); got != "go1.24.4.darwin-arm64.tar.gz" {
 		t.Fatalf("expected description to preserve secondary text, got %q", got)
+	}
+}
+
+func TestApplyThemeFallsBackToCurrentForUnknownTheme(t *testing.T) {
+	t.Cleanup(func() {
+		ApplyTheme(ThemeCurrent)
+	})
+
+	if got := ApplyTheme(ThemeName("unknown")); got != ThemeCurrent {
+		t.Fatalf("expected unknown theme to fall back to %q, got %q", ThemeCurrent, got)
+	}
+
+	if got := CurrentTheme(); got != ThemeCurrent {
+		t.Fatalf("expected current theme to be %q, got %q", ThemeCurrent, got)
+	}
+}
+
+func TestApplyThemeCurrentRestoresInstalledBadgeForeground(t *testing.T) {
+	t.Cleanup(func() {
+		ApplyTheme(ThemeCurrent)
+	})
+
+	ApplyTheme(ThemeCurrent)
+
+	if got, want := InstalledBadgeStyle.GetForeground(), lipgloss.Color("#F8FAFC"); got != want {
+		t.Fatalf("expected installed badge foreground to be %q, got %q", want, got)
+	}
+}
+
+func TestApplyThemeLightChangesAndCurrentRestoresRenderedOutput(t *testing.T) {
+	t.Cleanup(func() {
+		ApplyTheme(ThemeCurrent)
+	})
+
+	ApplyTheme(ThemeCurrent)
+	currentOutput := TitleStyle.Render("GoVM")
+
+	if got := ApplyTheme(ThemeLight); got != ThemeLight {
+		t.Fatalf("expected light theme to apply as %q, got %q", ThemeLight, got)
+	}
+
+	lightOutput := TitleStyle.Render("GoVM")
+	if lightOutput == currentOutput {
+		t.Fatalf("expected light theme output to differ from current output")
+	}
+
+	if got := ApplyTheme(ThemeCurrent); got != ThemeCurrent {
+		t.Fatalf("expected current theme to apply as %q, got %q", ThemeCurrent, got)
+	}
+
+	restoredOutput := TitleStyle.Render("GoVM")
+	if restoredOutput != currentOutput {
+		t.Fatalf("expected current theme to restore output %q, got %q", currentOutput, restoredOutput)
 	}
 }
