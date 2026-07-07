@@ -280,7 +280,7 @@ brew tap smileoniks-ctrl/tap
 You can then install your package with:
 
 ```bash
-brew install govm
+brew install --cask govm
 ```
 
 ## Dependencies

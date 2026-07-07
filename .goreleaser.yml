@@ -25,7 +25,8 @@ archives:
       {{- .ProjectName }}_{{- .Version }}_{{- title .Os }}_{{- if eq .Arch "amd64" }}x86_64{{- else if eq .Arch "386" }}i386{{- else }}{{ .Arch }}{{ end }}{{- if .Arm }}v{{ .Arm }}{{ end -}}
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     builds_info:
       group: root
       owner: root
@@ -35,7 +36,7 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 
-brews:
+homebrew_casks:
   - name: "{{ .ProjectName }}"
     homepage: "https://github.com/smileoniks-ctrl/govm"
     description: "GoVM - Go Version Manager"
@@ -47,6 +48,10 @@ brews:
     commit_author:
       name: goreleaserbot
       email: goreleaser@goreleaser.com
-    directory: Formula
-    install: |
-      bin.install "{{ .ProjectName }}"
+    directory: Casks
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/govm"]
+          end
