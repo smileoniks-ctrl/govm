@@ -160,3 +160,41 @@ func yesNoLabel(defaultYes bool) string {
 	}
 	return "y/N"
 }
+
+// RunList prints the current module dependencies to Stdout.
+func (s *DepsService) RunList() error {
+	deps, err := s.ListDeps(s.ModuleDir)
+	if err != nil {
+		return fmt.Errorf("failed to read dependencies: %w", err)
+	}
+	direct, indirect := 0, 0
+	for _, d := range deps {
+		if d.Indirect {
+			indirect++
+		} else {
+			direct++
+		}
+	}
+	fmt.Fprintf(s.Stdout, "🔍 Reading module dependencies in %s...\n\n", s.ModuleDir)
+	if len(deps) == 0 {
+		fmt.Fprintln(s.Stdout, "  (no dependencies)")
+	} else {
+		for _, line := range formatDepRows(deps) {
+			fmt.Fprintf(s.Stdout, "  %s\n", line)
+		}
+	}
+	fmt.Fprintf(s.Stdout, "\n✅ %d direct, %d indirect dependencies.\n", direct, indirect)
+	return nil
+}
+
+func formatDepRows(deps []utils.ModuleDependency) []string {
+	rows := make([]string, 0, len(deps))
+	for _, d := range deps {
+		kind := "direct"
+		if d.Indirect {
+			kind = "indirect"
+		}
+		rows = append(rows, fmt.Sprintf("%s\t%s\t%s", d.Path, d.Version, kind))
+	}
+	return rows
+}
