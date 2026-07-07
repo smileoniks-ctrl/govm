@@ -36,6 +36,26 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "n", "N":
 		return m.handleDeleteConfirmNo()
 	}
+	return m.handleActiveComponentKey(msg)
+}
+
+func (m Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "down", "k", "j":
+	default:
+		return m, nil
+	}
+
+	switch m.CurrentTab {
+	case AvailableTab:
+		var cmd tea.Cmd
+		m.List, cmd = m.List.Update(msg)
+		return m, cmd
+	case InstalledTab:
+		var cmd tea.Cmd
+		m.InstalledTable, cmd = m.InstalledTable.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 

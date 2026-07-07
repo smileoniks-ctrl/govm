@@ -157,6 +157,53 @@ func TestTabSwitchingCyclesThroughFourTabs(t *testing.T) {
 	}
 }
 
+func TestAvailableTabArrowKeysMoveListSelection(t *testing.T) {
+	m := newTestModel(t)
+	m.List.SetItems([]list.Item{
+		styles.Item{Name: "1.24.4"},
+		styles.Item{Name: "1.25.0"},
+	})
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updated.(Model)
+
+	if got := m.List.Index(); got != 1 {
+		t.Fatalf("expected list selection to move down to index 1, got %d", got)
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = updated.(Model)
+
+	if got := m.List.Index(); got != 0 {
+		t.Fatalf("expected list selection to move up to index 0, got %d", got)
+	}
+}
+
+func TestInstalledTabArrowKeysMoveTableCursor(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = InstalledTab
+	m.Versions = []utils.GoVersion{
+		{Version: "1.24.4", Installed: true, Path: "/p/1.24.4"},
+		{Version: "1.25.0", Installed: true, Path: "/p/1.25.0"},
+	}
+	m.updateInstalledTable()
+	m.InstalledTable.Focus()
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updated.(Model)
+
+	if got := m.InstalledTable.Cursor(); got != 1 {
+		t.Fatalf("expected installed table cursor to move down to index 1, got %d", got)
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = updated.(Model)
+
+	if got := m.InstalledTable.Cursor(); got != 0 {
+		t.Fatalf("expected installed table cursor to move up to index 0, got %d", got)
+	}
+}
+
 func TestSettingsTabRendersRowsAndHelp(t *testing.T) {
 	m := newTestModel(t)
 	m.CurrentTab = SettingsTab
