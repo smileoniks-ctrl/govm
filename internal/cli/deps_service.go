@@ -198,3 +198,51 @@ func formatDepRows(deps []utils.ModuleDependency) []string {
 	}
 	return rows
 }
+
+// RunCheck prints the dependencies and marks available updates.
+func (s *DepsService) RunCheck() error {
+	deps, err := s.CheckDeps(s.ModuleDir)
+	if err != nil {
+		return fmt.Errorf("failed to check dependencies: %w", err)
+	}
+	updates := countDirectUpdates(deps)
+	fmt.Fprintf(s.Stdout, "🔍 Checking available updates in %s...\n\n", s.ModuleDir)
+	if len(deps) == 0 {
+		fmt.Fprintln(s.Stdout, "  (no dependencies)")
+	} else {
+		for _, line := range formatCheckRows(deps) {
+			fmt.Fprintf(s.Stdout, "  %s\n", line)
+		}
+	}
+	if updates == 0 {
+		fmt.Fprintln(s.Stdout, "\n✅ 0 direct updates available.")
+	} else {
+		fmt.Fprintf(s.Stdout, "\n📦 %d direct update(s) available.\n", updates)
+	}
+	return nil
+}
+
+func countDirectUpdates(deps []utils.ModuleDependency) int {
+	return len(utils.UpdatableDirectDependencies(deps))
+}
+
+func formatCheckRows(deps []utils.ModuleDependency) []string {
+	rows := make([]string, 0, len(deps))
+	for _, d := range deps {
+		status := "current"
+		version := d.Version
+		switch {
+		case d.Error != "":
+			status = "error: " + d.Error
+		case d.Deprecated != "" && d.Latest != "" && d.Latest != d.Version:
+			status = "update available (deprecated)"
+		case d.Latest != "" && d.Latest != d.Version:
+			status = "update available"
+			version = fmt.Sprintf("%s → %s", d.Version, d.Latest)
+		case d.Deprecated != "":
+			status = "deprecated"
+		}
+		rows = append(rows, fmt.Sprintf("%s\t%s\t%s", d.Path, version, status))
+	}
+	return rows
+}
