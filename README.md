@@ -20,6 +20,8 @@ GoVM is a modern tool for managing multiple Go versions on your system. It featu
 - Supports partial version numbers (e.g., `1.21` for latest 1.21.x) and `go` prefix (e.g., `go1.21`)
 - Go module dependency viewer built into the TUI
 - Dependency update flow with a pre-update snapshot, optional `go test ./...` and `go vet ./...` checks, and one-key rollback to the pre-update state if checks fail
+- Settings tab with a dependency display filter (`Direct only` / `All`) and runtime theme switching (`Current` / `Light`)
+- Settings persist between sessions and are stored in a platform-specific config file
 - Resilient error handling: the TUI remains responsive (and closable) when go.dev is unreachable
 - Works on macOS, Linux, and Windows (darwin/linux/windows, amd64/arm64)
 
@@ -89,17 +91,18 @@ Launch the interactive TUI by running govm without arguments:
 govm
 ```
 
-The TUI has three tabs that you cycle through with `Tab`:
+The TUI has four tabs that you cycle through with `Tab`:
 
 - **Available** - all Go versions available for download from go.dev
 - **Installed** - Go versions installed locally on your system
 - **Deps** - Go module dependencies of the current working directory
+- **Settings** - dependency display filter and theme toggle
 
 The TUI layout is responsive and adjusts to your terminal width:
 
 | Width | Mode | Behavior |
 |---|---|---|
-| `< 60` | Compact | Minimal padding, short tab labels (`All`, `Local`, `Deps`), short help hints |
+| `< 60` | Compact | Minimal padding, short tab labels (`All`, `Local`, `Deps`, `Set`), short help hints |
 | `60-129` | Normal | Bordered layout, full labels |
 | `>= 130` | Wide | Larger padding, full borders |
 
@@ -109,11 +112,13 @@ The TUI header shows the GoVM version so you always know which build is running.
 
 | Key | Action |
 |---|---|
-| `Tab` | Cycle between Available, Installed, and Deps tabs |
+| `Tab` | Cycle between Available, Installed, Deps, and Settings tabs |
 | `i` | Install the selected version (Available tab) |
 | `u` | Switch to the selected version (Available tab) or update direct dependencies (Deps tab) |
 | `d` | Delete the selected installed version with confirmation (Available/Installed tabs) |
 | `r` | Refresh available versions from go.dev (Available tab) or check for dependency updates online (Deps tab) |
+| `↑/↓`, `k/j` | Move the cursor between settings (Settings tab) |
+| `enter`/`space` | Toggle the highlighted setting (Settings tab) |
 | `q`, `ctrl+c` | Quit |
 
 When deleting a version, you will be prompted to confirm with `y` or cancel with `n`. The active version cannot be deleted.
@@ -210,6 +215,34 @@ Once you confirm, GoVM:
 
 `esc` cancels or skips each dialog, and you can quit at any time with `q`/`ctrl+c`.
 
+### Settings
+
+The **Settings** tab lets you customise GoVM's behaviour. Settings are saved automatically whenever you change them and persist between sessions.
+
+| Setting | Values | Default | Effect |
+|---|---|---|---|
+| Deps display | `Direct only` / `All` | `Direct only` | Controls which dependencies are shown on the Deps tab. `Direct only` hides indirect dependencies; `All` shows every dependency. |
+| Theme | `Current` / `Light` | `Current` | Switches the TUI colour palette. `Current` is the dark theme; `Light` is a light-background theme. The change is applied immediately. |
+
+#### Navigating the Settings tab
+
+| Key | Action |
+|---|---|
+| `↑/↓`, `k/j` | Move the cursor between settings |
+| `enter`, `space`, `←/→`, `h/l` | Toggle the highlighted setting |
+| `tab` | Switch to the next tab |
+
+#### Settings file location
+
+Settings are stored in `settings.json` inside the platform's user config directory:
+
+| OS | Path |
+|---|---|
+| Linux / macOS | `~/.config/govm/settings.json` |
+| Windows | `%AppData%\govm\settings.json` |
+
+The file is written atomically (temp file + rename) and is safe to edit manually. On startup GoVM loads the saved theme and applies it before the TUI is rendered.
+
 ## How It Works
 
 GoVM downloads Go versions from the official go.dev website and installs them in `~/.govm/versions`. It uses a "shim" approach:
@@ -219,6 +252,7 @@ GoVM downloads Go versions from the official go.dev website and installs them in
 - Switching versions simply updates these wrappers to point to a different installation
 - The currently active version is tracked in `~/.govm/active_version`
 - Downloaded archives are temporarily stored in `~/.govm/downloads` and cleaned up after extraction
+- User settings (theme, deps display filter) are stored in `settings.json` in the user config directory (see [Settings](#settings))
 
 This ensures a seamless experience without needing to manually update environment variables or source scripts each time you switch versions.
 
