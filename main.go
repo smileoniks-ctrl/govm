@@ -73,6 +73,12 @@ func handleCommandLine() {
 		cli.DeleteVersion(version)
 	case "list":
 		cli.ListVersions()
+	case "deps":
+		if len(os.Args) < 3 {
+			cli.DepsCommand("help")
+			return
+		}
+		cli.DepsCommand(os.Args[2])
 	case "help":
 		printUsage()
 	default:
@@ -88,10 +94,14 @@ func printUsage() {
 	fmt.Println("  govm use <version>     Switch to a specific Go version")
 	fmt.Println("  govm delete <version>  Delete a specific Go version")
 	fmt.Println("  govm list              List installed Go versions")
+	fmt.Println("  govm deps list         List current module dependencies")
+	fmt.Println("  govm deps check        Check for available dependency updates")
+	fmt.Println("  govm deps update       Update direct dependencies (interactive)")
 	fmt.Println("  govm help              Show this help message")
 	fmt.Println("\nExamples:")
 	fmt.Println("  govm install 1.21      Install Go 1.21.x (latest)")
 	fmt.Println("  govm use 1.20          Switch to Go 1.20.x (latest)")
+	fmt.Println("  govm deps update       Update direct deps in the current module")
 }
 
 func loadTUISettings(stderr io.Writer, defaultPath func() (string, error), load func(string) (config.Settings, error)) (string, config.Settings) {
