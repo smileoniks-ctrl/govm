@@ -43,6 +43,16 @@ func TestPrintUsageShowsVersion(t *testing.T) {
 	if !strings.Contains(output, "GoVM") {
 		t.Fatal("expected help output to mention GoVM")
 	}
+
+	for _, want := range []string{
+		"govm deps list",
+		"govm deps check",
+		"govm deps update",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected help output to contain %q, got:\n%s", want, output)
+		}
+	}
 }
 
 func TestLoadTUISettings(t *testing.T) {
