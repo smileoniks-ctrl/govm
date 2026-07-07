@@ -246,3 +246,105 @@ func formatCheckRows(deps []utils.ModuleDependency) []string {
 	}
 	return rows
 }
+
+// RunUpdate runs the full scenario: check, confirm, update, optional
+// checks, optional rollback.
+func (s *DepsService) RunUpdate() error {
+	fmt.Fprintf(s.Stdout, "🔍 Checking available updates in %s...\n", s.ModuleDir)
+	deps, err := s.CheckDeps(s.ModuleDir)
+	if err != nil {
+		return fmt.Errorf("failed to check dependencies: %w", err)
+	}
+	updatable := utils.UpdatableDirectDependencies(deps)
+	if len(updatable) == 0 {
+		fmt.Fprintln(s.Stdout, "ℹ️  No direct dependency updates available.")
+		return nil
+	}
+
+	fmt.Fprintf(s.Stdout, "\n⚠️  %d direct %s will be updated:\n",
+		len(updatable), pluralize(len(updatable), "dependency", "dependencies"))
+	for _, line := range formatUpdateEntries(buildUpdateEntries(updatable)) {
+		fmt.Fprintf(s.Stdout, "  - %s\n", line)
+	}
+	ok, err := s.Confirm("\nApply these updates?", true)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(s.Stdout, "🛑 Update canceled.")
+		return nil
+	}
+
+	updated, err := s.Update(s.ModuleDir, deps)
+	if err != nil {
+		return fmt.Errorf("update failed: %w", err)
+	}
+	fmt.Fprintf(s.Stdout, "✅ Updated %d direct %s.\n",
+		updated.Updated, pluralize(updated.Updated, "dependency", "dependencies"))
+	if updated.Snapshot == nil {
+		return fmt.Errorf("update completed without a rollback snapshot")
+	}
+
+	ok, err = s.Confirm("\n🧪 Run checks (go test ./... and go vet ./...)?", true)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(s.Stdout, "ℹ️  Update complete. Checks skipped.")
+		return nil
+	}
+
+	result, err := s.RunChecks(s.ModuleDir)
+	if err != nil {
+		return fmt.Errorf("checks failed to run: %w", err)
+	}
+	if result.OK {
+		fmt.Fprintln(s.Stdout, "✅ Checks passed.")
+		return nil
+	}
+
+	fmt.Fprintf(s.Stdout, "\n❌ Checks failed: %s\n", result.Command)
+	if result.Output != "" {
+		fmt.Fprintln(s.Stdout, result.Output)
+	}
+	ok, err = s.Confirm("\nRoll back to pre-update state?", true)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(s.Stdout, "⚠️  Update kept. Failed checks were not rolled back.")
+		return nil
+	}
+	if _, err := s.Rollback(s.ModuleDir, updated.Snapshot); err != nil {
+		return fmt.Errorf("rollback failed: %w", err)
+	}
+	fmt.Fprintln(s.Stdout, "✅ Rolled back to pre-update state.")
+	return nil
+}
+
+func buildUpdateEntries(deps []utils.ModuleDependency) []utils.DependencyUpdateEntry {
+	entries := make([]utils.DependencyUpdateEntry, 0, len(deps))
+	for _, d := range deps {
+		entries = append(entries, utils.DependencyUpdateEntry{
+			Path:       d.Path,
+			OldVersion: d.Version,
+			NewVersion: d.Latest,
+		})
+	}
+	return entries
+}
+
+func formatUpdateEntries(entries []utils.DependencyUpdateEntry) []string {
+	rows := make([]string, 0, len(entries))
+	for _, e := range entries {
+		rows = append(rows, fmt.Sprintf("%s  %s → %s", e.Path, e.OldVersion, e.NewVersion))
+	}
+	return rows
+}
+
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
