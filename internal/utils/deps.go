@@ -84,6 +84,31 @@ type DependencySnapshot struct {
 	Updatable []DependencyUpdateEntry
 }
 
+// ResolveModuleRoot returns the absolute path to the Go module root
+// containing startDir. It runs `go env GOMOD` with cmd.Dir = startDir
+// so the search walks up the directory tree from startDir. The
+// resolved module root is filepath.Dir of the go.mod path reported
+// by Go. When startDir is not inside a Go module (the command
+// fails, the output is empty, or it points at os.DevNull) a wrapped
+// error is returned mentioning startDir.
+func ResolveModuleRoot(startDir string) (string, error) {
+	cmd := exec.Command("go", "env", "GOMOD")
+	cmd.Dir = startDir
+	out, err := cmd.Output()
+	if err != nil {
+		exitErr, ok := err.(*exec.ExitError)
+		if ok && len(exitErr.Stderr) > 0 {
+			return "", fmt.Errorf("not in a Go module (%s): %s", startDir, strings.TrimSpace(string(exitErr.Stderr)))
+		}
+		return "", fmt.Errorf("not in a Go module (%s): %w", startDir, err)
+	}
+	gomod := strings.TrimSpace(string(out))
+	if gomod == "" || gomod == os.DevNull {
+		return "", fmt.Errorf("not in a Go module (%s)", startDir)
+	}
+	return filepath.Dir(gomod), nil
+}
+
 // SnapshotModuleFiles reads go.mod and go.sum from moduleDir and
 // returns a snapshot of their current contents. It does not run any
 // external command. Returns an error if go.mod is missing, since
@@ -182,7 +207,11 @@ func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency) tea.Cmd
 	}
 
 	return func() tea.Msg {
-		snap, err := SnapshotModuleFiles(moduleDir)
+		root, err := ResolveModuleRoot(moduleDir)
+		if err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+		snap, err := SnapshotModuleFiles(root)
 		if err != nil {
 			return DependencyErrMsg{Err: err}
 		}
@@ -194,20 +223,20 @@ func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency) tea.Cmd
 		}
 
 		getCmd := exec.Command("go", args...)
-		getCmd.Dir = moduleDir
+		getCmd.Dir = root
 		if out, err := getCmd.CombinedOutput(); err != nil {
 			return DependencyErrMsg{Err: fmt.Errorf("go get failed: %s: %w", strings.TrimSpace(string(out)), err)}
 		}
 
 		tidyCmd := exec.Command("go", "mod", "tidy")
-		tidyCmd.Dir = moduleDir
+		tidyCmd.Dir = root
 		if out, err := tidyCmd.CombinedOutput(); err != nil {
 			return DependencyErrMsg{Err: fmt.Errorf("go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
 		}
 
 		// Refresh dependency list with available updates so the user
 		// can see the new state in the table.
-		fresh := loadDependencies(moduleDir, true)
+		fresh := loadDependencies(root, true)
 		if errMsg, ok := fresh.(DependencyErrMsg); ok {
 			return errMsg
 		}
@@ -225,29 +254,51 @@ func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency) tea.Cmd
 }
 
 // ListModuleDependencies lists current module dependencies
-// without checking for updates online.
+// without checking for updates online. The provided moduleDir is
+// treated as a starting directory; the actual module root is
+// resolved via ResolveModuleRoot so the call works from any
+// subfolder of a Go module.
 func ListModuleDependencies(moduleDir string) tea.Cmd {
 	return func() tea.Msg {
-		return loadDependencies(moduleDir, false)
+		root, err := ResolveModuleRoot(moduleDir)
+		if err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+		return loadDependencies(root, false)
 	}
 }
 
 // CheckModuleDependencyUpdates lists module dependencies
-// and checks for available updates online.
+// and checks for available updates online. The provided moduleDir is
+// treated as a starting directory; the actual module root is
+// resolved via ResolveModuleRoot so the call works from any
+// subfolder of a Go module.
 func CheckModuleDependencyUpdates(moduleDir string) tea.Cmd {
 	return func() tea.Msg {
-		return loadDependencies(moduleDir, true)
+		root, err := ResolveModuleRoot(moduleDir)
+		if err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+		return loadDependencies(root, true)
 	}
 }
 
 // RunModuleDependencyChecks runs `go test ./...` followed by
-// `go vet ./...` in moduleDir. On success it returns
-// DependencyCheckResultMsg{OK: true}. On failure it returns
-// DependencyCheckResultMsg{OK: false, Command, Output} where Output is
-// the combined stdout/stderr of the failing command, trimmed to a
-// reasonable number of lines.
+// `go vet ./...` in the module that contains moduleDir. On success
+// it returns DependencyCheckResultMsg{OK: true}. On failure it
+// returns DependencyCheckResultMsg{OK: false, Command, Output}
+// where Output is the combined stdout/stderr of the failing
+// command, trimmed to a reasonable number of lines. The provided
+// moduleDir is treated as a starting directory; the actual module
+// root is resolved via ResolveModuleRoot so the call works from
+// any subfolder of a Go module.
 func RunModuleDependencyChecks(moduleDir string) tea.Cmd {
 	return func() tea.Msg {
+		root, err := ResolveModuleRoot(moduleDir)
+		if err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+
 		checks := []struct {
 			args    []string
 			command string
@@ -258,7 +309,7 @@ func RunModuleDependencyChecks(moduleDir string) tea.Cmd {
 
 		for _, c := range checks {
 			cmd := exec.Command("go", c.args...)
-			cmd.Dir = moduleDir
+			cmd.Dir = root
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				return DependencyCheckResultMsg{
@@ -275,20 +326,28 @@ func RunModuleDependencyChecks(moduleDir string) tea.Cmd {
 
 // RollbackModuleDependencies restores go.mod and go.sum from snap,
 // runs `go mod tidy` so the module cache and the restored files stay
-// consistent, and refreshes the dependency list.
+// consistent, and refreshes the dependency list. The provided
+// moduleDir is treated as a starting directory; the actual module
+// root is resolved via ResolveModuleRoot so the call works from any
+// subfolder of a Go module.
 func RollbackModuleDependencies(moduleDir string, snap *DependencySnapshot) tea.Cmd {
 	return func() tea.Msg {
-		if err := RestoreModuleFiles(moduleDir, snap); err != nil {
+		root, err := ResolveModuleRoot(moduleDir)
+		if err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+
+		if err := RestoreModuleFiles(root, snap); err != nil {
 			return DependencyErrMsg{Err: err}
 		}
 
 		tidyCmd := exec.Command("go", "mod", "tidy")
-		tidyCmd.Dir = moduleDir
+		tidyCmd.Dir = root
 		if out, err := tidyCmd.CombinedOutput(); err != nil {
 			return DependencyErrMsg{Err: fmt.Errorf("rollback go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
 		}
 
-		fresh := loadDependencies(moduleDir, true)
+		fresh := loadDependencies(root, true)
 		if errMsg, ok := fresh.(DependencyErrMsg); ok {
 			return errMsg
 		}

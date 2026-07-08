@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -246,5 +247,125 @@ func TestTrimOutput_ShortOutput(t *testing.T) {
 	}
 	if strings.Contains(out, "more lines") {
 		t.Fatalf("short output should not have truncation marker, got: %s", out)
+	}
+}
+
+// requireGoToolchain skips the test when the `go` toolchain is not
+// available on PATH. ResolveModuleRoot depends on `go env GOMOD`,
+// so the test cannot run without it. We do not need network access:
+// `go env GOMOD` is a local command.
+func requireGoToolchain(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("go toolchain not available: %v", err)
+	}
+}
+
+// evalSymlinks is a small helper that evaluates symlinks on a path
+// and fails the test on error. It is used to compare module roots
+// resiliently on systems where t.TempDir() may return a path that
+// traverses a symlink (e.g. /var -> /private/var on macOS).
+func evalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("eval symlinks %s: %v", path, err)
+	}
+	return resolved
+}
+
+func TestResolveModuleRoot_HappyPath(t *testing.T) {
+	requireGoToolchain(t)
+
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/test\n\ngo 1.26\n")
+
+	root, err := ResolveModuleRoot(dir)
+	if err != nil {
+		t.Fatalf("ResolveModuleRoot: %v", err)
+	}
+
+	want := evalSymlinks(t, dir)
+	got := evalSymlinks(t, root)
+	if got != want {
+		t.Fatalf("ResolveModuleRoot returned %q, want %q", got, want)
+	}
+}
+
+func TestResolveModuleRoot_FromSubfolder(t *testing.T) {
+	requireGoToolchain(t)
+
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/test\n\ngo 1.26\n")
+
+	subdir := filepath.Join(dir, "internal", "subpkg")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	root, err := ResolveModuleRoot(subdir)
+	if err != nil {
+		t.Fatalf("ResolveModuleRoot: %v", err)
+	}
+
+	want := evalSymlinks(t, dir)
+	got := evalSymlinks(t, root)
+	if got != want {
+		t.Fatalf("ResolveModuleRoot returned %q, want %q", got, want)
+	}
+}
+
+func TestResolveModuleRoot_NotInModule(t *testing.T) {
+	requireGoToolchain(t)
+
+	// t.TempDir() lives under os.TempDir() (e.g. /tmp or
+	// /var/folders/.../T/...) which is not inside any Go module, so
+	// `go env GOMOD` should report that the directory is not in a
+	// module.
+	dir := t.TempDir()
+
+	_, err := ResolveModuleRoot(dir)
+	if err == nil {
+		t.Fatal("expected an error for a directory that is not in a Go module")
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Fatalf("error %q must mention startDir %q", err, dir)
+	}
+	if !strings.Contains(err.Error(), "not in a Go module") {
+		t.Fatalf("error %q must mention that the startDir is not in a Go module", err)
+	}
+}
+
+func TestSnapshotModuleFiles_FindsGoModFromSubfolder(t *testing.T) {
+	requireGoToolchain(t)
+
+	dir := t.TempDir()
+	wantMod := "module example.com/test\n\ngo 1.26\n"
+	writeFile(t, dir, "go.mod", wantMod)
+
+	subdir := filepath.Join(dir, "pkg", "sub")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	// SnapshotModuleFiles requires a real module directory. The fix
+	// for the bug is that callers resolve the module root first via
+	// ResolveModuleRoot and then pass the resolved root into
+	// SnapshotModuleFiles, so a subfolder as the input no longer
+	// hides the go.mod.
+	root, err := ResolveModuleRoot(subdir)
+	if err != nil {
+		t.Fatalf("ResolveModuleRoot: %v", err)
+	}
+
+	snap, err := SnapshotModuleFiles(root)
+	if err != nil {
+		t.Fatalf("SnapshotModuleFiles: %v", err)
+	}
+	if !snap.ModFile.Exists {
+		t.Fatal("expected ModFile.Exists to be true")
+	}
+	if snap.ModFile.Content != wantMod {
+		t.Fatalf("ModFile.Content mismatch: got %q, want %q", snap.ModFile.Content, wantMod)
 	}
 }
