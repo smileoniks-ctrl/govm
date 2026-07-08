@@ -357,3 +357,26 @@ func TestRunUpdateRollbackError(t *testing.T) {
 		t.Fatalf("expected failure context, got:\n%s", stdout.String())
 	}
 }
+
+func TestDefaultConfirmReadsBufferedAnswersAcrossPrompts(t *testing.T) {
+	stdin := strings.NewReader("y\nn\nn\n")
+	stdout := &bytes.Buffer{}
+	confirm := defaultConfirm(stdin, stdout)
+
+	first, err := confirm("Apply updates?", true)
+	if err != nil {
+		t.Fatalf("first confirm: %v", err)
+	}
+	second, err := confirm("Run checks?", true)
+	if err != nil {
+		t.Fatalf("second confirm: %v", err)
+	}
+	third, err := confirm("Roll back?", true)
+	if err != nil {
+		t.Fatalf("third confirm: %v", err)
+	}
+
+	if first != true || second != false || third != false {
+		t.Fatalf("expected true, false, false; got %t, %t, %t", first, second, third)
+	}
+}

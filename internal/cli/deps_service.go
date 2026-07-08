@@ -123,13 +123,13 @@ func defaultRollback(moduleDir string, snap *utils.DependencySnapshot) (utils.De
 // defaultConfirm returns a Confirm implementation that prompts on
 // stdout and reads a single line from stdin.
 func defaultConfirm(stdin io.Reader, stdout io.Writer) func(string, bool) (bool, error) {
+	scanner := bufio.NewScanner(stdin)
 	return func(question string, defaultYes bool) (bool, error) {
 		prompt := fmt.Sprintf("%s [%s]: ", question, yesNoLabel(defaultYes))
 		for {
 			if _, err := io.WriteString(stdout, prompt); err != nil {
 				return false, err
 			}
-			scanner := bufio.NewScanner(stdin)
 			if !scanner.Scan() {
 				if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
 					return false, err
