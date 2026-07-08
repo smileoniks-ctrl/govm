@@ -3,12 +3,12 @@ package setup
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
 type Model struct {
@@ -21,8 +21,8 @@ type Model struct {
 }
 
 func New() Model {
-	homeDir, _ := os.UserHomeDir()
-	shimPath := filepath.Join(homeDir, ".govm", "shim")
+	resolver := paths.New()
+	shimPath, _ := resolver.ShimDir()
 
 	shellConfig := "~/.bashrc"
 	if runtime.GOOS == "windows" {
@@ -164,8 +164,11 @@ func max(a, b int) int {
 }
 
 func IsShimInPath() bool {
-	homeDir, _ := os.UserHomeDir()
-	shimDir := filepath.Join(homeDir, ".govm", "shim")
+	resolver := paths.New()
+	shimDir, err := resolver.ShimDir()
+	if err != nil {
+		return false
+	}
 
 	currentPath := os.Getenv("PATH")
 	pathSeparator := string(os.PathListSeparator)

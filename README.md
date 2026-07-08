@@ -257,14 +257,18 @@ The **Settings** tab lets you customise GoVM's behaviour. Settings are saved aut
 
 #### Settings file location
 
-Settings are stored in `settings.json` inside the platform's user config directory:
+Settings are stored in `settings.json` inside the GoVM home directory:
 
 | OS | Path |
 |---|---|
-| Linux / macOS | `~/.config/govm/settings.json` |
-| Windows | `%AppData%\govm\settings.json` |
+| Linux / macOS | `~/.govm/settings.json` |
+| Windows | `%USERPROFILE%\.govm\settings.json` |
 
 The file is written atomically (temp file + rename) and is safe to edit manually. On startup GoVM loads the saved theme and applies it before the TUI is rendered.
+
+#### Migrating existing settings
+
+If you are upgrading from an older govm, your `settings.json` lives in the platform user config directory (`~/.config/govm/settings.json` on Linux, `~/Library/Application Support/govm/settings.json` on macOS, `%AppData%\govm\settings.json` on Windows). The first launch of the new govm automatically moves that file to `~/.govm/settings.json` and removes the old copy. No manual action is required.
 
 ## How It Works
 
@@ -275,7 +279,7 @@ GoVM downloads Go versions from the official go.dev website and installs them in
 - Switching versions simply updates these wrappers to point to a different installation
 - The currently active version is tracked in `~/.govm/active_version`
 - Downloaded archives are temporarily stored in `~/.govm/downloads` and cleaned up after extraction
-- User settings (theme, deps display filter) are stored in `settings.json` in the user config directory (see [Settings](#settings))
+- User settings (theme, deps display filter) are stored in `~/.govm/settings.json` (see [Settings](#settings))
 
 This ensures a seamless experience without needing to manually update environment variables or source scripts each time you switch versions.
 

@@ -9,12 +9,12 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/cli"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/model"
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/setup"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -104,19 +104,12 @@ func printUsage() {
 	fmt.Println("  govm deps update       Update direct deps in the current module")
 }
 
-func loadTUISettings(stderr io.Writer, defaultPath func() (string, error), load func(string) (config.Settings, error)) (string, config.Settings) {
-	settingsPath, err := defaultPath()
+func loadTUISettings(stderr io.Writer, load func() (string, config.Settings, error)) (string, config.Settings) {
+	settingsPath, settings, err := load()
 	if err != nil {
-		fmt.Fprintf(stderr, "Warning: Failed to resolve settings path: %v\n", err)
+		fmt.Fprintf(stderr, "Warning: Failed to load settings: %v\n", err)
 		return "", config.DefaultSettings()
 	}
-
-	settings, err := load(settingsPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "Warning: Failed to load settings from %s: %v\n", settingsPath, err)
-		return settingsPath, config.DefaultSettings()
-	}
-
 	return settingsPath, settings
 }
 
@@ -129,7 +122,10 @@ func launchTUI() {
 			os.Exit(1)
 		}
 	}
-	settingsPath, settings := loadTUISettings(os.Stderr, config.DefaultPath, config.Load)
+	settingsPath, settings := loadTUISettings(os.Stderr, func() (string, config.Settings, error) {
+		path, s, _, err := config.LoadWithMigration()
+		return path, s, err
+	})
 	model.ApplyTheme(styles.ThemeName(settings.Theme))
 
 	s := spinner.New()
@@ -160,7 +156,12 @@ func launchTUI() {
 		fmt.Println("Error getting working directory:", err)
 		os.Exit(1)
 	}
-	goVersionsDir := filepath.Join(homeDir, ".govm", "versions")
+	resolver := paths.New()
+	goVersionsDir, err := resolver.VersionsDir()
+	if err != nil {
+		fmt.Println("Error resolving versions directory:", err)
+		os.Exit(1)
+	}
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = styles.TableSelectedStyle
 	delegate.Styles.SelectedDesc = styles.TableSelectedStyle
