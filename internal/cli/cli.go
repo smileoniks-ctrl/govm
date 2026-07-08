@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 	"os"
 	"path/filepath"
@@ -71,17 +72,21 @@ func UseVersion(version string) {
 }
 func ListVersions() {
 	fmt.Println("📋 Installed Go Versions:")
-	homeDir, err := os.UserHomeDir()
+	resolver := paths.New()
+	activeVersionFile, err := resolver.ActiveVersionFile()
 	if err != nil {
-		fmt.Printf("❌ Error getting home directory: %v\n", err)
+		fmt.Printf("❌ Error resolving active version path: %v\n", err)
 		return
 	}
 	activeVersion := ""
-	activeVersionFile := filepath.Join(homeDir, ".govm", "active_version")
 	if versionBytes, err := os.ReadFile(activeVersionFile); err == nil {
 		activeVersion = string(versionBytes)
 	}
-	goVersionsDir := filepath.Join(homeDir, ".govm", "versions")
+	goVersionsDir, err := resolver.VersionsDir()
+	if err != nil {
+		fmt.Printf("❌ Error resolving versions directory: %v\n", err)
+		return
+	}
 	if _, err := os.Stat(goVersionsDir); os.IsNotExist(err) {
 		fmt.Println("  No versions installed yet")
 		return
@@ -143,11 +148,11 @@ func findMatchingVersion(version string) (utils.GoVersion, error) {
 // installed govm versions directly from disk so the CLI works
 // without contacting go.dev.
 func findInstalledVersion(version string) (utils.GoVersion, error) {
-	homeDir, err := os.UserHomeDir()
+	resolver := paths.New()
+	goVersionsDir, err := resolver.VersionsDir()
 	if err != nil {
 		return utils.GoVersion{}, fmt.Errorf("failed to get home directory: %v", err)
 	}
-	goVersionsDir := filepath.Join(homeDir, ".govm", "versions")
 
 	query := utils.NormalizeGoVersionQuery(version)
 	exactPath := filepath.Join(goVersionsDir, "go"+query)
@@ -165,7 +170,7 @@ func findInstalledVersion(version string) (utils.GoVersion, error) {
 	}
 
 	var versions []string
-	var paths []string
+	var versionPaths []string
 	versionToPath := make(map[string]string)
 	for _, entry := range entries {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "go") {
@@ -173,8 +178,8 @@ func findInstalledVersion(version string) (utils.GoVersion, error) {
 		}
 		versionStr := strings.TrimPrefix(entry.Name(), "go")
 		versions = append(versions, versionStr)
-		paths = append(paths, filepath.Join(goVersionsDir, entry.Name()))
-		versionToPath[versionStr] = paths[len(paths)-1]
+		versionPaths = append(versionPaths, filepath.Join(goVersionsDir, entry.Name()))
+		versionToPath[versionStr] = versionPaths[len(versionPaths)-1]
 	}
 
 	matched, ok := utils.FindLatestGoVersion(versions, query)
@@ -196,13 +201,13 @@ func DeleteVersion(version string) {
 		return
 	}
 
-	homeDir, err := os.UserHomeDir()
+	resolver := paths.New()
+	activeVersionFile, err := resolver.ActiveVersionFile()
 	if err != nil {
 		fmt.Printf("❌ Failed to get home directory: %v\n", err)
 		return
 	}
 
-	activeVersionFile := filepath.Join(homeDir, ".govm", "active_version")
 	activeVersion := ""
 	if versionBytes, err := os.ReadFile(activeVersionFile); err == nil {
 		activeVersion = string(versionBytes)
@@ -230,5 +235,54 @@ func DeleteVersion(version string) {
 		fmt.Printf("❌ Failed to delete version: %v\n", msg)
 	case utils.DeleteCompleteMsg:
 		fmt.Printf("✅ Successfully deleted Go %s\n", matchedVersion.Version)
+	}
+}
+
+// DepsCommand routes `govm deps <subcommand>`.
+func DepsCommand(subcommand string) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("❌ Error getting working directory: %v\n", err)
+		return
+	}
+	switch subcommand {
+	case "list":
+		DepsList(cwd)
+	case "check":
+		DepsCheck(cwd)
+	case "update":
+		DepsUpdate(cwd)
+	case "help", "-h", "--help":
+		fmt.Println("Usage:")
+		fmt.Println("  govm deps list     List current module dependencies")
+		fmt.Println("  govm deps check    Check for available dependency updates")
+		fmt.Println("  govm deps update   Update direct dependencies (interactive)")
+	default:
+		fmt.Printf("Unknown deps subcommand: %s\n", subcommand)
+		fmt.Println("Run 'govm deps help' for usage.")
+	}
+}
+
+// DepsList prints the current dependencies of moduleDir.
+func DepsList(moduleDir string) {
+	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err := svc.RunList(); err != nil {
+		fmt.Printf("❌ %s\n", err)
+	}
+}
+
+// DepsCheck prints the dependencies along with any available updates.
+func DepsCheck(moduleDir string) {
+	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err := svc.RunCheck(); err != nil {
+		fmt.Printf("❌ %s\n", err)
+	}
+}
+
+// DepsUpdate runs the interactive update workflow.
+func DepsUpdate(moduleDir string) {
+	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err := svc.RunUpdate(); err != nil {
+		fmt.Printf("❌ %s\n", err)
 	}
 }

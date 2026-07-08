@@ -9,12 +9,12 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/cli"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/model"
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/setup"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -73,6 +73,12 @@ func handleCommandLine() {
 		cli.DeleteVersion(version)
 	case "list":
 		cli.ListVersions()
+	case "deps":
+		if len(os.Args) < 3 {
+			cli.DepsCommand("help")
+			return
+		}
+		cli.DepsCommand(os.Args[2])
 	case "help":
 		printUsage()
 	default:
@@ -88,25 +94,22 @@ func printUsage() {
 	fmt.Println("  govm use <version>     Switch to a specific Go version")
 	fmt.Println("  govm delete <version>  Delete a specific Go version")
 	fmt.Println("  govm list              List installed Go versions")
+	fmt.Println("  govm deps list         List current module dependencies")
+	fmt.Println("  govm deps check        Check for available dependency updates")
+	fmt.Println("  govm deps update       Update direct dependencies (interactive)")
 	fmt.Println("  govm help              Show this help message")
 	fmt.Println("\nExamples:")
 	fmt.Println("  govm install 1.21      Install Go 1.21.x (latest)")
 	fmt.Println("  govm use 1.20          Switch to Go 1.20.x (latest)")
+	fmt.Println("  govm deps update       Update direct deps in the current module")
 }
 
-func loadTUISettings(stderr io.Writer, defaultPath func() (string, error), load func(string) (config.Settings, error)) (string, config.Settings) {
-	settingsPath, err := defaultPath()
+func loadTUISettings(stderr io.Writer, load func() (string, config.Settings, error)) (string, config.Settings) {
+	settingsPath, settings, err := load()
 	if err != nil {
-		fmt.Fprintf(stderr, "Warning: Failed to resolve settings path: %v\n", err)
+		fmt.Fprintf(stderr, "Warning: Failed to load settings: %v\n", err)
 		return "", config.DefaultSettings()
 	}
-
-	settings, err := load(settingsPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "Warning: Failed to load settings from %s: %v\n", settingsPath, err)
-		return settingsPath, config.DefaultSettings()
-	}
-
 	return settingsPath, settings
 }
 
@@ -119,7 +122,10 @@ func launchTUI() {
 			os.Exit(1)
 		}
 	}
-	settingsPath, settings := loadTUISettings(os.Stderr, config.DefaultPath, config.Load)
+	settingsPath, settings := loadTUISettings(os.Stderr, func() (string, config.Settings, error) {
+		path, s, _, err := config.LoadWithMigration()
+		return path, s, err
+	})
 	model.ApplyTheme(styles.ThemeName(settings.Theme))
 
 	s := spinner.New()
@@ -150,7 +156,12 @@ func launchTUI() {
 		fmt.Println("Error getting working directory:", err)
 		os.Exit(1)
 	}
-	goVersionsDir := filepath.Join(homeDir, ".govm", "versions")
+	resolver := paths.New()
+	goVersionsDir, err := resolver.VersionsDir()
+	if err != nil {
+		fmt.Println("Error resolving versions directory:", err)
+		os.Exit(1)
+	}
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = styles.TableSelectedStyle
 	delegate.Styles.SelectedDesc = styles.TableSelectedStyle

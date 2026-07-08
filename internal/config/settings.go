@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
 type DepsDisplayMode string
@@ -46,12 +48,35 @@ func Normalize(settings Settings) Settings {
 	return settings
 }
 
+// DefaultPath returns the canonical settings file location under
+// the user's home directory (e.g. ~/.govm/settings.json). The
+// (string, error) signature is preserved so existing callers can
+// keep wiring it up as a function value.
 func DefaultPath() (string, error) {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(configDir, "govm", "settings.json"), nil
+	return defaultPathFor(paths.New())
+}
+
+// defaultPathFor returns the canonical settings file location
+// using the provided resolver. It is the single place where
+// DefaultPath asks for a settings path so tests can inject a
+// stub resolver without touching the real filesystem.
+func defaultPathFor(r *paths.Resolver) (string, error) {
+	return r.SettingsFile()
+}
+
+// LegacyPath returns the historical location of the settings file
+// under the platform user-config directory. The bool reports
+// whether a legacy path could be resolved at all (a nil error with
+// an empty path means the host has no user-config directory).
+func LegacyPath() (string, bool, error) {
+	return legacyPathFor(paths.New())
+}
+
+// legacyPathFor returns the legacy settings path using the
+// provided resolver. It mirrors defaultPathFor so test code can
+// drive the migration with deterministic paths.
+func legacyPathFor(r *paths.Resolver) (string, bool, error) {
+	return r.LegacySettingsFile()
 }
 
 func Load(path string) (Settings, error) {
@@ -134,4 +159,63 @@ func saveWithRename(path string, settings Settings, rename func(string, string) 
 	}
 	renamed = true
 	return nil
+}
+
+// LoadWithMigration loads settings from the canonical location,
+// performing a one-shot migration from the legacy user-config
+// directory when needed. The returned path is the active settings
+// file location (empty when neither location has a file), the
+// migrated bool signals whether a legacy file was copied to the
+// new location and removed, and any migration error is returned
+// without deleting the legacy file.
+func LoadWithMigration() (string, Settings, bool, error) {
+	return loadWithMigrationFor(paths.New())
+}
+
+func loadWithMigrationFor(r *paths.Resolver) (string, Settings, bool, error) {
+	newPath, err := r.SettingsFile()
+	if err != nil {
+		return "", Settings{}, false, fmt.Errorf("resolve settings path: %w", err)
+	}
+
+	switch _, statErr := os.Stat(newPath); {
+	case statErr == nil:
+		settings, loadErr := Load(newPath)
+		if loadErr != nil {
+			return "", Settings{}, false, loadErr
+		}
+		return newPath, settings, false, nil
+	case !errors.Is(statErr, os.ErrNotExist):
+		return "", Settings{}, false, fmt.Errorf("check settings file: %w", statErr)
+	}
+
+	legacyPath, hasLegacy, err := r.LegacySettingsFile()
+	if err != nil {
+		return "", Settings{}, false, fmt.Errorf("resolve legacy settings path: %w", err)
+	}
+	if !hasLegacy {
+		return "", DefaultSettings(), false, nil
+	}
+
+	if _, statErr := os.Stat(legacyPath); statErr != nil {
+		if errors.Is(statErr, os.ErrNotExist) {
+			return "", DefaultSettings(), false, nil
+		}
+		return "", Settings{}, false, fmt.Errorf("check legacy settings file: %w", statErr)
+	}
+
+	settings, err := Load(legacyPath)
+	if err != nil {
+		return "", Settings{}, false, err
+	}
+
+	if err := Save(newPath, settings); err != nil {
+		return "", Settings{}, false, fmt.Errorf("migrate settings to %s: %w", newPath, err)
+	}
+
+	if err := os.Remove(legacyPath); err != nil {
+		return newPath, settings, true, fmt.Errorf("remove legacy settings file %s: %w", legacyPath, err)
+	}
+
+	return newPath, settings, true, nil
 }

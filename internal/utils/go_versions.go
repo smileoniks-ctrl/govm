@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
 type GoVersion struct {
@@ -124,15 +125,18 @@ func NormalizeGoVersionQuery(s string) string {
 }
 
 func SetupShimDirectory() error {
-	homeDir, err := os.UserHomeDir()
+	resolver := paths.New()
+	root, err := resolver.RootDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %v", err)
 	}
-	govmDir := filepath.Join(homeDir, ".govm")
-	if err := os.MkdirAll(govmDir, 0755); err != nil {
+	if err := os.MkdirAll(root, 0755); err != nil {
 		return fmt.Errorf("failed to create govm directory: %v", err)
 	}
-	shimDir := filepath.Join(govmDir, "shim")
+	shimDir, err := resolver.ShimDir()
+	if err != nil {
+		return fmt.Errorf("failed to resolve shim directory: %v", err)
+	}
 	if err := os.MkdirAll(shimDir, 0755); err != nil {
 		return fmt.Errorf("failed to create shim directory: %v", err)
 	}
@@ -142,8 +146,11 @@ func SetupShimDirectory() error {
 // IsShimInPath reports whether the govm shim directory is present
 // in the current PATH.
 func IsShimInPath() bool {
-	homeDir, _ := os.UserHomeDir()
-	shimDir := filepath.Join(homeDir, ".govm", "shim")
+	resolver := paths.New()
+	shimDir, err := resolver.ShimDir()
+	if err != nil {
+		return false
+	}
 	currentPath := os.Getenv("PATH")
 	pathSeparator := string(os.PathListSeparator)
 	pathEntries := strings.Split(currentPath, pathSeparator)
@@ -192,18 +199,17 @@ func FetchGoVersions() tea.Msg {
 	}
 	currentOS := runtime.GOOS
 	arch := runtime.GOARCH
-	// Get home directory
-	homeDir, err := os.UserHomeDir()
+	resolver := paths.New()
+	goVersionsDir, err := resolver.VersionsDir()
 	if err != nil {
 		return ErrMsg(err)
 	}
-	goVersionsDir := filepath.Join(homeDir, ".govm", "versions")
 	err = os.MkdirAll(goVersionsDir, 0755)
 	if err != nil {
 		return ErrMsg(err)
 	}
 	activeVersion := ""
-	activeVersionFile := filepath.Join(homeDir, ".govm", "active_version")
+	activeVersionFile, err := resolver.ActiveVersionFile()
 	if versionBytes, err := os.ReadFile(activeVersionFile); err == nil {
 		activeVersion = string(versionBytes)
 	} else {

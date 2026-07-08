@@ -215,6 +215,29 @@ Once you confirm, GoVM:
 
 `esc` cancels or skips each dialog, and you can quit at any time with `q`/`ctrl+c`.
 
+#### Go dependency commands
+
+The same dependency workflow is also available from the command line as
+`govm deps <list|check|update>`. The commands run in the current working
+directory and follow the same snapshot/update/checks/rollback model that
+the TUI uses.
+
+```bash
+# List current module dependencies
+govm deps list
+
+# Check for available updates (no changes)
+govm deps check
+
+# Interactively update direct dependencies, run checks, and roll back
+# on failure (mirrors the TUI Deps tab)
+govm deps update
+```
+
+`govm deps update` prompts for confirmation before each step. The default
+for every prompt is `Y` (yes), including the rollback prompt, matching
+the TUI behaviour where the safe option is the default.
+
 ### Settings
 
 The **Settings** tab lets you customise GoVM's behaviour. Settings are saved automatically whenever you change them and persist between sessions.
@@ -234,14 +257,18 @@ The **Settings** tab lets you customise GoVM's behaviour. Settings are saved aut
 
 #### Settings file location
 
-Settings are stored in `settings.json` inside the platform's user config directory:
+Settings are stored in `settings.json` inside the GoVM home directory:
 
 | OS | Path |
 |---|---|
-| Linux / macOS | `~/.config/govm/settings.json` |
-| Windows | `%AppData%\govm\settings.json` |
+| Linux / macOS | `~/.govm/settings.json` |
+| Windows | `%USERPROFILE%\.govm\settings.json` |
 
 The file is written atomically (temp file + rename) and is safe to edit manually. On startup GoVM loads the saved theme and applies it before the TUI is rendered.
+
+#### Migrating existing settings
+
+If you are upgrading from an older govm, your `settings.json` lives in the platform user config directory (`~/.config/govm/settings.json` on Linux, `~/Library/Application Support/govm/settings.json` on macOS, `%AppData%\govm\settings.json` on Windows). The first launch of the new govm automatically moves that file to `~/.govm/settings.json` and removes the old copy. No manual action is required.
 
 ## How It Works
 
@@ -252,7 +279,7 @@ GoVM downloads Go versions from the official go.dev website and installs them in
 - Switching versions simply updates these wrappers to point to a different installation
 - The currently active version is tracked in `~/.govm/active_version`
 - Downloaded archives are temporarily stored in `~/.govm/downloads` and cleaned up after extraction
-- User settings (theme, deps display filter) are stored in `settings.json` in the user config directory (see [Settings](#settings))
+- User settings (theme, deps display filter) are stored in `~/.govm/settings.json` (see [Settings](#settings))
 
 This ensures a seamless experience without needing to manually update environment variables or source scripts each time you switch versions.
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
 // DownloadCompleteMsg is sent after a version is downloaded and
@@ -22,12 +23,15 @@ type DownloadCompleteMsg struct {
 
 func DownloadAndInstall(version GoVersion) tea.Cmd {
 	return func() tea.Msg {
-		homeDir, err := os.UserHomeDir()
+		resolver := paths.New()
+		goVersionsDir, err := resolver.VersionsDir()
 		if err != nil {
 			return ErrMsg(err)
 		}
-		goVersionsDir := filepath.Join(homeDir, ".govm", "versions")
-		downloadDir := filepath.Join(homeDir, ".govm", "downloads")
+		downloadDir, err := resolver.DownloadsDir()
+		if err != nil {
+			return ErrMsg(err)
+		}
 		for _, dir := range []string{goVersionsDir, downloadDir} {
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				return ErrMsg(err)

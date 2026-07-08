@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
 func TestDefaultSettings(t *testing.T) {
@@ -125,7 +127,7 @@ func TestSaveWritesNormalizedSettings(t *testing.T) {
 
 	got, err := Load(path)
 	if err != nil {
-		t.Fatalf("Load() error = %v, want nil", err)
+		t.Fatalf("Load() error = %v", err)
 	}
 	if got != DefaultSettings() {
 		t.Fatalf("Load() = %+v, want %+v", got, DefaultSettings())
@@ -183,5 +185,242 @@ func TestSavePreservesExistingFileWhenRenameFails(t *testing.T) {
 		if strings.HasPrefix(entry.Name(), tempFilePrefix) {
 			t.Fatalf("Save() left temp file %q behind", entry.Name())
 		}
+	}
+}
+
+// stubResolver returns a paths.Resolver with deterministic
+// HomeDir and ConfigDir under fresh t.TempDir() directories so
+// tests do not touch the real filesystem. The returned home and
+// config paths are exposed so a test can pre-populate the
+// directories or plant blocker files inside them.
+func stubResolver(t *testing.T) (*paths.Resolver, string, string) {
+	t.Helper()
+	home := t.TempDir()
+	config := t.TempDir()
+	return &paths.Resolver{
+		HomeDir:   func() (string, error) { return home, nil },
+		ConfigDir: func() (string, error) { return config, nil },
+	}, home, config
+}
+
+func TestDefaultPathUsesHomeDir(t *testing.T) {
+	stubHome := t.TempDir()
+	t.Setenv("HOME", stubHome)
+
+	resolver := &paths.Resolver{
+		HomeDir:   func() (string, error) { return stubHome, nil },
+		ConfigDir: func() (string, error) { return "", nil },
+	}
+	want, err := resolver.SettingsFile()
+	if err != nil {
+		t.Fatalf("resolver.SettingsFile() error = %v", err)
+	}
+
+	got, err := DefaultPath()
+	if err != nil {
+		t.Fatalf("DefaultPath() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("DefaultPath() = %q, want %q (from stub resolver)", got, want)
+	}
+	if !strings.HasSuffix(got, ".govm/settings.json") {
+		t.Fatalf("DefaultPath() = %q, want suffix .govm/settings.json", got)
+	}
+	expectedRoot, err := resolver.RootDir()
+	if err != nil {
+		t.Fatalf("resolver.RootDir() error = %v", err)
+	}
+	if filepath.Dir(got) != expectedRoot {
+		t.Fatalf("DefaultPath() parent dir = %q, want %q (from stub resolver HomeDir)", filepath.Dir(got), expectedRoot)
+	}
+}
+
+func TestLoadWithMigrationNewFilePresent(t *testing.T) {
+	r, _, _ := stubResolver(t)
+	newPath, err := r.SettingsFile()
+	if err != nil {
+		t.Fatalf("SettingsFile() error = %v", err)
+	}
+	legacyPath, _, err := r.LegacySettingsFile()
+	if err != nil {
+		t.Fatalf("LegacySettingsFile() error = %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	newData := []byte("{\"depsDisplay\":\"all\",\"theme\":\"light\"}\n")
+	if err := os.WriteFile(newPath, newData, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	// Also create a legacy file to verify it is not touched.
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	legacyData := []byte("{\"depsDisplay\":\"direct\",\"theme\":\"current\"}\n")
+	if err := os.WriteFile(legacyPath, legacyData, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	gotPath, gotSettings, migrated, err := loadWithMigrationFor(r)
+	if err != nil {
+		t.Fatalf("loadWithMigrationFor() error = %v", err)
+	}
+	if gotPath != newPath {
+		t.Fatalf("path = %q, want %q", gotPath, newPath)
+	}
+	if migrated {
+		t.Fatal("migrated = true, want false")
+	}
+	want := Settings{DepsDisplay: DepsDisplayAll, Theme: ThemeLight}
+	if gotSettings != want {
+		t.Fatalf("settings = %+v, want %+v", gotSettings, want)
+	}
+
+	// New file content is unchanged.
+	newAfter, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatalf("ReadFile(new) error = %v", err)
+	}
+	if string(newAfter) != string(newData) {
+		t.Fatalf("new file = %q, want %q", newAfter, newData)
+	}
+
+	// Legacy file is still present and unchanged.
+	legacyAfter, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatalf("ReadFile(legacy) error = %v", err)
+	}
+	if string(legacyAfter) != string(legacyData) {
+		t.Fatalf("legacy file = %q, want %q", legacyAfter, legacyData)
+	}
+}
+
+func TestLoadWithMigrationMigratesLegacy(t *testing.T) {
+	r, _, _ := stubResolver(t)
+	newPath, err := r.SettingsFile()
+	if err != nil {
+		t.Fatalf("SettingsFile() error = %v", err)
+	}
+	legacyPath, _, err := r.LegacySettingsFile()
+	if err != nil {
+		t.Fatalf("LegacySettingsFile() error = %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	legacyData := []byte("{\"depsDisplay\":\"all\",\"theme\":\"light\"}\n")
+	if err := os.WriteFile(legacyPath, legacyData, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	gotPath, gotSettings, migrated, err := loadWithMigrationFor(r)
+	if err != nil {
+		t.Fatalf("loadWithMigrationFor() error = %v", err)
+	}
+	if gotPath != newPath {
+		t.Fatalf("path = %q, want %q", gotPath, newPath)
+	}
+	if !migrated {
+		t.Fatal("migrated = false, want true")
+	}
+	want := Settings{DepsDisplay: DepsDisplayAll, Theme: ThemeLight}
+	if gotSettings != want {
+		t.Fatalf("settings = %+v, want %+v", gotSettings, want)
+	}
+
+	// New file must exist with migrated content.
+	newData, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatalf("ReadFile(new) error = %v", err)
+	}
+	if !strings.Contains(string(newData), "\"all\"") {
+		t.Fatalf("new file = %q, want to contain \"all\"", newData)
+	}
+	if !strings.Contains(string(newData), "\"light\"") {
+		t.Fatalf("new file = %q, want to contain \"light\"", newData)
+	}
+
+	// Legacy file must be removed.
+	if _, err := os.Stat(legacyPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy file still present: %v", err)
+	}
+}
+
+func TestLoadWithMigrationSaveFails(t *testing.T) {
+	r, stubHome, _ := stubResolver(t)
+	newPath, err := r.SettingsFile()
+	if err != nil {
+		t.Fatalf("SettingsFile() error = %v", err)
+	}
+	legacyPath, _, err := r.LegacySettingsFile()
+	if err != nil {
+		t.Fatalf("LegacySettingsFile() error = %v", err)
+	}
+
+	// Plant a regular file at ~/.govm so MkdirAll fails when Save
+	// tries to create the settings directory.
+	govmDir := filepath.Join(stubHome, ".govm")
+	if err := os.WriteFile(govmDir, []byte("blocker"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	// Setup a legacy file with real content.
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	legacyData := []byte("{\"depsDisplay\":\"all\",\"theme\":\"light\"}\n")
+	if err := os.WriteFile(legacyPath, legacyData, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	gotPath, gotSettings, migrated, err := loadWithMigrationFor(r)
+	if err == nil {
+		t.Fatal("loadWithMigrationFor() error = nil, want error")
+	}
+	if gotPath != "" {
+		t.Fatalf("path = %q, want empty", gotPath)
+	}
+	if migrated {
+		t.Fatal("migrated = true, want false")
+	}
+	if gotSettings != (Settings{}) {
+		t.Fatalf("settings = %+v, want zero value", gotSettings)
+	}
+
+	// Legacy file must still be present because migration failed.
+	legacyAfter, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatalf("ReadFile(legacy) error = %v", err)
+	}
+	if string(legacyAfter) != string(legacyData) {
+		t.Fatalf("legacy file = %q, want %q", legacyAfter, legacyData)
+	}
+
+	// The new file must not have been written. We only care that no
+	// regular file exists at newPath; os.Stat may return ENOTDIR
+	// because the parent is a regular file, which is also fine.
+	if _, err := os.Stat(newPath); err == nil {
+		t.Fatalf("new file present despite save failure")
+	}
+}
+
+func TestLoadWithMigrationBothAbsent(t *testing.T) {
+	r, _, _ := stubResolver(t)
+
+	gotPath, gotSettings, migrated, err := loadWithMigrationFor(r)
+	if err != nil {
+		t.Fatalf("loadWithMigrationFor() error = %v", err)
+	}
+	if gotPath != "" {
+		t.Fatalf("path = %q, want empty", gotPath)
+	}
+	if migrated {
+		t.Fatal("migrated = true, want false")
+	}
+	if gotSettings != DefaultSettings() {
+		t.Fatalf("settings = %+v, want %+v", gotSettings, DefaultSettings())
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"runtime"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
 // SwitchCompletedMsg reports the result of a successful switch.
@@ -20,14 +21,14 @@ type SwitchCompletedMsg struct {
 
 func SwitchVersion(version GoVersion) tea.Cmd {
 	return func() tea.Msg {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return ErrMsg(err)
-		}
+		resolver := paths.New()
 		if err := SetupShimDirectory(); err != nil {
 			return ErrMsg(err)
 		}
-		shimDir := filepath.Join(homeDir, ".govm", "shim")
+		shimDir, err := resolver.ShimDir()
+		if err != nil {
+			return ErrMsg(err)
+		}
 		versionBinDir := filepath.Join(version.Path, "bin")
 		if _, err := os.Stat(versionBinDir); os.IsNotExist(err) {
 			return ErrMsg(fmt.Errorf("go version directory not found: %s", versionBinDir))
@@ -62,7 +63,10 @@ func SwitchVersion(version GoVersion) tea.Cmd {
 				}
 			}
 		}
-		versionFile := filepath.Join(homeDir, ".govm", "active_version")
+		versionFile, err := resolver.ActiveVersionFile()
+		if err != nil {
+			return ErrMsg(err)
+		}
 		if err := os.WriteFile(versionFile, []byte(version.Version), 0644); err != nil {
 			return ErrMsg(fmt.Errorf("failed to update active version file: %v", err))
 		}

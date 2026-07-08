@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
-	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -43,6 +43,16 @@ func TestPrintUsageShowsVersion(t *testing.T) {
 	if !strings.Contains(output, "GoVM") {
 		t.Fatal("expected help output to mention GoVM")
 	}
+
+	for _, want := range []string{
+		"govm deps list",
+		"govm deps check",
+		"govm deps update",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected help output to contain %q, got:\n%s", want, output)
+		}
+	}
 }
 
 func TestLoadTUISettings(t *testing.T) {
@@ -50,44 +60,24 @@ func TestLoadTUISettings(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		defaultPath  func() (string, error)
-		load         func(string) (config.Settings, error)
+		load         func() (string, config.Settings, error)
 		wantPath     string
 		wantSettings config.Settings
 		wantWarning  bool
 	}{
 		{
-			name: "default path error warns and returns defaults with empty path",
-			defaultPath: func() (string, error) {
-				return "", errors.New("config dir unavailable")
-			},
-			load: func(string) (config.Settings, error) {
-				t.Fatal("load should not be called when default path fails")
-				return config.Settings{}, nil
+			name: "load error warns and returns defaults with empty path",
+			load: func() (string, config.Settings, error) {
+				return "", defaultSettings, errors.New("config dir unavailable")
 			},
 			wantPath:     "",
 			wantSettings: defaultSettings,
 			wantWarning:  true,
 		},
 		{
-			name: "load error warns and returns defaults with resolved path",
-			defaultPath: func() (string, error) {
-				return "/tmp/govm-settings.json", nil
-			},
-			load: func(string) (config.Settings, error) {
-				return config.Settings{}, errors.New("permission denied")
-			},
-			wantPath:     "/tmp/govm-settings.json",
-			wantSettings: defaultSettings,
-			wantWarning:  true,
-		},
-		{
 			name: "successful load returns settings without warning",
-			defaultPath: func() (string, error) {
-				return "/tmp/govm-settings.json", nil
-			},
-			load: func(string) (config.Settings, error) {
-				return config.Settings{
+			load: func() (string, config.Settings, error) {
+				return "/tmp/govm-settings.json", config.Settings{
 					DepsDisplay: config.DepsDisplayAll,
 					Theme:       config.ThemeLight,
 				}, nil
@@ -105,7 +95,7 @@ func TestLoadTUISettings(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stderr bytes.Buffer
 
-			gotPath, gotSettings := loadTUISettings(&stderr, tt.defaultPath, tt.load)
+			gotPath, gotSettings := loadTUISettings(&stderr, tt.load)
 
 			if gotPath != tt.wantPath {
 				t.Fatalf("path = %q, want %q", gotPath, tt.wantPath)
@@ -122,15 +112,23 @@ func TestLoadTUISettings(t *testing.T) {
 }
 
 func TestLoadTUISettingsMissingFileDoesNotWarn(t *testing.T) {
-	missingPath := filepath.Join(t.TempDir(), "missing-settings.json")
+	// Use a fresh HOME that has no .govm and no legacy file, so
+	// LoadWithMigration returns defaults without an error.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", t.TempDir())
+	}
+
 	var stderr bytes.Buffer
 
-	gotPath, gotSettings := loadTUISettings(&stderr, func() (string, error) {
-		return missingPath, nil
-	}, config.Load)
+	gotPath, gotSettings := loadTUISettings(&stderr, func() (string, config.Settings, error) {
+		path, s, _, err := config.LoadWithMigration()
+		return path, s, err
+	})
 
-	if gotPath != missingPath {
-		t.Fatalf("path = %q, want %q", gotPath, missingPath)
+	if gotPath != "" {
+		t.Fatalf("path = %q, want empty", gotPath)
 	}
 	if gotSettings != config.DefaultSettings() {
 		t.Fatalf("settings = %#v, want %#v", gotSettings, config.DefaultSettings())
