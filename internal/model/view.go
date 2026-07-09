@@ -43,7 +43,16 @@ func (m Model) View() tea.View {
 		components = append(components, renderStatus(statusType, status, width))
 	}
 
-	components = append(components, renderHelp(m.CurrentTab, m.ConfirmingDelete, m.Deps.Dialog.ConfirmingUpdate, m.Deps.Dialog.ConfirmingChecks, m.Deps.Dialog.ConfirmingRollback, width, m.Layout))
+	components = append(components, renderHelp(
+		m.CurrentTab,
+		m.ConfirmingDelete,
+		m.Deps.Dialog.ConfirmingUpdate,
+		m.Deps.Dialog.ConfirmingChecks,
+		m.Deps.Dialog.ConfirmingRollback,
+		m.Deps.Dialog.ConfirmingRestoreBackup,
+		width,
+		m.Layout,
+	))
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
 
 	if m.Deps.Dialog.ConfirmingUpdate {
@@ -61,6 +70,8 @@ func (m Model) View() tea.View {
 		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.Deps.Dialog.CheckChoiceYes), width, height)
 	} else if m.Deps.Dialog.ConfirmingRollback {
 		rendered = overlayDialog(rendered, renderDependencyRollbackDialog(m.Deps.Dialog.RollbackChoiceYes, m.Deps.LastCheckResult), width, height)
+	} else if m.Deps.Dialog.ConfirmingRestoreBackup {
+		rendered = overlayDialog(rendered, renderDependencyRestoreDialog(m.Deps.Dialog.RestoreChoiceYes, m.Deps.Backups, m.Deps.BackupCursor), width, height)
 	}
 
 	v := tea.NewView(rendered)
@@ -73,14 +84,18 @@ func (m Model) View() tea.View {
 func (m Model) composeStatus() (string, string) {
 	status := m.Message
 	statusType := m.MessageType
-	if m.Loading || m.Deps.Checking || m.Deps.Updating || m.Deps.RunningChecks || m.Deps.RollingBack {
+	if m.Loading || m.Deps.Checking || m.Deps.Updating || m.Deps.RunningChecks || m.Deps.RollingBack || m.Deps.LoadingBackups || m.Deps.RestoringBackup {
 		statusType = "info"
 		if m.InstallingVersion != "" {
 			status = fmt.Sprintf("%s Downloading Go %s", m.Spinner.View(), m.InstallingVersion)
 		} else if m.Deps.RollingBack {
 			status = fmt.Sprintf("%s Rolling back dependencies", m.Spinner.View())
+		} else if m.Deps.RestoringBackup {
+			status = fmt.Sprintf("%s Restoring dependency backup", m.Spinner.View())
 		} else if m.Deps.RunningChecks {
 			status = fmt.Sprintf("%s Running checks", m.Spinner.View())
+		} else if m.Deps.LoadingBackups {
+			status = fmt.Sprintf("%s Loading dependency backups", m.Spinner.View())
 		} else if status == "" {
 			status = fmt.Sprintf("%s Loading", m.Spinner.View())
 		}
@@ -179,7 +194,7 @@ func themeLabel(name config.ThemeName) string {
 	return "Current"
 }
 
-func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChecks, confirmingRollback bool, width int, layout styles.LayoutMode) string {
+func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChecks, confirmingRollback, confirmingRestore bool, width int, layout styles.LayoutMode) string {
 	var hints [][2]string
 
 	switch {
@@ -204,6 +219,14 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			{"←/→", "choose"},
 			{"enter", "confirm"},
 			{"q", "quit"},
+		}
+		return renderKeyHints(hints, width, layout)
+	case confirmingRestore:
+		hints = [][2]string{
+			{"↑/↓", "select"},
+			{"←/→", "choose"},
+			{"enter", "restore"},
+			{"esc", "cancel"},
 		}
 		return renderKeyHints(hints, width, layout)
 	}
@@ -238,6 +261,7 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			hints = [][2]string{
 				{"r", "check"},
 				{"u", "update"},
+				{"b", "bkup"},
 				{"tab", "sw"},
 				{"q", "quit"},
 			}
@@ -245,6 +269,7 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			hints = [][2]string{
 				{"r", "check updates"},
 				{"u", "update"},
+				{"b", "backups"},
 				{"tab", "switch"},
 				{"q", "quit"},
 			}

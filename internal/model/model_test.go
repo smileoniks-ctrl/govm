@@ -360,6 +360,69 @@ func TestRefreshOnDepsTabTriggersCheckCmd(t *testing.T) {
 	}
 }
 
+func TestPressBOnDepsTabTriggersBackupListCmd(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
+	m = updated.(Model)
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'b'})
+	m = updated.(Model)
+
+	if !m.Deps.LoadingBackups {
+		t.Fatal("expected LoadingBackups to be true after pressing b on deps tab")
+	}
+	if cmd == nil {
+		t.Fatal("expected a command to be returned")
+	}
+}
+
+func TestDependencyBackupsMsgOpensRestoreDialog(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, _ := m.Update(utils.DependencyBackupsMsg{
+		{
+			Name:       "2026-07-09_12-00-00.json",
+			ModulePath: "github.com/acme/app",
+			Kind:       utils.DependencyBackupKindPreUpdate,
+			Updated:    1,
+		},
+	})
+	got := updated.(Model)
+
+	if got.Deps.LoadingBackups {
+		t.Fatal("expected LoadingBackups to be false after backups load")
+	}
+	if !got.Deps.Dialog.ConfirmingRestoreBackup {
+		t.Fatal("expected restore dialog to open")
+	}
+	if got.Deps.BackupCursor != 0 {
+		t.Fatalf("expected backup cursor 0, got %d", got.Deps.BackupCursor)
+	}
+}
+
+func TestRestoreBackupDialogEnterTriggersRestoreCmd(t *testing.T) {
+	m := newTestModel(t)
+	m.Deps.Dialog.ConfirmingRestoreBackup = true
+	m.Deps.Dialog.RestoreChoiceYes = true
+	m.Deps.Backups = []utils.DependencyBackupInfo{
+		{Name: "2026-07-09_12-00-00.json"},
+	}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	got := updated.(Model)
+
+	if got.Deps.Dialog.ConfirmingRestoreBackup {
+		t.Fatal("expected restore dialog to close")
+	}
+	if !got.Deps.RestoringBackup {
+		t.Fatal("expected RestoringBackup to be true")
+	}
+	if cmd == nil {
+		t.Fatal("expected restore command")
+	}
+}
+
 func TestDependenciesMsgPopulatesTable(t *testing.T) {
 	m := newTestModel(t)
 
@@ -663,6 +726,23 @@ func TestRenderDependencyUpdateDialogTruncatesLongLists(t *testing.T) {
 
 	if !strings.Contains(dialog, "and") || !strings.Contains(dialog, "more") {
 		t.Fatalf("expected truncation hint in dialog, got:\n%s", dialog)
+	}
+}
+
+func TestRenderDependencyRestoreDialogKeepsCursorVisible(t *testing.T) {
+	backups := make([]utils.DependencyBackupInfo, 0, 7)
+	for i := 0; i < 7; i++ {
+		backups = append(backups, utils.DependencyBackupInfo{
+			Name:    fmt.Sprintf("2026-07-09_12-00-0%d.json", i),
+			Kind:    utils.DependencyBackupKindPreUpdate,
+			Updated: i,
+		})
+	}
+
+	dialog := stripANSI(renderDependencyRestoreDialog(true, backups, 6))
+
+	if !strings.Contains(dialog, "> 2026-07-09_12-00-06.json") {
+		t.Fatalf("expected selected backup to be visible, got:\n%s", dialog)
 	}
 }
 
@@ -979,7 +1059,7 @@ func TestSpliceCentered_UsesVisibleColumnsWithANSI(t *testing.T) {
 }
 
 func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
-	got := renderHelp(0, true, false, false, false, 80, styles.LayoutNormal)
+	got := renderHelp(0, true, false, false, false, false, 80, styles.LayoutNormal)
 	if !strings.Contains(stripANSI(got), "confirm") {
 		t.Fatalf("expected confirm hint, got: %s", got)
 	}
@@ -989,7 +1069,7 @@ func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
 }
 
 func TestRenderHelp_DepsCompactTruncates(t *testing.T) {
-	got := renderHelp(2, false, false, false, false, 20, styles.LayoutCompact)
+	got := renderHelp(2, false, false, false, false, false, 20, styles.LayoutCompact)
 	if got == "" {
 		t.Fatal("expected non-empty help for deps compact")
 	}

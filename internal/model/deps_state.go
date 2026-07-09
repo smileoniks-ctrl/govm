@@ -9,12 +9,14 @@ import (
 // dialogs so the main Model struct does not have to expose 6 boolean
 // fields at the top level.
 type DepsDialogState struct {
-	ConfirmingUpdate   bool
-	UpdateChoiceYes    bool
-	ConfirmingChecks   bool
-	CheckChoiceYes     bool
-	ConfirmingRollback bool
-	RollbackChoiceYes  bool
+	ConfirmingUpdate        bool
+	UpdateChoiceYes         bool
+	ConfirmingChecks        bool
+	CheckChoiceYes          bool
+	ConfirmingRollback      bool
+	RollbackChoiceYes       bool
+	ConfirmingRestoreBackup bool
+	RestoreChoiceYes        bool
 }
 
 // DepsState groups everything that belongs to the "Deps" tab so the
@@ -30,7 +32,11 @@ type DepsState struct {
 	Updating        bool
 	RunningChecks   bool
 	RollingBack     bool
+	LoadingBackups  bool
+	RestoringBackup bool
 	Snapshot        *utils.DependencySnapshot
+	Backups         []utils.DependencyBackupInfo
+	BackupCursor    int
 	LastCheckResult *utils.DependencyCheckResultMsg
 	Dialog          DepsDialogState
 }
@@ -46,6 +52,7 @@ func NewDepsState(moduleDir string, tbl table.Model) DepsState {
 			UpdateChoiceYes:   true,
 			CheckChoiceYes:    true,
 			RollbackChoiceYes: true,
+			RestoreChoiceYes:  true,
 		},
 	}
 }

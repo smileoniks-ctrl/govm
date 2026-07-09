@@ -29,6 +29,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleUseKey()
 	case "r":
 		return m.handleRefreshKey()
+	case "b":
+		return m.handleBackupsKey()
 	case "d":
 		return m.handleDeleteKey()
 	case "y", "Y":
@@ -130,6 +132,16 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 	m.Loading = true
 	m.Message = ""
 	return m, utils.FetchGoVersions
+}
+
+func (m Model) handleBackupsKey() (tea.Model, tea.Cmd) {
+	if m.CurrentTab != DepsTab || m.Deps.LoadingBackups || m.Deps.RestoringBackup {
+		return m, nil
+	}
+	m.Deps.LoadingBackups = true
+	m.Message = "Loading dependency backups..."
+	m.MessageType = "info"
+	return m, utils.ListDependencyBackupsCmd(m.Deps.ModuleDir)
 }
 
 func (m Model) handleDeleteKey() (tea.Model, tea.Cmd) {

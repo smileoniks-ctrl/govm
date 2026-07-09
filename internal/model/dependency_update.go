@@ -132,3 +132,58 @@ func (m Model) keepUpdatedDependencies() (tea.Model, tea.Cmd) {
 	m.MessageType = "warning"
 	return m, nil
 }
+
+func (m Model) handleRestoreBackupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.Deps.BackupCursor > 0 {
+			m.Deps.BackupCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.Deps.BackupCursor < len(m.Deps.Backups)-1 {
+			m.Deps.BackupCursor++
+		}
+		return m, nil
+	case "left", "right", "tab", "h", "l":
+		m.Deps.Dialog.RestoreChoiceYes = !m.Deps.Dialog.RestoreChoiceYes
+		return m, nil
+	case "enter":
+		return m.applyRestoreBackupChoice()
+	case "y", "Y":
+		m.Deps.Dialog.RestoreChoiceYes = true
+		return m.applyRestoreBackupChoice()
+	case "n", "N", "esc":
+		m.Deps.Dialog.ConfirmingRestoreBackup = false
+		m.Deps.Dialog.RestoreChoiceYes = false
+		m.Message = "Restore canceled."
+		m.MessageType = "info"
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
+	if !m.Deps.Dialog.RestoreChoiceYes {
+		m.Deps.Dialog.ConfirmingRestoreBackup = false
+		m.Deps.Dialog.RestoreChoiceYes = false
+		m.Message = "Restore canceled."
+		m.MessageType = "info"
+		return m, nil
+	}
+	if len(m.Deps.Backups) == 0 || m.Deps.BackupCursor < 0 || m.Deps.BackupCursor >= len(m.Deps.Backups) {
+		m.Deps.Dialog.ConfirmingRestoreBackup = false
+		m.Deps.Dialog.RestoreChoiceYes = false
+		m.Message = "Restore unavailable: no backup selected."
+		m.MessageType = "error"
+		return m, nil
+	}
+
+	backup := m.Deps.Backups[m.Deps.BackupCursor]
+	m.Deps.Dialog.ConfirmingRestoreBackup = false
+	m.Deps.Dialog.RestoreChoiceYes = false
+	m.Deps.RestoringBackup = true
+	m.Message = "Restoring dependency backup..."
+	m.MessageType = "info"
+	return m, utils.RestoreDependencyBackup(m.Deps.ModuleDir, backup.Name)
+}

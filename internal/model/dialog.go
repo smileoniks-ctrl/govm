@@ -175,6 +175,64 @@ func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCh
 	return dialogErrorBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
+func renderDependencyRestoreDialog(yesSelected bool, backups []utils.DependencyBackupInfo, cursor int) string {
+	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
+	if yesSelected {
+		yesBtn = dialogActiveStyle
+	} else {
+		noBtn = dialogActiveStyle
+	}
+
+	buttons := lipgloss.JoinHorizontal(lipgloss.Center,
+		yesBtn.Render("Restore"),
+		"  ",
+		noBtn.Render("Cancel"),
+	)
+
+	lines := []string{
+		dialogTitleStyle.Render(dialogWarningStyle.Render("Dependency backups")),
+		"",
+		dialogBodyStyle.Render("Choose a saved dependency backup:"),
+	}
+	start := 0
+	if cursor >= maxDependencyListLines {
+		start = cursor - maxDependencyListLines + 1
+	}
+	if maxStart := len(backups) - maxDependencyListLines; start > maxStart {
+		start = maxStart
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := len(backups)
+	if end > start+maxDependencyListLines {
+		end = start + maxDependencyListLines
+	}
+	visible := backups[start:end]
+	for i, b := range visible {
+		prefix := "  "
+		if start+i == cursor {
+			prefix = "> "
+		}
+		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf(
+			"%s%s  %s  %d update(s)",
+			prefix,
+			b.Name,
+			b.Kind,
+			b.Updated,
+		)))
+	}
+	if len(backups) > end {
+		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf("  …and %d more", len(backups)-end)))
+	}
+	lines = append(lines, "")
+	lines = append(lines, dialogMutedStyle.Render("Current go.mod and go.sum will be saved before restore."))
+	lines = append(lines, "")
+	lines = append(lines, buttons)
+
+	return dialogBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+}
+
 func overlayDialog(background, dialog string, width, height int) string {
 	if width <= 0 {
 		width = 80

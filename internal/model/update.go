@@ -23,6 +23,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.Deps.Dialog.ConfirmingRollback {
 			return m.handleRollbackConfirmKey(msg)
 		}
+		if m.Deps.Dialog.ConfirmingRestoreBackup {
+			return m.handleRestoreBackupKey(msg)
+		}
 		return m.handleKey(msg)
 
 	case tea.WindowSizeMsg:
@@ -86,6 +89,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.MessageType = ""
 		return m, nil
 
+	case utils.DependencyBackupsMsg:
+		m.Deps.LoadingBackups = false
+		m.Deps.Backups = msg
+		m.Deps.BackupCursor = 0
+		if len(msg) == 0 {
+			m.Message = "No dependency backups found."
+			m.MessageType = "warning"
+			return m, nil
+		}
+		m.Deps.Dialog.ConfirmingRestoreBackup = true
+		m.Deps.Dialog.RestoreChoiceYes = true
+		m.Message = "Select a dependency backup to restore."
+		m.MessageType = "info"
+		return m, nil
+
 	case utils.DependenciesUpdatedMsg:
 		m.Deps.Updating = false
 		m.Deps.Dependencies = msg.Dependencies
@@ -124,6 +142,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.MessageType = "success"
 		return m, nil
 
+	case utils.DependenciesRestoredMsg:
+		m.Deps.RestoringBackup = false
+		m.Deps.Dependencies = msg.Dependencies
+		m.Deps.LastCheckResult = nil
+		m.updateDependencyTable()
+		m.Message = fmt.Sprintf("Restored dependencies from %s.", msg.BackupName)
+		m.MessageType = "success"
+		return m, nil
+
 	case utils.DependencyErrMsg:
 		if m.Deps.Updating {
 			m.Deps.Updating = false
@@ -136,6 +163,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.Deps.RollingBack {
 			m.Deps.RollingBack = false
+		}
+		if m.Deps.LoadingBackups {
+			m.Deps.LoadingBackups = false
+		}
+		if m.Deps.RestoringBackup {
+			m.Deps.RestoringBackup = false
 		}
 		if msg.Err != nil {
 			m.Message = msg.Err.Error()
