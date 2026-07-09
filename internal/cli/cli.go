@@ -239,11 +239,15 @@ func DeleteVersion(version string) {
 }
 
 // DepsCommand routes `govm deps <subcommand>`.
-func DepsCommand(subcommand string) {
+func DepsCommand(args ...string) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Printf("❌ Error getting working directory: %v\n", err)
 		return
+	}
+	subcommand := "help"
+	if len(args) > 0 {
+		subcommand = args[0]
 	}
 	switch subcommand {
 	case "list":
@@ -252,11 +256,21 @@ func DepsCommand(subcommand string) {
 		DepsCheck(cwd)
 	case "update":
 		DepsUpdate(cwd)
+	case "backups":
+		DepsBackups(cwd)
+	case "restore":
+		name := ""
+		if len(args) > 1 {
+			name = args[1]
+		}
+		DepsRestore(cwd, name)
 	case "help", "-h", "--help":
 		fmt.Println("Usage:")
-		fmt.Println("  govm deps list     List current module dependencies")
-		fmt.Println("  govm deps check    Check for available dependency updates")
-		fmt.Println("  govm deps update   Update direct dependencies (interactive)")
+		fmt.Println("  govm deps list              List current module dependencies")
+		fmt.Println("  govm deps check             Check for available dependency updates")
+		fmt.Println("  govm deps update            Update direct dependencies (interactive)")
+		fmt.Println("  govm deps backups           List dependency backups")
+		fmt.Println("  govm deps restore <file>    Restore dependency backup")
 	default:
 		fmt.Printf("Unknown deps subcommand: %s\n", subcommand)
 		fmt.Println("Run 'govm deps help' for usage.")
@@ -283,6 +297,22 @@ func DepsCheck(moduleDir string) {
 func DepsUpdate(moduleDir string) {
 	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
 	if err := svc.RunUpdate(); err != nil {
+		fmt.Printf("❌ %s\n", err)
+	}
+}
+
+// DepsBackups lists saved dependency backups.
+func DepsBackups(moduleDir string) {
+	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err := svc.RunBackups(); err != nil {
+		fmt.Printf("❌ %s\n", err)
+	}
+}
+
+// DepsRestore restores a saved dependency backup.
+func DepsRestore(moduleDir, name string) {
+	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err := svc.RunRestore(name); err != nil {
 		fmt.Printf("❌ %s\n", err)
 	}
 }

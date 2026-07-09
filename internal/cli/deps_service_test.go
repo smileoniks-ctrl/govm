@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -15,9 +16,75 @@ type fakeOps struct {
 	updateFn       func(string, []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error)
 	runChecksFn    func(string) (utils.DependencyCheckResultMsg, error)
 	rollbackFn     func(string, *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error)
+	listBackupsFn  func(string) ([]utils.DependencyBackupInfo, error)
+	restoreFn      func(string, string) (utils.DependenciesRestoredMsg, error)
 	updateCalls    int
 	runChecksCalls int
 	rollbackCalls  int
+	restoreCalls   int
+}
+
+func TestRunBackupsPrintsNewestBackups(t *testing.T) {
+	svc, _, stdout := newFakeDeps(
+		func(string) ([]utils.ModuleDependency, error) { return nil, nil },
+		func(string, bool) (bool, error) { return true, nil },
+	)
+	svc.ListBackups = func(string) ([]utils.DependencyBackupInfo, error) {
+		return []utils.DependencyBackupInfo{
+			{
+				Name:       "2026-07-09_12-00-00.json",
+				CreatedAt:  time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+				ModulePath: "github.com/acme/app",
+				Kind:       utils.DependencyBackupKindPreUpdate,
+				Updated:    2,
+			},
+		}, nil
+	}
+
+	if err := svc.RunBackups(); err != nil {
+		t.Fatalf("RunBackups: %v", err)
+	}
+
+	out := stdout.String()
+	for _, want := range []string{"2026-07-09_12-00-00.json", "github.com/acme/app", "pre-update", "2 update"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected output to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunRestoreUsesProvidedBackupName(t *testing.T) {
+	confirmCalls := 0
+	svc, ops, stdout := newFakeDeps(
+		func(string) ([]utils.ModuleDependency, error) { return nil, nil },
+		func(string, bool) (bool, error) {
+			confirmCalls++
+			return true, nil
+		},
+	)
+	svc.RestoreBackup = ops.RestoreBackup
+	ops.restoreFn = func(dir, name string) (utils.DependenciesRestoredMsg, error) {
+		if name != "2026-07-09_12-00-00.json" {
+			t.Fatalf("restore name = %q", name)
+		}
+		return utils.DependenciesRestoredMsg{
+			BackupName:    name,
+			BackupCreated: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+		}, nil
+	}
+
+	if err := svc.RunRestore("2026-07-09_12-00-00.json"); err != nil {
+		t.Fatalf("RunRestore: %v", err)
+	}
+	if confirmCalls != 1 {
+		t.Fatalf("expected one confirmation, got %d", confirmCalls)
+	}
+	if ops.restoreCalls != 1 {
+		t.Fatalf("expected one restore call, got %d", ops.restoreCalls)
+	}
+	if !strings.Contains(stdout.String(), "Restored dependencies") {
+		t.Fatalf("expected restore success, got:\n%s", stdout.String())
+	}
 }
 
 func (f *fakeOps) ListDeps(dir string) ([]utils.ModuleDependency, error) {
@@ -38,20 +105,29 @@ func (f *fakeOps) Rollback(dir string, snap *utils.DependencySnapshot) (utils.De
 	f.rollbackCalls++
 	return f.rollbackFn(dir, snap)
 }
+func (f *fakeOps) ListBackups(dir string) ([]utils.DependencyBackupInfo, error) {
+	return f.listBackupsFn(dir)
+}
+func (f *fakeOps) RestoreBackup(dir, name string) (utils.DependenciesRestoredMsg, error) {
+	f.restoreCalls++
+	return f.restoreFn(dir, name)
+}
 
 func newFakeDeps(checkFn func(string) ([]utils.ModuleDependency, error), confirm func(string, bool) (bool, error)) (*DepsService, *fakeOps, *bytes.Buffer) {
 	ops := &fakeOps{checkFn: checkFn}
 	stdout := &bytes.Buffer{}
 	svc := &DepsService{
-		ModuleDir: "/tmp/m",
-		Stdout:    stdout,
-		Stdin:     &bytes.Buffer{},
-		Confirm:   confirm,
-		ListDeps:  ops.ListDeps,
-		CheckDeps: ops.CheckDeps,
-		Update:    ops.Update,
-		RunChecks: ops.RunChecks,
-		Rollback:  ops.Rollback,
+		ModuleDir:     "/tmp/m",
+		Stdout:        stdout,
+		Stdin:         &bytes.Buffer{},
+		Confirm:       confirm,
+		ListDeps:      ops.ListDeps,
+		CheckDeps:     ops.CheckDeps,
+		Update:        ops.Update,
+		RunChecks:     ops.RunChecks,
+		Rollback:      ops.Rollback,
+		ListBackups:   ops.ListBackups,
+		RestoreBackup: ops.RestoreBackup,
 	}
 	ops.listFn = func(dir string) ([]utils.ModuleDependency, error) {
 		return []utils.ModuleDependency{{Path: "x", Version: "v1.0.0"}}, nil
@@ -69,6 +145,12 @@ func newFakeDeps(checkFn func(string) ([]utils.ModuleDependency, error), confirm
 	}
 	ops.rollbackFn = func(dir string, snap *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error) {
 		return utils.DependenciesRolledBackMsg{Snapshot: snap}, nil
+	}
+	ops.listBackupsFn = func(dir string) ([]utils.DependencyBackupInfo, error) {
+		return nil, nil
+	}
+	ops.restoreFn = func(dir, name string) (utils.DependenciesRestoredMsg, error) {
+		return utils.DependenciesRestoredMsg{}, nil
 	}
 	return svc, ops, stdout
 }

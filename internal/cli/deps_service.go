@@ -39,6 +39,12 @@ type DepsService struct {
 
 	// Rollback restores the snapshot and runs go mod tidy.
 	Rollback func(moduleDir string, snap *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error)
+
+	// ListBackups returns saved dependency backups for moduleDir.
+	ListBackups func(moduleDir string) ([]utils.DependencyBackupInfo, error)
+
+	// RestoreBackup restores a saved dependency backup by filename.
+	RestoreBackup func(moduleDir, name string) (utils.DependenciesRestoredMsg, error)
 }
 
 // NewDepsService builds a service that defaults each operation to the
@@ -51,15 +57,17 @@ func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) *DepsSe
 		stdin = os.Stdin
 	}
 	return &DepsService{
-		ModuleDir: moduleDir,
-		Stdout:    stdout,
-		Stdin:     stdin,
-		Confirm:   defaultConfirm(stdin, stdout),
-		ListDeps:  defaultListDeps,
-		CheckDeps: defaultCheckDeps,
-		Update:    defaultUpdate,
-		RunChecks: defaultRunChecks,
-		Rollback:  defaultRollback,
+		ModuleDir:     moduleDir,
+		Stdout:        stdout,
+		Stdin:         stdin,
+		Confirm:       defaultConfirm(stdin, stdout),
+		ListDeps:      defaultListDeps,
+		CheckDeps:     defaultCheckDeps,
+		Update:        defaultUpdate,
+		RunChecks:     defaultRunChecks,
+		Rollback:      defaultRollback,
+		ListBackups:   defaultListBackups,
+		RestoreBackup: defaultRestoreBackup,
 	}
 }
 
@@ -118,6 +126,29 @@ func defaultRollback(moduleDir string, snap *utils.DependencySnapshot) (utils.De
 		return utils.DependenciesRolledBackMsg{}, errMsg.Err
 	}
 	return utils.DependenciesRolledBackMsg{}, fmt.Errorf("unexpected rollback result: %T", msg)
+}
+
+func defaultListBackups(moduleDir string) ([]utils.DependencyBackupInfo, error) {
+	msg := utils.ListDependencyBackupsCmd(moduleDir)()
+	backups, ok := msg.(utils.DependencyBackupsMsg)
+	if ok {
+		return []utils.DependencyBackupInfo(backups), nil
+	}
+	if errMsg, ok := msg.(utils.DependencyErrMsg); ok {
+		return nil, errMsg.Err
+	}
+	return nil, fmt.Errorf("unexpected backup list result: %T", msg)
+}
+
+func defaultRestoreBackup(moduleDir, name string) (utils.DependenciesRestoredMsg, error) {
+	msg := utils.RestoreDependencyBackup(moduleDir, name)()
+	if restored, ok := msg.(utils.DependenciesRestoredMsg); ok {
+		return restored, nil
+	}
+	if errMsg, ok := msg.(utils.DependencyErrMsg); ok {
+		return utils.DependenciesRestoredMsg{}, errMsg.Err
+	}
+	return utils.DependenciesRestoredMsg{}, fmt.Errorf("unexpected restore result: %T", msg)
 }
 
 // defaultConfirm returns a Confirm implementation that prompts on
@@ -219,6 +250,56 @@ func (s *DepsService) RunCheck() error {
 	} else {
 		fmt.Fprintf(s.Stdout, "\n📦 %d direct update(s) available.\n", updates)
 	}
+	return nil
+}
+
+// RunBackups prints saved dependency backups for the current module.
+func (s *DepsService) RunBackups() error {
+	backups, err := s.ListBackups(s.ModuleDir)
+	if err != nil {
+		return fmt.Errorf("failed to list dependency backups: %w", err)
+	}
+	fmt.Fprintf(s.Stdout, "📦 Dependency backups in %s:\n\n", s.ModuleDir)
+	if len(backups) == 0 {
+		fmt.Fprintln(s.Stdout, "  (no backups)")
+		return nil
+	}
+	for _, b := range backups {
+		fmt.Fprintf(
+			s.Stdout,
+			"  %s\t%s\t%s\t%d update(s)\n",
+			b.Name,
+			b.ModulePath,
+			b.Kind,
+			b.Updated,
+		)
+	}
+	return nil
+}
+
+// RunRestore restores one saved dependency backup by filename.
+func (s *DepsService) RunRestore(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("backup filename is required")
+	}
+	ok, err := s.Confirm(fmt.Sprintf("Restore dependency backup %s?", name), true)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintln(s.Stdout, "🛑 Restore canceled.")
+		return nil
+	}
+	restored, err := s.RestoreBackup(s.ModuleDir, name)
+	if err != nil {
+		return fmt.Errorf("restore failed: %w", err)
+	}
+	fmt.Fprintf(
+		s.Stdout,
+		"✅ Restored dependencies from %s (%s).\n",
+		restored.BackupName,
+		restored.BackupCreated.Format("2006-01-02 15:04:05"),
+	)
 	return nil
 }
 
