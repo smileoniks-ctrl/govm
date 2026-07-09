@@ -20,6 +20,7 @@ const (
 	versionsDirName   = "versions"
 	downloadsDirName  = "downloads"
 	shimDirName       = "shim"
+	depsBackupDirName = "deps_backup"
 	activeVersionName = "active_version"
 	settingsFileName  = "settings.json"
 	legacyGovmDirName = "govm"
@@ -107,6 +108,16 @@ func (r *Resolver) SettingsFile() (string, error) {
 		return "", err
 	}
 	return filepath.Join(root, settingsFileName), nil
+}
+
+// DepsBackupDir returns the directory that holds dependency backup
+// snapshots, e.g. ~/.govm/deps_backup.
+func (r *Resolver) DepsBackupDir() (string, error) {
+	root, err := r.RootDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, depsBackupDirName), nil
 }
 
 // LegacySettingsFile returns the historical location of the

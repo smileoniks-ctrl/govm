@@ -40,6 +40,7 @@ func TestResolverLayoutFromHome(t *testing.T) {
 		{"ShimDir", r.ShimDir, filepath.Join(home, ".govm", "shim")},
 		{"ActiveVersionFile", r.ActiveVersionFile, filepath.Join(home, ".govm", "active_version")},
 		{"SettingsFile", r.SettingsFile, filepath.Join(home, ".govm", "settings.json")},
+		{"DepsBackupDir", r.DepsBackupDir, filepath.Join(home, ".govm", "deps_backup")},
 	}
 
 	for _, tc := range cases {
