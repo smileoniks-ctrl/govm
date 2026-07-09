@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -49,6 +50,18 @@ type DependenciesUpdatedMsg struct {
 type DependenciesRolledBackMsg struct {
 	Snapshot     *DependencySnapshot
 	Dependencies []ModuleDependency
+}
+
+// DependencyBackupsMsg carries the saved dependency backups for the
+// current module.
+type DependencyBackupsMsg []DependencyBackupInfo
+
+// DependenciesRestoredMsg is sent after restoring module files from
+// a saved dependency backup.
+type DependenciesRestoredMsg struct {
+	BackupName    string
+	BackupCreated time.Time
+	Dependencies  []ModuleDependency
 }
 
 // DependencyCheckResultMsg reports the result of the post-update
@@ -216,6 +229,9 @@ func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency) tea.Cmd
 			return DependencyErrMsg{Err: err}
 		}
 		snap.Updatable = entries
+		if _, err := SaveDependencyBackup(root, snap, DependencyBackupKindPreUpdate); err != nil {
+			return DependencyErrMsg{Err: err}
+		}
 
 		args := []string{"get"}
 		for _, d := range updatable {
@@ -250,6 +266,18 @@ func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency) tea.Cmd
 			Dependencies: []ModuleDependency(depsMsg),
 			Snapshot:     snap,
 		}
+	}
+}
+
+// ListDependencyBackupsCmd lists saved dependency backups for the
+// module containing moduleDir.
+func ListDependencyBackupsCmd(moduleDir string) tea.Cmd {
+	return func() tea.Msg {
+		backups, err := ListDependencyBackups(moduleDir)
+		if err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+		return DependencyBackupsMsg(backups)
 	}
 }
 
@@ -359,6 +387,53 @@ func RollbackModuleDependencies(moduleDir string, snap *DependencySnapshot) tea.
 		return DependenciesRolledBackMsg{
 			Snapshot:     snap,
 			Dependencies: []ModuleDependency(depsMsg),
+		}
+	}
+}
+
+// RestoreDependencyBackup restores go.mod and go.sum from a saved
+// dependency backup, saving the current files first as a pre-restore
+// backup so the restore itself can be undone manually.
+func RestoreDependencyBackup(moduleDir, backupName string) tea.Cmd {
+	return func() tea.Msg {
+		root, err := ResolveModuleRoot(moduleDir)
+		if err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+		backup, err := LoadDependencyBackup(root, backupName)
+		if err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+		current, err := SnapshotModuleFiles(root)
+		if err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+		if _, err := SaveDependencyBackup(root, current, DependencyBackupKindPreRestore); err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+		if err := RestoreModuleFiles(root, backup.Snapshot); err != nil {
+			return DependencyErrMsg{Err: err}
+		}
+
+		tidyCmd := exec.Command("go", "mod", "tidy")
+		tidyCmd.Dir = root
+		if out, err := tidyCmd.CombinedOutput(); err != nil {
+			return DependencyErrMsg{Err: fmt.Errorf("restore go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
+		}
+
+		fresh := loadDependencies(root, true)
+		if errMsg, ok := fresh.(DependencyErrMsg); ok {
+			return errMsg
+		}
+		depsMsg, ok := fresh.(DependenciesMsg)
+		if !ok {
+			return DependencyErrMsg{Err: fmt.Errorf("unexpected refresh result: %T", fresh)}
+		}
+
+		return DependenciesRestoredMsg{
+			BackupName:    filepath.Base(backupName),
+			BackupCreated: backup.CreatedAt,
+			Dependencies:  []ModuleDependency(depsMsg),
 		}
 	}
 }

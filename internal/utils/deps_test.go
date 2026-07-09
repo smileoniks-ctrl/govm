@@ -1,12 +1,14 @@
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -83,6 +85,219 @@ func TestSnapshotModuleFiles_TrailingSeparator(t *testing.T) {
 	}
 	if snap.ModFile.Content != wantMod {
 		t.Fatalf("ModFile.Content mismatch: got %q, want %q", snap.ModFile.Content, wantMod)
+	}
+}
+
+func TestSaveDependencyBackupUsesModulePathAndTimestamp(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
+	writeFile(t, dir, "go.sum", "github.com/x/y v1.0.0 h1:abc=\n")
+
+	oldNow := dependencyBackupNow
+	dependencyBackupNow = func() time.Time {
+		return time.Date(2026, 7, 9, 12, 34, 56, 0, time.UTC)
+	}
+	t.Cleanup(func() { dependencyBackupNow = oldNow })
+
+	snap, err := SnapshotModuleFiles(dir)
+	if err != nil {
+		t.Fatalf("SnapshotModuleFiles: %v", err)
+	}
+	snap.Updatable = []DependencyUpdateEntry{{Path: "github.com/x/y", OldVersion: "v1.0.0", NewVersion: "v1.1.0"}}
+
+	info, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate)
+	if err != nil {
+		t.Fatalf("SaveDependencyBackup: %v", err)
+	}
+
+	wantPath := filepath.Join(home, ".govm", "deps_backup", "github.com_acme_my-app", "2026-07-09_12-34-56.json")
+	if info.Path != wantPath {
+		t.Fatalf("backup path = %q, want %q", info.Path, wantPath)
+	}
+
+	bytes, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("read backup: %v", err)
+	}
+	var backup DependencyBackup
+	if err := json.Unmarshal(bytes, &backup); err != nil {
+		t.Fatalf("unmarshal backup: %v", err)
+	}
+	if backup.SchemaVersion != 1 {
+		t.Fatalf("SchemaVersion = %d, want 1", backup.SchemaVersion)
+	}
+	if backup.ModulePath != "github.com/acme/my-app" {
+		t.Fatalf("ModulePath = %q", backup.ModulePath)
+	}
+	if backup.Kind != DependencyBackupKindPreUpdate {
+		t.Fatalf("Kind = %q", backup.Kind)
+	}
+	if backup.Snapshot == nil || backup.Snapshot.ModFile.Content == "" || len(backup.Snapshot.Updatable) != 1 {
+		t.Fatalf("snapshot not persisted correctly: %+v", backup.Snapshot)
+	}
+}
+
+func TestDependencyBackupProjectDirRejectsDotDotModulePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir, err := dependencyBackupProjectDir("..")
+	if err != nil {
+		t.Fatalf("dependencyBackupProjectDir: %v", err)
+	}
+
+	root := filepath.Join(home, ".govm", "deps_backup")
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		t.Fatalf("filepath.Rel: %v", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		t.Fatalf("backup dir escaped root: root=%q dir=%q rel=%q", root, dir, rel)
+	}
+	if dir == filepath.Clean(filepath.Join(root, "..")) {
+		t.Fatalf("backup dir collapsed to parent: %q", dir)
+	}
+}
+
+func TestSaveDependencyBackupDoesNotOverwriteSameSecondBackup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
+
+	oldNow := dependencyBackupNow
+	dependencyBackupNow = func() time.Time {
+		return time.Date(2026, 7, 9, 12, 34, 56, 0, time.UTC)
+	}
+	t.Cleanup(func() { dependencyBackupNow = oldNow })
+
+	snap, err := SnapshotModuleFiles(dir)
+	if err != nil {
+		t.Fatalf("SnapshotModuleFiles: %v", err)
+	}
+
+	first, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate)
+	if err != nil {
+		t.Fatalf("first SaveDependencyBackup: %v", err)
+	}
+	second, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreRestore)
+	if err != nil {
+		t.Fatalf("second SaveDependencyBackup: %v", err)
+	}
+
+	if first.Path == second.Path {
+		t.Fatalf("expected unique backup paths, both were %q", first.Path)
+	}
+
+	backups, err := ListDependencyBackups(dir)
+	if err != nil {
+		t.Fatalf("ListDependencyBackups: %v", err)
+	}
+	if len(backups) != 2 {
+		t.Fatalf("expected 2 backups, got %d: %+v", len(backups), backups)
+	}
+}
+
+func TestListDependencyBackupsSortsNewestFirst(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
+
+	snap, err := SnapshotModuleFiles(dir)
+	if err != nil {
+		t.Fatalf("SnapshotModuleFiles: %v", err)
+	}
+
+	oldNow := dependencyBackupNow
+	t.Cleanup(func() { dependencyBackupNow = oldNow })
+	for _, ts := range []time.Time{
+		time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC),
+		time.Date(2026, 7, 9, 11, 0, 0, 0, time.UTC),
+	} {
+		dependencyBackupNow = func() time.Time { return ts }
+		if _, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate); err != nil {
+			t.Fatalf("SaveDependencyBackup: %v", err)
+		}
+	}
+
+	backups, err := ListDependencyBackups(dir)
+	if err != nil {
+		t.Fatalf("ListDependencyBackups: %v", err)
+	}
+	if len(backups) != 2 {
+		t.Fatalf("expected 2 backups, got %d", len(backups))
+	}
+	if backups[0].Name != "2026-07-09_11-00-00.json" || backups[1].Name != "2026-07-09_10-00-00.json" {
+		t.Fatalf("unexpected order: %+v", backups)
+	}
+}
+
+func TestListDependencyBackupsSkipsInvalidBackupFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
+
+	oldNow := dependencyBackupNow
+	dependencyBackupNow = func() time.Time {
+		return time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	}
+	t.Cleanup(func() { dependencyBackupNow = oldNow })
+
+	snap, err := SnapshotModuleFiles(dir)
+	if err != nil {
+		t.Fatalf("SnapshotModuleFiles: %v", err)
+	}
+	info, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate)
+	if err != nil {
+		t.Fatalf("SaveDependencyBackup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(info.Path), "broken.json"), []byte("{not json"), 0644); err != nil {
+		t.Fatalf("write broken backup: %v", err)
+	}
+
+	backups, err := ListDependencyBackups(dir)
+	if err != nil {
+		t.Fatalf("ListDependencyBackups: %v", err)
+	}
+	if len(backups) != 1 {
+		t.Fatalf("expected 1 valid backup, got %d: %+v", len(backups), backups)
+	}
+	if backups[0].Name != info.Name {
+		t.Fatalf("expected valid backup %q, got %q", info.Name, backups[0].Name)
+	}
+}
+
+func TestLoadDependencyBackupRejectsDifferentModule(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module github.com/acme/current\n\ngo 1.26\n")
+	backupDir := filepath.Join(home, ".govm", "deps_backup", "github.com_acme_current")
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatalf("mkdir backup dir: %v", err)
+	}
+	backup := DependencyBackup{
+		SchemaVersion: 1,
+		CreatedAt:     time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+		ModulePath:    "github.com/acme/other",
+		Kind:          DependencyBackupKindPreUpdate,
+		Snapshot:      &DependencySnapshot{},
+	}
+	bytes, err := json.Marshal(backup)
+	if err != nil {
+		t.Fatalf("marshal backup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, "bad.json"), bytes, 0644); err != nil {
+		t.Fatalf("write backup: %v", err)
+	}
+
+	_, err = LoadDependencyBackup(dir, "bad.json")
+	if err == nil || !strings.Contains(err.Error(), "belongs to module") {
+		t.Fatalf("expected module mismatch error, got %v", err)
 	}
 }
 
