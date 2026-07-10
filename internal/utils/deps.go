@@ -354,14 +354,16 @@ func RunModuleDependencyChecks(moduleDir string) tea.Cmd {
 }
 
 type dependencyOperation struct {
-	resolveRoot func(string) (string, error)
-	runCommand  func(string, ...string) ([]byte, error)
-	load        func(string, bool) tea.Msg
+	resolveRoot  func(string) (string, error)
+	restoreFiles func(string, *DependencySnapshot) error
+	runCommand   func(string, ...string) ([]byte, error)
+	load         func(string, bool) tea.Msg
 }
 
 func defaultDependencyOperation() dependencyOperation {
 	return dependencyOperation{
-		resolveRoot: ResolveModuleRoot,
+		resolveRoot:  ResolveModuleRoot,
+		restoreFiles: RestoreModuleFiles,
 		runCommand: func(moduleDir string, args ...string) ([]byte, error) {
 			cmd := exec.Command("go", args...)
 			cmd.Dir = moduleDir
@@ -369,6 +371,13 @@ func defaultDependencyOperation() dependencyOperation {
 		},
 		load: loadDependencies,
 	}
+}
+
+func (operation dependencyOperation) restore(moduleDir string, snap *DependencySnapshot) error {
+	if operation.restoreFiles == nil {
+		return RestoreModuleFiles(moduleDir, snap)
+	}
+	return operation.restoreFiles(moduleDir, snap)
 }
 
 // RollbackModuleDependencies restores go.mod and go.sum from snap,
@@ -388,7 +397,7 @@ func rollbackModuleDependencies(moduleDir string, snap *DependencySnapshot, oper
 			return DependencyErrMsg{Err: err}
 		}
 
-		if err := RestoreModuleFiles(root, snap); err != nil {
+		if err := operation.restore(root, snap); err != nil {
 			return DependencyErrMsg{Err: err}
 		}
 
@@ -436,13 +445,20 @@ func restoreDependencyBackup(moduleDir, backupName string, operation dependencyO
 		if _, err := SaveDependencyBackup(root, current, DependencyBackupKindPreRestore); err != nil {
 			return DependencyErrMsg{Err: err}
 		}
-		if err := RestoreModuleFiles(root, backup.Snapshot); err != nil {
-			return DependencyErrMsg{Err: err}
+		if err := operation.restore(root, backup.Snapshot); err != nil {
+			restoreErr := fmt.Errorf("restore backup module files: %w", err)
+			if compensationErr := operation.restore(root, current); compensationErr != nil {
+				return DependencyErrMsg{Err: errors.Join(
+					restoreErr,
+					fmt.Errorf("restore original module files after backup restore failure: %w", compensationErr),
+				)}
+			}
+			return DependencyErrMsg{Err: restoreErr}
 		}
 
 		if out, err := operation.runCommand(root, "mod", "tidy"); err != nil {
 			tidyErr := fmt.Errorf("restore go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)
-			if rollbackErr := RestoreModuleFiles(root, current); rollbackErr != nil {
+			if rollbackErr := operation.restore(root, current); rollbackErr != nil {
 				return DependencyErrMsg{Err: errors.Join(
 					tidyErr,
 					fmt.Errorf("restore original module files after tidy failure: %w", rollbackErr),

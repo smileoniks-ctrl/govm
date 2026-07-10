@@ -197,6 +197,83 @@ func TestRestoreDependencyBackup_TidyFailureHasContext(t *testing.T) {
 	}
 }
 
+func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *testing.T) {
+	setTestHome(t)
+	root := t.TempDir()
+	currentMod := "module example.com/app\n\ngo 1.26\n\nrequire example.com/current v1.0.0\n"
+	currentSum := "example.com/current v1.0.0 h1:current=\n"
+	restoredMod := "module example.com/app\n\ngo 1.26\n\nrequire example.com/restored v2.0.0\n"
+	restoredSum := "example.com/restored v2.0.0 h1:restored=\n"
+	writeFile(t, root, "go.mod", currentMod)
+	writeFile(t, root, "go.sum", currentSum)
+
+	backup, err := SnapshotModuleFiles(root)
+	if err != nil {
+		t.Fatalf("SnapshotModuleFiles: %v", err)
+	}
+	backup.ModFile.Content = restoredMod
+	backup.SumFile.Content = restoredSum
+	info, err := SaveDependencyBackup(root, backup, DependencyBackupKindPreUpdate)
+	if err != nil {
+		t.Fatalf("SaveDependencyBackup: %v", err)
+	}
+
+	restoreCalls := 0
+	msg := restoreDependencyBackup(root, info.Name, dependencyOperation{
+		resolveRoot: func(string) (string, error) { return root, nil },
+		restoreFiles: func(moduleDir string, snap *DependencySnapshot) error {
+			restoreCalls++
+			if restoreCalls == 1 {
+				writeFile(t, moduleDir, "go.mod", snap.ModFile.Content)
+				writeFile(t, moduleDir, "go.sum", "partial restore result\n")
+				return errors.New("restore failed")
+			}
+			return RestoreModuleFiles(moduleDir, snap)
+		},
+		runCommand: func(string, ...string) ([]byte, error) {
+			t.Fatal("command must not run after restore error")
+			return nil, nil
+		},
+		load: func(string, bool) tea.Msg { t.Fatal("loader must not run after restore error"); return nil },
+	})()
+
+	errMsg, ok := msg.(DependencyErrMsg)
+	if !ok || !strings.Contains(errMsg.Err.Error(), "restore failed") {
+		t.Fatalf("message = %+v, want restore error", msg)
+	}
+	if restoreCalls != 2 {
+		t.Fatalf("restore calls = %d, want 2", restoreCalls)
+	}
+	gotMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read restored go.mod: %v", err)
+	}
+	if string(gotMod) != currentMod {
+		t.Fatalf("go.mod after restore failure = %q, want original bytes %q", gotMod, currentMod)
+	}
+	gotSum, err := os.ReadFile(filepath.Join(root, "go.sum"))
+	if err != nil {
+		t.Fatalf("read restored go.sum: %v", err)
+	}
+	if string(gotSum) != currentSum {
+		t.Fatalf("go.sum after restore failure = %q, want original bytes %q", gotSum, currentSum)
+	}
+	backups, err := ListDependencyBackups(root)
+	if err != nil {
+		t.Fatalf("ListDependencyBackups: %v", err)
+	}
+	foundPreRestore := false
+	for _, candidate := range backups {
+		if candidate.Kind == DependencyBackupKindPreRestore {
+			foundPreRestore = true
+			break
+		}
+	}
+	if !foundPreRestore {
+		t.Fatal("expected pre-restore backup to remain after restore failure")
+	}
+}
+
 func TestRollbackModuleDependencies_TidyFailureHasContext(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n")
