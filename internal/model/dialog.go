@@ -64,7 +64,33 @@ func rebuildDialogStyles() {
 
 const maxDependencyListLines = 6
 
-func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.DependencyUpdateEntry) string {
+func dependencyDialogWidth(viewportWidth []int) int {
+	width := 64
+	if len(viewportWidth) > 0 {
+		width = viewportWidth[0]
+	}
+	if width < 1 {
+		width = 1
+	}
+	return min(64, width)
+}
+
+func renderDependencyDialog(content string, errorStyle bool, viewportWidth []int) string {
+	width := dependencyDialogWidth(viewportWidth)
+	contentWidth := max(1, width-6)
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = ansi.Cut(line, 0, contentWidth)
+	}
+
+	style := dialogBoxStyle
+	if errorStyle {
+		style = dialogErrorBoxStyle
+	}
+	return style.Width(width).Render(strings.Join(lines, "\n"))
+}
+
+func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.DependencyUpdateEntry, viewportWidth ...int) string {
 	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
 	if yesSelected {
 		yesBtn = dialogActiveStyle
@@ -109,10 +135,10 @@ func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.Dependency
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
-	return dialogBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return renderDependencyDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
 }
 
-func renderDependencyChecksDialog(yesSelected bool) string {
+func renderDependencyChecksDialog(yesSelected bool, viewportWidth ...int) string {
 	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
 	if yesSelected {
 		yesBtn = dialogActiveStyle
@@ -138,10 +164,10 @@ func renderDependencyChecksDialog(yesSelected bool) string {
 		buttons,
 	}
 
-	return dialogBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return renderDependencyDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
 }
 
-func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCheckResultMsg) string {
+func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCheckResultMsg, viewportWidth ...int) string {
 	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
 	if yesSelected {
 		yesBtn = dialogActiveStyle
@@ -172,10 +198,10 @@ func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCh
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
-	return dialogErrorBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return renderDependencyDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), true, viewportWidth)
 }
 
-func renderDependencyRestoreDialog(yesSelected bool, backups []utils.DependencyBackupInfo, cursor int) string {
+func renderDependencyRestoreDialog(yesSelected bool, backups []utils.DependencyBackupInfo, cursor int, viewportWidth ...int) string {
 	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
 	if yesSelected {
 		yesBtn = dialogActiveStyle
@@ -230,7 +256,7 @@ func renderDependencyRestoreDialog(yesSelected bool, backups []utils.DependencyB
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
-	return dialogBoxStyle.Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
+	return renderDependencyDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
 }
 
 func overlayDialog(background, dialog string, width, height int) string {

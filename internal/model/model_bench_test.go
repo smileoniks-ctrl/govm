@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"testing"
 
 	"charm.land/bubbles/v2/list"
@@ -186,5 +187,29 @@ func BenchmarkRenderDependencyUpdateDialog(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = renderDependencyUpdateDialog(true, entries)
 		_ = renderDependencyUpdateDialog(false, entries)
+	}
+}
+
+func BenchmarkRenderDependencyDialogsCompact(b *testing.B) {
+	result := &utils.DependencyCheckResultMsg{
+		Command: "go test ./...",
+		Output:  "FAIL: dependency test output that is deliberately longer than the compact dialog content area",
+	}
+	backups := []utils.DependencyBackupInfo{{
+		Name:    "2026-07-09_12-00-00-a-long-backup-filename.json",
+		Kind:    utils.DependencyBackupKindPreUpdate,
+		Updated: 1,
+	}}
+
+	for _, width := range []int{30, 59, 60} {
+		b.Run(strconv.Itoa(width), func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = renderDependencyChecksDialog(true, width)
+				_ = renderDependencyRollbackDialog(true, result, width)
+				_ = renderDependencyRestoreDialog(true, backups, 0, width)
+			}
+		})
 	}
 }

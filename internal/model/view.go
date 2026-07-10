@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
@@ -15,6 +16,12 @@ func (m Model) View() tea.View {
 	appStyle := styles.AppStyleFor(m.Layout)
 	width := m.viewWidth()
 	height := m.viewHeight()
+	viewportWidth := width
+	physicalViewportWidth := 0
+	if m.TermWidth > 0 {
+		viewportWidth = m.TermWidth
+		physicalViewportWidth = m.TermWidth
+	}
 
 	if m.Err != nil {
 		return tea.NewView(appStyle.Render(renderStatus("error", fmt.Sprintf("Error: %s", m.Err), width)))
@@ -50,6 +57,7 @@ func (m Model) View() tea.View {
 		m.Deps.Dialog.ConfirmingChecks,
 		m.Deps.Dialog.ConfirmingRollback,
 		m.Deps.Dialog.ConfirmingRestoreBackup,
+		m.Deps.Dialog.RestoreChoiceYes,
 		width,
 		m.Layout,
 	))
@@ -65,13 +73,16 @@ func (m Model) View() tea.View {
 				NewVersion: d.Latest,
 			})
 		}
-		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.Deps.Dialog.UpdateChoiceYes, entries), width, height)
+		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.Deps.Dialog.UpdateChoiceYes, entries, viewportWidth), viewportWidth, height)
 	} else if m.Deps.Dialog.ConfirmingChecks {
-		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.Deps.Dialog.CheckChoiceYes), width, height)
+		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.Deps.Dialog.CheckChoiceYes, viewportWidth), viewportWidth, height)
 	} else if m.Deps.Dialog.ConfirmingRollback {
-		rendered = overlayDialog(rendered, renderDependencyRollbackDialog(m.Deps.Dialog.RollbackChoiceYes, m.Deps.LastCheckResult), width, height)
+		rendered = overlayDialog(rendered, renderDependencyRollbackDialog(m.Deps.Dialog.RollbackChoiceYes, m.Deps.LastCheckResult, viewportWidth), viewportWidth, height)
 	} else if m.Deps.Dialog.ConfirmingRestoreBackup {
-		rendered = overlayDialog(rendered, renderDependencyRestoreDialog(m.Deps.Dialog.RestoreChoiceYes, m.Deps.Backups, m.Deps.BackupCursor), width, height)
+		rendered = overlayDialog(rendered, renderDependencyRestoreDialog(m.Deps.Dialog.RestoreChoiceYes, m.Deps.Backups, m.Deps.BackupCursor, viewportWidth), viewportWidth, height)
+	}
+	if physicalViewportWidth > 0 {
+		rendered = truncateViewWidth(rendered, physicalViewportWidth)
 	}
 
 	v := tea.NewView(rendered)
@@ -194,7 +205,7 @@ func themeLabel(name config.ThemeName) string {
 	return "Current"
 }
 
-func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChecks, confirmingRollback, confirmingRestore bool, width int, layout styles.LayoutMode) string {
+func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChecks, confirmingRollback, confirmingRestore, restoreChoiceYes bool, width int, layout styles.LayoutMode) string {
 	var hints [][2]string
 
 	switch {
@@ -222,10 +233,14 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 		}
 		return renderKeyHints(hints, width, layout)
 	case confirmingRestore:
+		action := "cancel"
+		if restoreChoiceYes {
+			action = "restore"
+		}
 		hints = [][2]string{
 			{"↑/↓", "select"},
 			{"←/→", "choose"},
-			{"enter", "restore"},
+			{"enter", action},
 			{"esc", "cancel"},
 		}
 		return renderKeyHints(hints, width, layout)
@@ -309,6 +324,17 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 	}
 
 	return renderKeyHints(hints, width, layout)
+}
+
+func truncateViewWidth(rendered string, width int) string {
+	if width < 1 {
+		return rendered
+	}
+	lines := strings.Split(rendered, "\n")
+	for i, line := range lines {
+		lines[i] = ansi.Cut(line, 0, width)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderKeyHints(hints [][2]string, width int, layout styles.LayoutMode) string {

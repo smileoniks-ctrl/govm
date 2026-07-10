@@ -339,12 +339,41 @@ func TestWindowSizeMsgResizesDepsTable(t *testing.T) {
 	}
 }
 
+func TestWindowSizeMsgCompactUsesPhysicalContentWidth(t *testing.T) {
+	tests := []struct {
+		name      string
+		termWidth int
+		wantWidth int
+	}{
+		{name: "minimum terminal", termWidth: 30, wantWidth: 28},
+		{name: "below compact breakpoint", termWidth: 59, wantWidth: 57},
+		{name: "compact breakpoint", termWidth: 60, wantWidth: 56},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: tt.termWidth, Height: 24})
+			got := updated.(Model)
+
+			if got.Width != tt.wantWidth {
+				t.Fatalf("content width = %d, want %d", got.Width, tt.wantWidth)
+			}
+			if got.Deps.Table.Width() != tt.wantWidth {
+				t.Fatalf("deps table width = %d, want %d", got.Deps.Table.Width(), tt.wantWidth)
+			}
+		})
+	}
+}
+
 func TestRefreshOnDepsTabTriggersCheckCmd(t *testing.T) {
 	m := newTestModel(t)
 
 	// Switch to deps tab
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
+	m = updated.(Model)
+	updated, _ = m.Update(utils.DependenciesMsg{})
 	m = updated.(Model)
 
 	// Press 'r' on deps tab
@@ -364,6 +393,8 @@ func TestPressBOnDepsTabTriggersBackupListCmd(t *testing.T) {
 	m := newTestModel(t)
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
+	m = updated.(Model)
+	updated, _ = m.Update(utils.DependenciesMsg{})
 	m = updated.(Model)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'b'})
@@ -771,6 +802,126 @@ func TestRenderDependencyRollbackDialogContainsCommand(t *testing.T) {
 	}
 }
 
+func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
+	longPath := "github.com/acme/very-long-module-name-that-must-not-overflow-the-terminal"
+	longOutput := "FAIL: " + strings.Repeat("a", 100)
+	backups := []utils.DependencyBackupInfo{{
+		Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
+		Kind:    utils.DependencyBackupKindPreUpdate,
+		Updated: 1,
+	}}
+
+	tests := []struct {
+		name   string
+		render func(width int) string
+	}{
+		{
+			name: "update",
+			render: func(width int) string {
+				return renderDependencyUpdateDialog(true, []utils.DependencyUpdateEntry{{
+					Path: longPath, OldVersion: "v1.0.0", NewVersion: "v1.1.0",
+				}}, width)
+			},
+		},
+		{
+			name: "checks",
+			render: func(width int) string {
+				return renderDependencyChecksDialog(true, width)
+			},
+		},
+		{
+			name: "rollback",
+			render: func(width int) string {
+				return renderDependencyRollbackDialog(true, &utils.DependencyCheckResultMsg{
+					Command: longPath,
+					Output:  longOutput,
+				}, width)
+			},
+		},
+		{
+			name: "restore",
+			render: func(width int) string {
+				return renderDependencyRestoreDialog(true, backups, 0, width)
+			},
+		},
+	}
+
+	for _, width := range []int{30, 59, 60} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s-%d", tt.name, width), func(t *testing.T) {
+				for _, line := range strings.Split(tt.render(width), "\n") {
+					if got := ansi.StringWidth(line); got > width {
+						t.Fatalf("line width = %d, want <= %d: %q", got, width, line)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Model)
+	}{
+		{
+			name: "update",
+			setup: func(m *Model) {
+				m.Deps.Dialog.ConfirmingUpdate = true
+				m.Deps.Dependencies = []utils.ModuleDependency{{
+					Path:    "github.com/acme/very-long-module-name-that-must-not-overflow-the-terminal",
+					Version: "v1.0.0",
+					Latest:  "v1.1.0",
+				}}
+			},
+		},
+		{
+			name: "checks",
+			setup: func(m *Model) {
+				m.Deps.Dialog.ConfirmingChecks = true
+			},
+		},
+		{
+			name: "rollback",
+			setup: func(m *Model) {
+				m.Deps.Dialog.ConfirmingRollback = true
+				m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
+					Command: "go test ./...",
+					Output:  strings.Repeat("failure output ", 12),
+				}
+			},
+		},
+		{
+			name: "restore",
+			setup: func(m *Model) {
+				m.Deps.Dialog.ConfirmingRestoreBackup = true
+				m.Deps.Backups = []utils.DependencyBackupInfo{{
+					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
+					Kind:    utils.DependencyBackupKindPreUpdate,
+					Updated: 1,
+				}}
+			},
+		},
+	}
+
+	for _, width := range []int{30, 59, 60} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s-%d", tt.name, width), func(t *testing.T) {
+				m := newTestModel(t)
+				updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+				m = updated.(Model)
+				tt.setup(&m)
+
+				for _, line := range strings.Split(m.View().Content, "\n") {
+					if got := ansi.StringWidth(line); got > width {
+						t.Fatalf("view line width = %d, want <= %d: %q", got, width, line)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestDialogRendersOverDepsView(t *testing.T) {
 	m := newTestModel(t)
 
@@ -1059,7 +1210,7 @@ func TestSpliceCentered_UsesVisibleColumnsWithANSI(t *testing.T) {
 }
 
 func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
-	got := renderHelp(0, true, false, false, false, false, 80, styles.LayoutNormal)
+	got := renderHelp(0, true, false, false, false, false, false, 80, styles.LayoutNormal)
 	if !strings.Contains(stripANSI(got), "confirm") {
 		t.Fatalf("expected confirm hint, got: %s", got)
 	}
@@ -1068,8 +1219,28 @@ func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
 	}
 }
 
+func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
+	tests := []struct {
+		name             string
+		restoreChoiceYes bool
+		want             string
+	}{
+		{name: "restore selected", restoreChoiceYes: true, want: "enter restore"},
+		{name: "cancel selected", restoreChoiceYes: false, want: "enter cancel"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripANSI(renderHelp(DepsTab, false, false, false, false, true, tt.restoreChoiceYes, 80, styles.LayoutNormal))
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("expected help to contain %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestRenderHelp_DepsCompactTruncates(t *testing.T) {
-	got := renderHelp(2, false, false, false, false, false, 20, styles.LayoutCompact)
+	got := renderHelp(2, false, false, false, false, false, false, 20, styles.LayoutCompact)
 	if got == "" {
 		t.Fatal("expected non-empty help for deps compact")
 	}

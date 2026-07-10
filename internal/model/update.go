@@ -35,8 +35,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		frameH, frameV := styles.FrameOverhead(m.Layout)
 		contentWidth := msg.Width - frameH
-		if contentWidth < styles.MinTermWidth {
-			contentWidth = styles.MinTermWidth
+		if contentWidth < 1 {
+			contentWidth = 1
 		}
 
 		const fixedUIElements = 6
