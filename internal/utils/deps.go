@@ -352,6 +352,24 @@ func RunModuleDependencyChecks(moduleDir string) tea.Cmd {
 	}
 }
 
+type dependencyOperation struct {
+	resolveRoot func(string) (string, error)
+	runCommand  func(string, ...string) ([]byte, error)
+	load        func(string, bool) tea.Msg
+}
+
+func defaultDependencyOperation() dependencyOperation {
+	return dependencyOperation{
+		resolveRoot: ResolveModuleRoot,
+		runCommand: func(moduleDir string, args ...string) ([]byte, error) {
+			cmd := exec.Command("go", args...)
+			cmd.Dir = moduleDir
+			return cmd.CombinedOutput()
+		},
+		load: loadDependencies,
+	}
+}
+
 // RollbackModuleDependencies restores go.mod and go.sum from snap,
 // runs `go mod tidy` so the module cache and the restored files stay
 // consistent, and refreshes the dependency list. The provided
@@ -359,8 +377,12 @@ func RunModuleDependencyChecks(moduleDir string) tea.Cmd {
 // root is resolved via ResolveModuleRoot so the call works from any
 // subfolder of a Go module.
 func RollbackModuleDependencies(moduleDir string, snap *DependencySnapshot) tea.Cmd {
+	return rollbackModuleDependencies(moduleDir, snap, defaultDependencyOperation())
+}
+
+func rollbackModuleDependencies(moduleDir string, snap *DependencySnapshot, operation dependencyOperation) tea.Cmd {
 	return func() tea.Msg {
-		root, err := ResolveModuleRoot(moduleDir)
+		root, err := operation.resolveRoot(moduleDir)
 		if err != nil {
 			return DependencyErrMsg{Err: err}
 		}
@@ -369,13 +391,11 @@ func RollbackModuleDependencies(moduleDir string, snap *DependencySnapshot) tea.
 			return DependencyErrMsg{Err: err}
 		}
 
-		tidyCmd := exec.Command("go", "mod", "tidy")
-		tidyCmd.Dir = root
-		if out, err := tidyCmd.CombinedOutput(); err != nil {
+		if out, err := operation.runCommand(root, "mod", "tidy"); err != nil {
 			return DependencyErrMsg{Err: fmt.Errorf("rollback go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
 		}
 
-		fresh := loadDependencies(root, true)
+		fresh := operation.load(root, false)
 		if errMsg, ok := fresh.(DependencyErrMsg); ok {
 			return errMsg
 		}
@@ -395,8 +415,12 @@ func RollbackModuleDependencies(moduleDir string, snap *DependencySnapshot) tea.
 // dependency backup, saving the current files first as a pre-restore
 // backup so the restore itself can be undone manually.
 func RestoreDependencyBackup(moduleDir, backupName string) tea.Cmd {
+	return restoreDependencyBackup(moduleDir, backupName, defaultDependencyOperation())
+}
+
+func restoreDependencyBackup(moduleDir, backupName string, operation dependencyOperation) tea.Cmd {
 	return func() tea.Msg {
-		root, err := ResolveModuleRoot(moduleDir)
+		root, err := operation.resolveRoot(moduleDir)
 		if err != nil {
 			return DependencyErrMsg{Err: err}
 		}
@@ -415,13 +439,11 @@ func RestoreDependencyBackup(moduleDir, backupName string) tea.Cmd {
 			return DependencyErrMsg{Err: err}
 		}
 
-		tidyCmd := exec.Command("go", "mod", "tidy")
-		tidyCmd.Dir = root
-		if out, err := tidyCmd.CombinedOutput(); err != nil {
+		if out, err := operation.runCommand(root, "mod", "tidy"); err != nil {
 			return DependencyErrMsg{Err: fmt.Errorf("restore go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
 		}
 
-		fresh := loadDependencies(root, true)
+		fresh := operation.load(root, false)
 		if errMsg, ok := fresh.(DependencyErrMsg); ok {
 			return errMsg
 		}
