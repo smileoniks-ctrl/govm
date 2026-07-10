@@ -28,6 +28,12 @@ func setTestHome(t *testing.T) string {
 	return home
 }
 
+func fixedDependencyBackupStore(now time.Time) dependencyBackupStore {
+	return dependencyBackupStore{
+		now: func() time.Time { return now },
+	}
+}
+
 func TestReadModulePath_QuotedDirective(t *testing.T) {
 	requireGoToolchain(t)
 
@@ -150,19 +156,18 @@ func TestSaveDependencyBackupUsesModulePathAndTimestamp(t *testing.T) {
 	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
 	writeFile(t, dir, "go.sum", "github.com/x/y v1.0.0 h1:abc=\n")
 
-	oldNow := dependencyBackupNow
-	dependencyBackupNow = func() time.Time {
-		return time.Date(2026, 7, 9, 12, 34, 56, 0, time.UTC)
-	}
-	t.Cleanup(func() { dependencyBackupNow = oldNow })
-
 	snap, err := SnapshotModuleFiles(dir)
 	if err != nil {
 		t.Fatalf("SnapshotModuleFiles: %v", err)
 	}
 	snap.Updatable = []DependencyUpdateEntry{{Path: "github.com/x/y", OldVersion: "v1.0.0", NewVersion: "v1.1.0"}}
 
-	info, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate)
+	context, err := resolveModuleContext(dir)
+	if err != nil {
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
+	store := fixedDependencyBackupStore(time.Date(2026, 7, 9, 12, 34, 56, 0, time.UTC))
+	info, err := store.save(context, snap, DependencyBackupKindPreUpdate)
 	if err != nil {
 		t.Fatalf("SaveDependencyBackup: %v", err)
 	}
@@ -220,24 +225,23 @@ func TestSaveDependencyBackupDoesNotOverwriteSameSecondBackup(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
 
-	oldNow := dependencyBackupNow
-	dependencyBackupNow = func() time.Time {
-		return time.Date(2026, 7, 9, 12, 34, 56, 0, time.UTC)
-	}
-	t.Cleanup(func() { dependencyBackupNow = oldNow })
-
 	snap, err := SnapshotModuleFiles(dir)
 	if err != nil {
 		t.Fatalf("SnapshotModuleFiles: %v", err)
 	}
 
-	first, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate)
+	context, err := resolveModuleContext(dir)
 	if err != nil {
-		t.Fatalf("first SaveDependencyBackup: %v", err)
+		t.Fatalf("resolveModuleContext: %v", err)
 	}
-	second, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreRestore)
+	store := fixedDependencyBackupStore(time.Date(2026, 7, 9, 12, 34, 56, 0, time.UTC))
+	first, err := store.save(context, snap, DependencyBackupKindPreUpdate)
 	if err != nil {
-		t.Fatalf("second SaveDependencyBackup: %v", err)
+		t.Fatalf("first save: %v", err)
+	}
+	second, err := store.save(context, snap, DependencyBackupKindPreRestore)
+	if err != nil {
+		t.Fatalf("second save: %v", err)
 	}
 
 	if first.Path == second.Path {
@@ -263,15 +267,17 @@ func TestListDependencyBackupsSortsNewestFirst(t *testing.T) {
 		t.Fatalf("SnapshotModuleFiles: %v", err)
 	}
 
-	oldNow := dependencyBackupNow
-	t.Cleanup(func() { dependencyBackupNow = oldNow })
+	context, err := resolveModuleContext(dir)
+	if err != nil {
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
 	for _, ts := range []time.Time{
 		time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC),
 		time.Date(2026, 7, 9, 11, 0, 0, 0, time.UTC),
 	} {
-		dependencyBackupNow = func() time.Time { return ts }
-		if _, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate); err != nil {
-			t.Fatalf("SaveDependencyBackup: %v", err)
+		store := fixedDependencyBackupStore(ts)
+		if _, err := store.save(context, snap, DependencyBackupKindPreUpdate); err != nil {
+			t.Fatalf("save: %v", err)
 		}
 	}
 
@@ -292,17 +298,16 @@ func TestListDependencyBackupsSkipsInvalidBackupFiles(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
 
-	oldNow := dependencyBackupNow
-	dependencyBackupNow = func() time.Time {
-		return time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
-	}
-	t.Cleanup(func() { dependencyBackupNow = oldNow })
-
 	snap, err := SnapshotModuleFiles(dir)
 	if err != nil {
 		t.Fatalf("SnapshotModuleFiles: %v", err)
 	}
-	info, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate)
+	context, err := resolveModuleContext(dir)
+	if err != nil {
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
+	store := fixedDependencyBackupStore(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	info, err := store.save(context, snap, DependencyBackupKindPreUpdate)
 	if err != nil {
 		t.Fatalf("SaveDependencyBackup: %v", err)
 	}

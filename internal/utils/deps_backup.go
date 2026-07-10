@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,7 +21,42 @@ const (
 	dependencyBackupSchemaVersion  = 1
 )
 
-var dependencyBackupNow = time.Now
+type moduleContext struct {
+	Root string
+	Path string
+}
+
+func resolveModuleContext(moduleDir string) (moduleContext, error) {
+	root, err := ResolveModuleRoot(moduleDir)
+	if err != nil {
+		return moduleContext{}, err
+	}
+	bytes, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return moduleContext{}, fmt.Errorf("read go.mod: %w", err)
+	}
+	modulePath := modfile.ModulePath(bytes)
+	if modulePath == "" {
+		return moduleContext{}, fmt.Errorf("read go.mod: module path not found")
+	}
+	return moduleContext{Root: root, Path: modulePath}, nil
+}
+
+type dependencyBackupStore struct {
+	now   func() time.Time
+	write func(*os.File, []byte) (int, error)
+	sync  func(*os.File) error
+	close func(*os.File) error
+}
+
+func defaultDependencyBackupStore() dependencyBackupStore {
+	return dependencyBackupStore{
+		now:   time.Now,
+		write: (*os.File).Write,
+		sync:  (*os.File).Sync,
+		close: (*os.File).Close,
+	}
+}
 
 // DependencyBackup is the on-disk JSON format for a dependency snapshot.
 type DependencyBackup struct {
@@ -43,54 +79,23 @@ type DependencyBackupInfo struct {
 }
 
 func SaveDependencyBackup(moduleDir string, snap *DependencySnapshot, kind string) (DependencyBackupInfo, error) {
-	if snap == nil {
-		return DependencyBackupInfo{}, fmt.Errorf("save dependency backup: nil snapshot")
-	}
-	modulePath, err := ReadModulePath(moduleDir)
+	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
 		return DependencyBackupInfo{}, err
 	}
-	root, err := ResolveModuleRoot(moduleDir)
-	if err != nil {
-		return DependencyBackupInfo{}, err
-	}
-
-	createdAt := dependencyBackupNow().UTC()
-	dir, err := dependencyBackupProjectDir(modulePath)
-	if err != nil {
-		return DependencyBackupInfo{}, err
-	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return DependencyBackupInfo{}, fmt.Errorf("create dependency backup dir: %w", err)
-	}
-
-	backup := DependencyBackup{
-		SchemaVersion: dependencyBackupSchemaVersion,
-		CreatedAt:     createdAt,
-		ModulePath:    modulePath,
-		ModuleDir:     root,
-		Kind:          kind,
-		Snapshot:      snap,
-	}
-	bytes, err := json.MarshalIndent(backup, "", "  ")
-	if err != nil {
-		return DependencyBackupInfo{}, fmt.Errorf("marshal dependency backup: %w", err)
-	}
-
-	name, path, err := writeDependencyBackupFile(dir, createdAt, bytes)
-	if err != nil {
-		return DependencyBackupInfo{}, fmt.Errorf("write dependency backup: %w", err)
-	}
-
-	return backupInfo(name, path, backup), nil
+	return saveDependencyBackupResolved(context, snap, kind)
 }
 
 func ListDependencyBackups(moduleDir string) ([]DependencyBackupInfo, error) {
-	modulePath, err := ReadModulePath(moduleDir)
+	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
 		return nil, err
 	}
-	dir, err := dependencyBackupProjectDir(modulePath)
+	return listDependencyBackupsResolved(context)
+}
+
+func listDependencyBackupsResolved(context moduleContext) ([]DependencyBackupInfo, error) {
+	dir, err := dependencyBackupProjectDir(context.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +117,7 @@ func ListDependencyBackups(moduleDir string) ([]DependencyBackupInfo, error) {
 		if err != nil {
 			continue
 		}
-		if backup.ModulePath != modulePath {
+		if backup.ModulePath != context.Path {
 			continue
 		}
 		backups = append(backups, backupInfo(entry.Name(), path, backup))
@@ -125,11 +130,15 @@ func ListDependencyBackups(moduleDir string) ([]DependencyBackupInfo, error) {
 }
 
 func LoadDependencyBackup(moduleDir, name string) (*DependencyBackup, error) {
-	modulePath, err := ReadModulePath(moduleDir)
+	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
 		return nil, err
 	}
-	dir, err := dependencyBackupProjectDir(modulePath)
+	return loadDependencyBackupResolved(context, name)
+}
+
+func loadDependencyBackupResolved(context moduleContext, name string) (*DependencyBackup, error) {
+	dir, err := dependencyBackupProjectDir(context.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -138,26 +147,18 @@ func LoadDependencyBackup(moduleDir, name string) (*DependencyBackup, error) {
 	if err != nil {
 		return nil, err
 	}
-	if backup.ModulePath != modulePath {
-		return nil, fmt.Errorf("backup %q belongs to module %q, current module is %q", base, backup.ModulePath, modulePath)
+	if backup.ModulePath != context.Path {
+		return nil, fmt.Errorf("backup %q belongs to module %q, current module is %q", base, backup.ModulePath, context.Path)
 	}
 	return &backup, nil
 }
 
 func ReadModulePath(moduleDir string) (string, error) {
-	root, err := ResolveModuleRoot(moduleDir)
+	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
 		return "", err
 	}
-	bytes, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil {
-		return "", fmt.Errorf("read go.mod: %w", err)
-	}
-	modulePath := modfile.ModulePath(bytes)
-	if modulePath == "" {
-		return "", fmt.Errorf("read go.mod: module path not found")
-	}
-	return modulePath, nil
+	return context.Path, nil
 }
 
 func dependencyBackupProjectDir(modulePath string) (string, error) {
@@ -176,7 +177,54 @@ func dependencyBackupProjectDir(modulePath string) (string, error) {
 	return dir, nil
 }
 
-func writeDependencyBackupFile(dir string, createdAt time.Time, bytes []byte) (string, string, error) {
+func saveDependencyBackupResolved(context moduleContext, snap *DependencySnapshot, kind string) (DependencyBackupInfo, error) {
+	return defaultDependencyBackupStore().save(context, snap, kind)
+}
+
+func (store dependencyBackupStore) save(context moduleContext, snap *DependencySnapshot, kind string) (DependencyBackupInfo, error) {
+	if snap == nil {
+		return DependencyBackupInfo{}, fmt.Errorf("save dependency backup: nil snapshot")
+	}
+	if store.now == nil {
+		store.now = time.Now
+	}
+	if store.write == nil {
+		store.write = (*os.File).Write
+	}
+	if store.sync == nil {
+		store.sync = (*os.File).Sync
+	}
+	if store.close == nil {
+		store.close = (*os.File).Close
+	}
+	createdAt := store.now().UTC()
+	dir, err := dependencyBackupProjectDir(context.Path)
+	if err != nil {
+		return DependencyBackupInfo{}, err
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return DependencyBackupInfo{}, fmt.Errorf("create dependency backup dir: %w", err)
+	}
+	backup := DependencyBackup{
+		SchemaVersion: dependencyBackupSchemaVersion,
+		CreatedAt:     createdAt,
+		ModulePath:    context.Path,
+		ModuleDir:     context.Root,
+		Kind:          kind,
+		Snapshot:      snap,
+	}
+	bytes, err := json.MarshalIndent(backup, "", "  ")
+	if err != nil {
+		return DependencyBackupInfo{}, fmt.Errorf("marshal dependency backup: %w", err)
+	}
+	name, path, err := store.writeFile(dir, createdAt, bytes)
+	if err != nil {
+		return DependencyBackupInfo{}, fmt.Errorf("write dependency backup: %w", err)
+	}
+	return backupInfo(name, path, backup), nil
+}
+
+func (store dependencyBackupStore) writeFile(dir string, createdAt time.Time, bytes []byte) (string, string, error) {
 	base := createdAt.Format("2006-01-02_15-04-05")
 	for i := 0; i < 1000; i++ {
 		name := base + ".json"
@@ -184,20 +232,61 @@ func writeDependencyBackupFile(dir string, createdAt time.Time, bytes []byte) (s
 			name = fmt.Sprintf("%s-%03d.json", base, i)
 		}
 		path := filepath.Join(dir, name)
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		reservation := path + ".reserve"
+		file, err := os.CreateTemp(dir, ".dependency-backup-*")
+		if err != nil {
+			return "", "", err
+		}
+		temp := file.Name()
+		cleanup := func() {
+			_ = os.Remove(temp)
+			_ = os.Remove(reservation)
+		}
+		n, err := store.write(file, bytes)
+		if err != nil {
+			_ = store.close(file)
+			cleanup()
+			return "", "", err
+		}
+		if n < len(bytes) {
+			_ = store.close(file)
+			cleanup()
+			return "", "", io.ErrShortWrite
+		}
+		if err := store.sync(file); err != nil {
+			_ = store.close(file)
+			cleanup()
+			return "", "", err
+		}
+		if err := store.close(file); err != nil {
+			cleanup()
+			return "", "", err
+		}
+		reserved, err := os.OpenFile(reservation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 		if err != nil {
 			if os.IsExist(err) {
+				_ = os.Remove(temp)
 				continue
 			}
+			cleanup()
 			return "", "", err
 		}
-		if _, err := file.Write(bytes); err != nil {
-			_ = file.Close()
-			_ = os.Remove(path)
+		if err := reserved.Close(); err != nil {
+			cleanup()
 			return "", "", err
 		}
-		if err := file.Close(); err != nil {
-			_ = os.Remove(path)
+		if _, err := os.Stat(path); err == nil {
+			cleanup()
+			continue
+		} else if !os.IsNotExist(err) {
+			cleanup()
+			return "", "", err
+		}
+		if err := os.Rename(temp, path); err != nil {
+			cleanup()
+			return "", "", err
+		}
+		if err := os.Remove(reservation); err != nil {
 			return "", "", err
 		}
 		return name, path, nil

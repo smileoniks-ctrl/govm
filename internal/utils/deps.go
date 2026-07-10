@@ -204,6 +204,10 @@ func UpdatableDirectDependencies(deps []ModuleDependency) []ModuleDependency {
 // available updates. It takes a snapshot of go.mod and go.sum before
 // running go get so the caller can roll back on check failure.
 func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency) tea.Cmd {
+	return updateModuleDependencies(moduleDir, deps, defaultDependencyOperation())
+}
+
+func updateModuleDependencies(moduleDir string, deps []ModuleDependency, operation dependencyOperation) tea.Cmd {
 	updatable := UpdatableDirectDependencies(deps)
 	if len(updatable) == 0 {
 		return func() tea.Msg {
@@ -221,16 +225,16 @@ func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency) tea.Cmd
 	}
 
 	return func() tea.Msg {
-		root, err := ResolveModuleRoot(moduleDir)
+		context, err := operation.resolve(moduleDir)
 		if err != nil {
 			return DependencyErrMsg{Err: err}
 		}
-		snap, err := SnapshotModuleFiles(root)
+		snap, err := SnapshotModuleFiles(context.Root)
 		if err != nil {
 			return DependencyErrMsg{Err: err}
 		}
 		snap.Updatable = entries
-		if _, err := SaveDependencyBackup(root, snap, DependencyBackupKindPreUpdate); err != nil {
+		if _, err := operation.save(context, snap, DependencyBackupKindPreUpdate); err != nil {
 			return DependencyErrMsg{Err: err}
 		}
 
@@ -239,21 +243,17 @@ func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency) tea.Cmd
 			args = append(args, fmt.Sprintf("%s@%s", d.Path, d.Latest))
 		}
 
-		getCmd := exec.Command("go", args...)
-		getCmd.Dir = root
-		if out, err := getCmd.CombinedOutput(); err != nil {
+		if out, err := operation.runCommand(context.Root, args...); err != nil {
 			return DependencyErrMsg{Err: fmt.Errorf("go get failed: %s: %w", strings.TrimSpace(string(out)), err)}
 		}
 
-		tidyCmd := exec.Command("go", "mod", "tidy")
-		tidyCmd.Dir = root
-		if out, err := tidyCmd.CombinedOutput(); err != nil {
+		if out, err := operation.runCommand(context.Root, "mod", "tidy"); err != nil {
 			return DependencyErrMsg{Err: fmt.Errorf("go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
 		}
 
 		// Refresh dependency list with available updates so the user
 		// can see the new state in the table.
-		fresh := loadDependencies(root, true)
+		fresh := operation.load(context.Root, true)
 		if errMsg, ok := fresh.(DependencyErrMsg); ok {
 			return errMsg
 		}
@@ -354,23 +354,54 @@ func RunModuleDependencyChecks(moduleDir string) tea.Cmd {
 }
 
 type dependencyOperation struct {
-	resolveRoot  func(string) (string, error)
-	restoreFiles func(string, *DependencySnapshot) error
-	runCommand   func(string, ...string) ([]byte, error)
-	load         func(string, bool) tea.Msg
+	resolveContext func(string) (moduleContext, error)
+	resolveRoot    func(string) (string, error)
+	restoreFiles   func(string, *DependencySnapshot) error
+	runCommand     func(string, ...string) ([]byte, error)
+	load           func(string, bool) tea.Msg
+	saveBackup     func(moduleContext, *DependencySnapshot, string) (DependencyBackupInfo, error)
+	loadBackup     func(moduleContext, string) (*DependencyBackup, error)
 }
 
 func defaultDependencyOperation() dependencyOperation {
 	return dependencyOperation{
-		resolveRoot:  ResolveModuleRoot,
-		restoreFiles: RestoreModuleFiles,
+		resolveContext: resolveModuleContext,
+		resolveRoot:    ResolveModuleRoot,
+		restoreFiles:   RestoreModuleFiles,
 		runCommand: func(moduleDir string, args ...string) ([]byte, error) {
 			cmd := exec.Command("go", args...)
 			cmd.Dir = moduleDir
 			return cmd.CombinedOutput()
 		},
-		load: loadDependencies,
+		load:       loadDependencies,
+		saveBackup: saveDependencyBackupResolved,
+		loadBackup: loadDependencyBackupResolved,
 	}
+}
+
+func (operation dependencyOperation) resolve(moduleDir string) (moduleContext, error) {
+	if operation.resolveContext != nil {
+		return operation.resolveContext(moduleDir)
+	}
+	root, err := operation.resolveRoot(moduleDir)
+	if err != nil {
+		return moduleContext{}, err
+	}
+	return resolveModuleContext(root)
+}
+
+func (operation dependencyOperation) save(context moduleContext, snap *DependencySnapshot, kind string) (DependencyBackupInfo, error) {
+	if operation.saveBackup == nil {
+		return saveDependencyBackupResolved(context, snap, kind)
+	}
+	return operation.saveBackup(context, snap, kind)
+}
+
+func (operation dependencyOperation) loadBackupResolved(context moduleContext, name string) (*DependencyBackup, error) {
+	if operation.loadBackup == nil {
+		return loadDependencyBackupResolved(context, name)
+	}
+	return operation.loadBackup(context, name)
 }
 
 func (operation dependencyOperation) restore(moduleDir string, snap *DependencySnapshot) error {
@@ -430,24 +461,24 @@ func RestoreDependencyBackup(moduleDir, backupName string) tea.Cmd {
 
 func restoreDependencyBackup(moduleDir, backupName string, operation dependencyOperation) tea.Cmd {
 	return func() tea.Msg {
-		root, err := operation.resolveRoot(moduleDir)
+		context, err := operation.resolve(moduleDir)
 		if err != nil {
 			return DependencyErrMsg{Err: err}
 		}
-		backup, err := LoadDependencyBackup(root, backupName)
+		backup, err := operation.loadBackupResolved(context, backupName)
 		if err != nil {
 			return DependencyErrMsg{Err: err}
 		}
-		current, err := SnapshotModuleFiles(root)
+		current, err := SnapshotModuleFiles(context.Root)
 		if err != nil {
 			return DependencyErrMsg{Err: err}
 		}
-		if _, err := SaveDependencyBackup(root, current, DependencyBackupKindPreRestore); err != nil {
+		if _, err := operation.save(context, current, DependencyBackupKindPreRestore); err != nil {
 			return DependencyErrMsg{Err: err}
 		}
-		if err := operation.restore(root, backup.Snapshot); err != nil {
+		if err := operation.restore(context.Root, backup.Snapshot); err != nil {
 			restoreErr := fmt.Errorf("restore backup module files: %w", err)
-			if compensationErr := operation.restore(root, current); compensationErr != nil {
+			if compensationErr := operation.restore(context.Root, current); compensationErr != nil {
 				return DependencyErrMsg{Err: errors.Join(
 					restoreErr,
 					fmt.Errorf("restore original module files after backup restore failure: %w", compensationErr),
@@ -456,9 +487,9 @@ func restoreDependencyBackup(moduleDir, backupName string, operation dependencyO
 			return DependencyErrMsg{Err: restoreErr}
 		}
 
-		if out, err := operation.runCommand(root, "mod", "tidy"); err != nil {
+		if out, err := operation.runCommand(context.Root, "mod", "tidy"); err != nil {
 			tidyErr := fmt.Errorf("restore go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)
-			if rollbackErr := operation.restore(root, current); rollbackErr != nil {
+			if rollbackErr := operation.restore(context.Root, current); rollbackErr != nil {
 				return DependencyErrMsg{Err: errors.Join(
 					tidyErr,
 					fmt.Errorf("restore original module files after tidy failure: %w", rollbackErr),
@@ -467,7 +498,7 @@ func restoreDependencyBackup(moduleDir, backupName string, operation dependencyO
 			return DependencyErrMsg{Err: tidyErr}
 		}
 
-		fresh := operation.load(root, false)
+		fresh := operation.load(context.Root, false)
 		if errMsg, ok := fresh.(DependencyErrMsg); ok {
 			return errMsg
 		}
