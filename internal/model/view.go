@@ -81,7 +81,7 @@ func (m Model) View() tea.View {
 	} else if m.Deps.Dialog.ConfirmingRestoreBackup {
 		rendered = overlayDialog(rendered, renderDependencyRestoreDialog(m.Deps.Dialog.RestoreChoiceYes, m.Deps.Backups, m.Deps.BackupCursor, viewportWidth), viewportWidth, height)
 	}
-	if physicalViewportWidth > 0 {
+	if shouldClampViewWidth(physicalViewportWidth, m.Layout) {
 		rendered = truncateViewWidth(rendered, physicalViewportWidth)
 	}
 
@@ -324,6 +324,10 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 	}
 
 	return renderKeyHints(hints, width, layout)
+}
+
+func shouldClampViewWidth(physicalViewportWidth int, layout styles.LayoutMode) bool {
+	return physicalViewportWidth > 0 && layout == styles.LayoutCompact
 }
 
 func truncateViewWidth(rendered string, width int) string {

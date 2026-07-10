@@ -77,6 +77,13 @@ func benchModel(b *testing.B) Model {
 	}
 }
 
+func benchModelAtViewport(b *testing.B, width int) Model {
+	b.Helper()
+	m := benchModel(b)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+	return updated.(Model)
+}
+
 func BenchmarkView_NormalLayout(b *testing.B) {
 	m := benchModel(b)
 	b.ReportAllocs()
@@ -125,6 +132,38 @@ func BenchmarkView_DepsTabWithPhysicalViewport(b *testing.B) {
 			m.CurrentTab = DepsTab
 			m.TermWidth = width
 			m.TermHeight = 30
+			m.Deps.Dialog.ConfirmingUpdate = true
+			m.Deps.Dialog.UpdateChoiceYes = true
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = m.View()
+			}
+		})
+	}
+}
+
+func BenchmarkView_DepsTabWithPhysicalViewportWithoutDialog(b *testing.B) {
+	for _, width := range []int{30, 59, 60, 120} {
+		b.Run(strconv.Itoa(width), func(b *testing.B) {
+			m := benchModelAtViewport(b, width)
+			m.CurrentTab = DepsTab
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = m.View()
+			}
+		})
+	}
+}
+
+func BenchmarkView_DepsTabWithPhysicalViewportWithDialog(b *testing.B) {
+	for _, width := range []int{30, 59, 60, 120} {
+		b.Run(strconv.Itoa(width), func(b *testing.B) {
+			m := benchModelAtViewport(b, width)
+			m.CurrentTab = DepsTab
 			m.Deps.Dialog.ConfirmingUpdate = true
 			m.Deps.Dialog.UpdateChoiceYes = true
 
