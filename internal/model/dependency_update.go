@@ -60,6 +60,7 @@ func (m Model) handleChecksConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case "n", "N", "esc":
 		m.Deps.Dialog.ConfirmingChecks = false
 		m.Deps.Dialog.CheckChoiceYes = false
+		m.Deps.clearRollbackContext()
 		m.Message = "Update complete. Checks skipped."
 		m.MessageType = "info"
 		return m, nil
@@ -71,6 +72,7 @@ func (m Model) applyChecksChoice() (tea.Model, tea.Cmd) {
 	if !m.Deps.Dialog.CheckChoiceYes {
 		m.Deps.Dialog.ConfirmingChecks = false
 		m.Deps.Dialog.CheckChoiceYes = false
+		m.Deps.clearRollbackContext()
 		m.Message = "Update complete. Checks skipped."
 		m.MessageType = "info"
 		return m, nil
@@ -128,6 +130,7 @@ func (m Model) applyRollbackChoice() (tea.Model, tea.Cmd) {
 func (m Model) keepUpdatedDependencies() (tea.Model, tea.Cmd) {
 	m.Deps.Dialog.ConfirmingRollback = false
 	m.Deps.Dialog.RollbackChoiceYes = false
+	m.Deps.clearRollbackContext()
 	m.Message = "Update kept. Failed checks were not rolled back."
 	m.MessageType = "warning"
 	return m, nil

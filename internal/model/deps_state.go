@@ -65,3 +65,8 @@ func (s DepsState) operationInProgress() bool {
 		s.LoadingBackups ||
 		s.RestoringBackup
 }
+
+func (s *DepsState) clearRollbackContext() {
+	s.Snapshot = nil
+	s.LastCheckResult = nil
+}

@@ -1377,6 +1377,7 @@ func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
 	m := newTestModel(t)
 	m.Deps.Dialog.ConfirmingChecks = true
 	m.Deps.Dialog.CheckChoiceYes = true
+	m.Deps.Snapshot = &utils.DependencySnapshot{}
 
 	updated, _ := m.Update(utils.DependencyCheckResultMsg{OK: true})
 	got := updated.(Model)
@@ -1390,8 +1391,11 @@ func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
 	if got.MessageType != "success" {
 		t.Fatalf("expected success status, got %q", got.MessageType)
 	}
-	if got.Deps.LastCheckResult == nil {
-		t.Fatal("expected LastCheckResult to be stored")
+	if got.Deps.Snapshot != nil {
+		t.Fatal("expected Snapshot to be cleared after success")
+	}
+	if got.Deps.LastCheckResult != nil {
+		t.Fatal("expected LastCheckResult to be cleared after success")
 	}
 }
 

@@ -122,7 +122,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.OK {
 			m.Message = "Checks passed."
 			m.MessageType = "success"
-			m.Deps.LastCheckResult = &msg
+			m.Deps.clearRollbackContext()
 			return m, nil
 		}
 		m.Deps.LastCheckResult = &msg
@@ -135,8 +135,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case utils.DependenciesRolledBackMsg:
 		m.Deps.RollingBack = false
 		m.Deps.Dependencies = msg.Dependencies
-		m.Deps.Snapshot = msg.Snapshot
-		m.Deps.LastCheckResult = nil
+		m.Deps.clearRollbackContext()
 		m.updateDependencyTable()
 		m.Message = "Rolled back to pre-update state."
 		m.MessageType = "success"
@@ -145,7 +144,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case utils.DependenciesRestoredMsg:
 		m.Deps.RestoringBackup = false
 		m.Deps.Dependencies = msg.Dependencies
-		m.Deps.LastCheckResult = nil
+		m.Deps.clearRollbackContext()
 		m.updateDependencyTable()
 		m.Message = fmt.Sprintf("Restored dependencies from %s.", msg.BackupName)
 		m.MessageType = "success"
