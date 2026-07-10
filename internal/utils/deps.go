@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -440,7 +441,14 @@ func restoreDependencyBackup(moduleDir, backupName string, operation dependencyO
 		}
 
 		if out, err := operation.runCommand(root, "mod", "tidy"); err != nil {
-			return DependencyErrMsg{Err: fmt.Errorf("restore go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
+			tidyErr := fmt.Errorf("restore go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)
+			if rollbackErr := RestoreModuleFiles(root, current); rollbackErr != nil {
+				return DependencyErrMsg{Err: errors.Join(
+					tidyErr,
+					fmt.Errorf("restore original module files after tidy failure: %w", rollbackErr),
+				)}
+			}
+			return DependencyErrMsg{Err: tidyErr}
 		}
 
 		fresh := operation.load(root, false)
