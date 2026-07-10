@@ -118,6 +118,34 @@ func BenchmarkView_DepsTabWithDialog(b *testing.B) {
 	}
 }
 
+func BenchmarkView_DepsTabWithPhysicalViewport(b *testing.B) {
+	for _, width := range []int{30, 59, 60, 120} {
+		b.Run(strconv.Itoa(width), func(b *testing.B) {
+			m := benchModel(b)
+			m.CurrentTab = DepsTab
+			m.TermWidth = width
+			m.TermHeight = 30
+			m.Deps.Dialog.ConfirmingUpdate = true
+			m.Deps.Dialog.UpdateChoiceYes = true
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				_ = m.View()
+			}
+		})
+	}
+}
+
+func BenchmarkTruncateViewWidth_NoOverflow(b *testing.B) {
+	rendered := "first short line\nsecond short line\nthird short line"
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = truncateViewWidth(rendered, 80)
+	}
+}
+
 func BenchmarkUpdate_WindowSizeMsg(b *testing.B) {
 	m := benchModel(b)
 	msg := tea.WindowSizeMsg{Width: 100, Height: 30}

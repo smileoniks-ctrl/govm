@@ -330,11 +330,43 @@ func truncateViewWidth(rendered string, width int) string {
 	if width < 1 {
 		return rendered
 	}
-	lines := strings.Split(rendered, "\n")
-	for i, line := range lines {
-		lines[i] = ansi.Cut(line, 0, width)
+
+	var truncated strings.Builder
+	overflowed := false
+	lineStart := 0
+	for {
+		lineEnd := strings.IndexByte(rendered[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(rendered)
+		} else {
+			lineEnd += lineStart
+		}
+
+		line := rendered[lineStart:lineEnd]
+		if ansi.StringWidth(line) > width {
+			if !overflowed {
+				truncated.Grow(len(rendered))
+				truncated.WriteString(rendered[:lineStart])
+			}
+			overflowed = true
+			truncated.WriteString(ansi.Cut(line, 0, width))
+		} else if overflowed {
+			truncated.WriteString(line)
+		}
+
+		if lineEnd == len(rendered) {
+			break
+		}
+		if overflowed {
+			truncated.WriteByte('\n')
+		}
+		lineStart = lineEnd + 1
 	}
-	return strings.Join(lines, "\n")
+
+	if !overflowed {
+		return rendered
+	}
+	return truncated.String()
 }
 
 func renderKeyHints(hints [][2]string, width int, layout styles.LayoutMode) string {

@@ -366,6 +366,73 @@ func TestWindowSizeMsgCompactUsesPhysicalContentWidth(t *testing.T) {
 	}
 }
 
+func TestTruncateViewWidth(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		width int
+		check func(t *testing.T, got string)
+	}{
+		{
+			name:  "ANSI-styled line that overflows retains its reset sequence and width <= max",
+			input: "\x1b[31mabcdef\x1b[0m",
+			width: 3,
+			check: func(t *testing.T, got string) {
+				t.Helper()
+				if !strings.Contains(got, "\x1b[0m") {
+					t.Fatalf("expected ANSI reset sequence in %q", got)
+				}
+				if gotWidth := ansi.StringWidth(got); gotWidth > 3 {
+					t.Fatalf("line width = %d, want <= 3: %q", gotWidth, got)
+				}
+			},
+		},
+		{
+			name:  "multiple lines preserves normal lines",
+			input: "first\nthis line overflows\nlast",
+			width: 6,
+			check: func(t *testing.T, got string) {
+				t.Helper()
+				if !strings.Contains(got, "first") || !strings.Contains(got, "last") {
+					t.Fatalf("expected normal lines preserved, got %q", got)
+				}
+			},
+		},
+		{
+			name:  "trailing empty line/newline preserved",
+			input: "this line overflows\n",
+			width: 4,
+			check: func(t *testing.T, got string) {
+				t.Helper()
+				if !strings.HasSuffix(got, "\n") {
+					t.Fatalf("expected trailing newline preserved, got %q", got)
+				}
+				if gotLines := strings.Split(got, "\n"); len(gotLines) != 2 || gotLines[1] != "" {
+					t.Fatalf("expected trailing empty line preserved, got %q", got)
+				}
+			},
+		},
+		{
+			name:  "no-overflow returns identical content",
+			input: "\x1b[32mshort\x1b[0m\nsecond",
+			width: 10,
+			check: func(t *testing.T, got string) {
+				t.Helper()
+				if got != "\x1b[32mshort\x1b[0m\nsecond" {
+					t.Fatalf("got %q, want identical input", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateViewWidth(tt.input, tt.width)
+			tt.check(t, got)
+		})
+	}
+}
+
 func TestRefreshOnDepsTabTriggersCheckCmd(t *testing.T) {
 	m := newTestModel(t)
 
