@@ -29,7 +29,7 @@ GoVM is a modern tool for managing multiple Go versions on your system. It featu
 
 ### Prerequisites
 
-- Go 1.26 or higher
+- Go 1.26.1 or higher
 
 ### Install
 
