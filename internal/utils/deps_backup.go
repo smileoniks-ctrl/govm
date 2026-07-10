@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"golang.org/x/mod/modfile"
 )
 
 const (
@@ -152,13 +153,11 @@ func ReadModulePath(moduleDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read go.mod: %w", err)
 	}
-	for _, line := range strings.Split(string(bytes), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == "module" {
-			return fields[1], nil
-		}
+	modulePath := modfile.ModulePath(bytes)
+	if modulePath == "" {
+		return "", fmt.Errorf("read go.mod: module path not found")
 	}
-	return "", fmt.Errorf("read go.mod: module path not found")
+	return modulePath, nil
 }
 
 func dependencyBackupProjectDir(modulePath string) (string, error) {

@@ -20,6 +20,62 @@ func writeFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
+func setTestHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
+}
+
+func TestReadModulePath_QuotedDirective(t *testing.T) {
+	requireGoToolchain(t)
+
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module \"example.com/app\"\n\ngo 1.26\n")
+
+	modulePath, err := ReadModulePath(dir)
+	if err != nil {
+		t.Fatalf("ReadModulePath: %v", err)
+	}
+	if modulePath != "example.com/app" {
+		t.Fatalf("ReadModulePath = %q, want %q", modulePath, "example.com/app")
+	}
+}
+
+func TestReadModulePath_MalformedOrMissingDirective(t *testing.T) {
+	requireGoToolchain(t)
+
+	tests := []struct {
+		name  string
+		goMod string
+	}{
+		{
+			name:  "malformed",
+			goMod: "module \"example.com/app\n\ngo 1.26\n",
+		},
+		{
+			name:  "missing",
+			goMod: "go 1.26\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "go.mod", tt.goMod)
+
+			_, err := ReadModulePath(dir)
+			if err == nil {
+				t.Fatal("expected ReadModulePath to reject a go.mod without a valid module directive")
+			}
+			if !strings.Contains(err.Error(), "read go.mod: module path not found") {
+				t.Fatalf("ReadModulePath error = %q, want contextual module-path error", err)
+			}
+		})
+	}
+}
+
 func TestSnapshotModuleFiles_WithGoSum(t *testing.T) {
 	dir := t.TempDir()
 	wantMod := "module example.com/test\n\ngo 1.26\n\nrequire github.com/x/y v1.0.0\n"
@@ -89,8 +145,7 @@ func TestSnapshotModuleFiles_TrailingSeparator(t *testing.T) {
 }
 
 func TestSaveDependencyBackupUsesModulePathAndTimestamp(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := setTestHome(t)
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
 	writeFile(t, dir, "go.sum", "github.com/x/y v1.0.0 h1:abc=\n")
@@ -140,8 +195,7 @@ func TestSaveDependencyBackupUsesModulePathAndTimestamp(t *testing.T) {
 }
 
 func TestDependencyBackupProjectDirRejectsDotDotModulePath(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := setTestHome(t)
 
 	dir, err := dependencyBackupProjectDir("..")
 	if err != nil {
@@ -162,8 +216,7 @@ func TestDependencyBackupProjectDirRejectsDotDotModulePath(t *testing.T) {
 }
 
 func TestSaveDependencyBackupDoesNotOverwriteSameSecondBackup(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t)
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
 
@@ -201,8 +254,7 @@ func TestSaveDependencyBackupDoesNotOverwriteSameSecondBackup(t *testing.T) {
 }
 
 func TestListDependencyBackupsSortsNewestFirst(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t)
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
 
@@ -236,8 +288,7 @@ func TestListDependencyBackupsSortsNewestFirst(t *testing.T) {
 }
 
 func TestListDependencyBackupsSkipsInvalidBackupFiles(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t)
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
 
@@ -272,8 +323,7 @@ func TestListDependencyBackupsSkipsInvalidBackupFiles(t *testing.T) {
 }
 
 func TestLoadDependencyBackupRejectsDifferentModule(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	home := setTestHome(t)
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module github.com/acme/current\n\ngo 1.26\n")
 	backupDir := filepath.Join(home, ".govm", "deps_backup", "github.com_acme_current")
@@ -298,6 +348,39 @@ func TestLoadDependencyBackupRejectsDifferentModule(t *testing.T) {
 	_, err = LoadDependencyBackup(dir, "bad.json")
 	if err == nil || !strings.Contains(err.Error(), "belongs to module") {
 		t.Fatalf("expected module mismatch error, got %v", err)
+	}
+}
+
+func TestDependencyBackups_RemainAvailableAfterQuotedModuleIsNormalized(t *testing.T) {
+	_ = setTestHome(t)
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module \"github.com/acme/my-app\"\n\ngo 1.26\n")
+
+	snap, err := SnapshotModuleFiles(dir)
+	if err != nil {
+		t.Fatalf("SnapshotModuleFiles: %v", err)
+	}
+	info, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate)
+	if err != nil {
+		t.Fatalf("SaveDependencyBackup: %v", err)
+	}
+
+	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
+
+	backups, err := ListDependencyBackups(dir)
+	if err != nil {
+		t.Fatalf("ListDependencyBackups: %v", err)
+	}
+	if len(backups) != 1 || backups[0].Name != info.Name {
+		t.Fatalf("ListDependencyBackups = %+v, want backup %q", backups, info.Name)
+	}
+
+	backup, err := LoadDependencyBackup(dir, info.Name)
+	if err != nil {
+		t.Fatalf("LoadDependencyBackup: %v", err)
+	}
+	if backup.ModulePath != "github.com/acme/my-app" {
+		t.Fatalf("loaded ModulePath = %q, want %q", backup.ModulePath, "github.com/acme/my-app")
 	}
 }
 
