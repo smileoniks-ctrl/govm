@@ -24,17 +24,24 @@ const (
 	ThemeLight   ThemeName = "light"
 )
 
-const tempFilePrefix = ".settings-"
+const (
+	tempFilePrefix         = ".settings-"
+	defaultDepsBackupLimit = 10
+	minDepsBackupLimit     = 1
+	maxDepsBackupLimit     = 100
+)
 
 type Settings struct {
-	DepsDisplay DepsDisplayMode `json:"depsDisplay"`
-	Theme       ThemeName       `json:"theme"`
+	DepsDisplay     DepsDisplayMode `json:"depsDisplay"`
+	Theme           ThemeName       `json:"theme"`
+	DepsBackupLimit int             `json:"depsBackupLimit"`
 }
 
 func DefaultSettings() Settings {
 	return Settings{
-		DepsDisplay: DepsDisplayDirect,
-		Theme:       ThemeCurrent,
+		DepsDisplay:     DepsDisplayDirect,
+		Theme:           ThemeCurrent,
+		DepsBackupLimit: defaultDepsBackupLimit,
 	}
 }
 
@@ -44,6 +51,9 @@ func Normalize(settings Settings) Settings {
 	}
 	if settings.Theme != ThemeCurrent && settings.Theme != ThemeLight {
 		settings.Theme = ThemeCurrent
+	}
+	if settings.DepsBackupLimit < minDepsBackupLimit || settings.DepsBackupLimit > maxDepsBackupLimit {
+		settings.DepsBackupLimit = defaultDepsBackupLimit
 	}
 	return settings
 }

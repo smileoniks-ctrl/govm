@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -58,6 +59,157 @@ func TestDependencyBackupStore_SaveCreatesUniqueNamesForSameTimestamp(t *testing
 	if first.Name == second.Name {
 		t.Fatalf("backup names collide: %q", first.Name)
 	}
+}
+
+func TestDependencyBackupStore_SaveWithRetentionPrunesOldestValidBackups(t *testing.T) {
+	setTestHome(t)
+	context := dependencyBackupTestContext(t)
+	dir, err := dependencyBackupProjectDir(context.Path)
+	if err != nil {
+		t.Fatalf("dependencyBackupProjectDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("create backup directory: %v", err)
+	}
+
+	writeDependencyBackupFile(t, dir, "oldest.json", context.Path, time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+	writeDependencyBackupFile(t, dir, "same-created-a.json", context.Path, time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	writeDependencyBackupFile(t, dir, "same-created-z.json", context.Path, time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+
+	store := dependencyBackupStore{
+		now: func() time.Time {
+			return time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+		},
+	}
+	info, err := store.saveWithRetention(context, &DependencySnapshot{}, DependencyBackupKindPreUpdate, 3)
+	if err != nil {
+		t.Fatalf("saveWithRetention: %v", err)
+	}
+
+	for _, name := range []string{info.Name, "same-created-z.json", "same-created-a.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("retained backup %q: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "oldest.json")); !os.IsNotExist(err) {
+		t.Errorf("oldest backup still exists or stat failed: %v", err)
+	}
+}
+
+func TestDependencyBackupStore_SaveWithRetentionProtectsIneligibleFiles(t *testing.T) {
+	setTestHome(t)
+	context := dependencyBackupTestContext(t)
+	dir, err := dependencyBackupProjectDir(context.Path)
+	if err != nil {
+		t.Fatalf("dependencyBackupProjectDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("create backup directory: %v", err)
+	}
+
+	writeDependencyBackupFile(t, dir, "old-valid.json", context.Path, time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+	writeFile(t, dir, "malformed.json", "{")
+	writeFile(t, dir, "unsupported.json", `{"schema_version":2}`)
+	writeDependencyBackupFile(t, dir, "foreign.json", "example.com/other", time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+	writeFile(t, dir, "notes.txt", "do not remove")
+
+	store := dependencyBackupStore{
+		now: func() time.Time {
+			return time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+		},
+	}
+	if _, err := store.saveWithRetention(context, &DependencySnapshot{}, DependencyBackupKindPreUpdate, 1); err != nil {
+		t.Fatalf("saveWithRetention: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "old-valid.json")); !os.IsNotExist(err) {
+		t.Errorf("old valid backup still exists or stat failed: %v", err)
+	}
+	for _, name := range []string{"malformed.json", "unsupported.json", "foreign.json", "notes.txt"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("protected file %q: %v", name, err)
+		}
+	}
+}
+
+func TestDependencyBackupStore_SaveWithRetentionKeepsPublishedFileOnRemoveFailure(t *testing.T) {
+	setTestHome(t)
+	context := dependencyBackupTestContext(t)
+	dir, err := dependencyBackupProjectDir(context.Path)
+	if err != nil {
+		t.Fatalf("dependencyBackupProjectDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("create backup directory: %v", err)
+	}
+	writeDependencyBackupFile(t, dir, "old-valid.json", context.Path, time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+
+	removeErr := errors.New("injected remove failure")
+	store := dependencyBackupStore{
+		now: func() time.Time {
+			return time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+		},
+		remove: func(string) error { return removeErr },
+	}
+	info, err := store.saveWithRetention(context, &DependencySnapshot{}, DependencyBackupKindPreUpdate, 1)
+	if !errors.Is(err, removeErr) {
+		t.Fatalf("saveWithRetention error = %v, want injected remove failure", err)
+	}
+	if _, err := os.Stat(info.Path); err != nil {
+		t.Errorf("published backup %q: %v", info.Name, err)
+	}
+}
+
+func TestDependencyBackupStore_SaveWithRetentionIgnoresMissingOldBackup(t *testing.T) {
+	setTestHome(t)
+	context := dependencyBackupTestContext(t)
+	dir, err := dependencyBackupProjectDir(context.Path)
+	if err != nil {
+		t.Fatalf("dependencyBackupProjectDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("create backup directory: %v", err)
+	}
+	writeDependencyBackupFile(t, dir, "old-valid.json", context.Path, time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+
+	store := dependencyBackupStore{
+		now: func() time.Time {
+			return time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+		},
+		remove: func(string) error { return os.ErrNotExist },
+	}
+	info, err := store.saveWithRetention(context, &DependencySnapshot{}, DependencyBackupKindPreUpdate, 1)
+	if err != nil {
+		t.Fatalf("saveWithRetention: %v", err)
+	}
+	if _, err := os.Stat(info.Path); err != nil {
+		t.Errorf("published backup %q: %v", info.Name, err)
+	}
+}
+
+func dependencyBackupTestContext(t *testing.T) moduleContext {
+	t.Helper()
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n")
+	context, err := resolveModuleContext(root)
+	if err != nil {
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
+	return context
+}
+
+func writeDependencyBackupFile(t *testing.T, dir, name, modulePath string, createdAt time.Time) {
+	t.Helper()
+	bytes, err := json.Marshal(DependencyBackup{
+		SchemaVersion: dependencyBackupSchemaVersion,
+		CreatedAt:     createdAt,
+		ModulePath:    modulePath,
+		Snapshot:      &DependencySnapshot{},
+	})
+	if err != nil {
+		t.Fatalf("marshal backup: %v", err)
+	}
+	writeFile(t, dir, name, string(bytes))
 }
 
 func TestDependencyBackupStore_SaveDoesNotPublishPartialFileOnWriteFailure(t *testing.T) {
@@ -170,19 +322,23 @@ func TestUpdateModuleDependencies_ResolvesContextOnce(t *testing.T) {
 	context := moduleContext{Root: t.TempDir(), Path: "example.com/app"}
 	writeFile(t, context.Root, "go.mod", "module example.com/app\n\ngo 1.26\n")
 	resolves := 0
+	const backupLimit = 3
 	operation := dependencyOperation{
 		resolveContext: func(string) (moduleContext, error) {
 			resolves++
 			return context, nil
 		},
-		saveBackup: func(moduleContext, *DependencySnapshot, string) (DependencyBackupInfo, error) {
+		saveBackup: func(_ moduleContext, _ *DependencySnapshot, _ string, gotLimit int) (DependencyBackupInfo, error) {
+			if gotLimit != backupLimit {
+				t.Fatalf("backup limit = %d, want %d", gotLimit, backupLimit)
+			}
 			return DependencyBackupInfo{}, nil
 		},
 		runCommand: func(string, ...string) ([]byte, error) { return nil, nil },
 		load:       func(string, bool) tea.Msg { return DependenciesMsg{} },
 	}
 
-	msg := updateModuleDependencies(".", []ModuleDependency{{Path: "example.com/dep", Version: "v1.0.0", Latest: "v1.1.0"}}, operation)()
+	msg := updateModuleDependencies(".", []ModuleDependency{{Path: "example.com/dep", Version: "v1.0.0", Latest: "v1.1.0"}}, backupLimit, operation)()
 	if _, ok := msg.(DependenciesUpdatedMsg); !ok {
 		t.Fatalf("update result = %T, want DependenciesUpdatedMsg", msg)
 	}
@@ -195,6 +351,7 @@ func TestRestoreDependencyBackup_ResolvesContextOnce(t *testing.T) {
 	context := moduleContext{Root: t.TempDir(), Path: "example.com/app"}
 	writeFile(t, context.Root, "go.mod", "module example.com/app\n\ngo 1.26\n")
 	resolves := 0
+	const backupLimit = 4
 	backup := &DependencyBackup{
 		CreatedAt: time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC),
 		Snapshot:  &DependencySnapshot{ModFile: ModuleFileSnapshot{Exists: true, Content: "module example.com/app\n\ngo 1.26\n"}},
@@ -205,7 +362,10 @@ func TestRestoreDependencyBackup_ResolvesContextOnce(t *testing.T) {
 			return context, nil
 		},
 		loadBackup: func(moduleContext, string) (*DependencyBackup, error) { return backup, nil },
-		saveBackup: func(moduleContext, *DependencySnapshot, string) (DependencyBackupInfo, error) {
+		saveBackup: func(_ moduleContext, _ *DependencySnapshot, _ string, gotLimit int) (DependencyBackupInfo, error) {
+			if gotLimit != backupLimit {
+				t.Fatalf("backup limit = %d, want %d", gotLimit, backupLimit)
+			}
 			return DependencyBackupInfo{}, nil
 		},
 		restoreFiles: func(string, *DependencySnapshot) error { return nil },
@@ -213,7 +373,7 @@ func TestRestoreDependencyBackup_ResolvesContextOnce(t *testing.T) {
 		load:         func(string, bool) tea.Msg { return DependenciesMsg{} },
 	}
 
-	msg := restoreDependencyBackup(".", "saved.json", operation)()
+	msg := restoreDependencyBackup(".", "saved.json", backupLimit, operation)()
 	if _, ok := msg.(DependenciesRestoredMsg); !ok {
 		t.Fatalf("restore result = %T, want DependenciesRestoredMsg", msg)
 	}

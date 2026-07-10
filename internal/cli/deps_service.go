@@ -8,15 +8,17 @@ import (
 	"os"
 	"strings"
 
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
 // DepsService encapsulates the CLI dependency workflow and lets tests
 // substitute individual operations.
 type DepsService struct {
-	ModuleDir string
-	Stdout    io.Writer
-	Stdin     io.Reader
+	ModuleDir       string
+	Stdout          io.Writer
+	Stdin           io.Reader
+	DepsBackupLimit int
 
 	// Confirm asks the user a yes/no question. The default answer
 	// (used on empty input or EOF) is defaultYes. The default
@@ -56,18 +58,27 @@ func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) *DepsSe
 	if stdin == nil {
 		stdin = os.Stdin
 	}
+	settings, err := config.Load("")
+	if err != nil {
+		settings = config.DefaultSettings()
+	}
 	return &DepsService{
-		ModuleDir:     moduleDir,
-		Stdout:        stdout,
-		Stdin:         stdin,
-		Confirm:       defaultConfirm(stdin, stdout),
-		ListDeps:      defaultListDeps,
-		CheckDeps:     defaultCheckDeps,
-		Update:        defaultUpdate,
-		RunChecks:     defaultRunChecks,
-		Rollback:      defaultRollback,
-		ListBackups:   defaultListBackups,
-		RestoreBackup: defaultRestoreBackup,
+		ModuleDir:       moduleDir,
+		Stdout:          stdout,
+		Stdin:           stdin,
+		DepsBackupLimit: settings.DepsBackupLimit,
+		Confirm:         defaultConfirm(stdin, stdout),
+		ListDeps:        defaultListDeps,
+		CheckDeps:       defaultCheckDeps,
+		Update: func(moduleDir string, deps []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error) {
+			return defaultUpdate(moduleDir, deps, settings.DepsBackupLimit)
+		},
+		RunChecks:   defaultRunChecks,
+		Rollback:    defaultRollback,
+		ListBackups: defaultListBackups,
+		RestoreBackup: func(moduleDir, name string) (utils.DependenciesRestoredMsg, error) {
+			return defaultRestoreBackup(moduleDir, name, settings.DepsBackupLimit)
+		},
 	}
 }
 
@@ -95,8 +106,8 @@ func defaultCheckDeps(moduleDir string) ([]utils.ModuleDependency, error) {
 	return []utils.ModuleDependency(deps), nil
 }
 
-func defaultUpdate(moduleDir string, deps []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error) {
-	msg := utils.UpdateModuleDependencies(moduleDir, deps)()
+func defaultUpdate(moduleDir string, deps []utils.ModuleDependency, backupLimit int) (utils.DependenciesUpdatedMsg, error) {
+	msg := utils.UpdateModuleDependencies(moduleDir, deps, backupLimit)()
 	if updated, ok := msg.(utils.DependenciesUpdatedMsg); ok {
 		return updated, nil
 	}
@@ -140,8 +151,8 @@ func defaultListBackups(moduleDir string) ([]utils.DependencyBackupInfo, error) 
 	return nil, fmt.Errorf("unexpected backup list result: %T", msg)
 }
 
-func defaultRestoreBackup(moduleDir, name string) (utils.DependenciesRestoredMsg, error) {
-	msg := utils.RestoreDependencyBackup(moduleDir, name)()
+func defaultRestoreBackup(moduleDir, name string, backupLimit int) (utils.DependenciesRestoredMsg, error) {
+	msg := utils.RestoreDependencyBackup(moduleDir, name, backupLimit)()
 	if restored, ok := msg.(utils.DependenciesRestoredMsg); ok {
 		return restored, nil
 	}

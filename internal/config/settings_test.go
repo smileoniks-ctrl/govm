@@ -19,6 +19,9 @@ func TestDefaultSettings(t *testing.T) {
 	if got.Theme != ThemeCurrent {
 		t.Fatalf("Theme = %q, want %q", got.Theme, ThemeCurrent)
 	}
+	if got.DepsBackupLimit != 10 {
+		t.Fatalf("DepsBackupLimit = %d, want 10", got.DepsBackupLimit)
+	}
 }
 
 func TestNormalizeUnknowns(t *testing.T) {
@@ -30,12 +33,40 @@ func TestNormalizeUnknowns(t *testing.T) {
 		{
 			name: "keeps known values",
 			settings: Settings{
-				DepsDisplay: DepsDisplayAll,
-				Theme:       ThemeLight,
+				DepsDisplay:     DepsDisplayAll,
+				Theme:           ThemeLight,
+				DepsBackupLimit: 25,
 			},
 			want: Settings{
-				DepsDisplay: DepsDisplayAll,
-				Theme:       ThemeLight,
+				DepsDisplay:     DepsDisplayAll,
+				Theme:           ThemeLight,
+				DepsBackupLimit: 25,
+			},
+		},
+		{
+			name: "keeps minimum backup limit",
+			settings: Settings{
+				DepsDisplay:     DepsDisplayDirect,
+				Theme:           ThemeCurrent,
+				DepsBackupLimit: 1,
+			},
+			want: Settings{
+				DepsDisplay:     DepsDisplayDirect,
+				Theme:           ThemeCurrent,
+				DepsBackupLimit: 1,
+			},
+		},
+		{
+			name: "keeps maximum backup limit",
+			settings: Settings{
+				DepsDisplay:     DepsDisplayAll,
+				Theme:           ThemeLight,
+				DepsBackupLimit: 100,
+			},
+			want: Settings{
+				DepsDisplay:     DepsDisplayAll,
+				Theme:           ThemeLight,
+				DepsBackupLimit: 100,
 			},
 		},
 		{
@@ -46,8 +77,16 @@ func TestNormalizeUnknowns(t *testing.T) {
 		{
 			name: "defaults unknown values",
 			settings: Settings{
-				DepsDisplay: DepsDisplayMode("transitive"),
-				Theme:       ThemeName("dark"),
+				DepsDisplay:     DepsDisplayMode("transitive"),
+				Theme:           ThemeName("dark"),
+				DepsBackupLimit: 101,
+			},
+			want: DefaultSettings(),
+		},
+		{
+			name: "defaults missing and invalid backup limits",
+			settings: Settings{
+				DepsBackupLimit: -1,
 			},
 			want: DefaultSettings(),
 		},
@@ -86,11 +125,43 @@ func TestLoadInvalidJSONReturnsError(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesDepsBackupLimit(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want int
+	}{
+		{name: "missing", data: `{"depsDisplay":"direct","theme":"current"}`, want: 10},
+		{name: "zero", data: `{"depsBackupLimit":0}`, want: 10},
+		{name: "below range", data: `{"depsBackupLimit":-1}`, want: 10},
+		{name: "above range", data: `{"depsBackupLimit":101}`, want: 10},
+		{name: "valid", data: `{"depsBackupLimit":25}`, want: 25},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			if err := os.WriteFile(path, []byte(tt.data), 0o644); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+
+			got, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if got.DepsBackupLimit != tt.want {
+				t.Fatalf("DepsBackupLimit = %d, want %d", got.DepsBackupLimit, tt.want)
+			}
+		})
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "settings.json")
 	settings := Settings{
-		DepsDisplay: DepsDisplayAll,
-		Theme:       ThemeLight,
+		DepsDisplay:     DepsDisplayAll,
+		Theme:           ThemeLight,
+		DepsBackupLimit: 25,
 	}
 
 	if err := Save(path, settings); err != nil {
@@ -273,7 +344,7 @@ func TestLoadWithMigrationNewFilePresent(t *testing.T) {
 	if migrated {
 		t.Fatal("migrated = true, want false")
 	}
-	want := Settings{DepsDisplay: DepsDisplayAll, Theme: ThemeLight}
+	want := Settings{DepsDisplay: DepsDisplayAll, Theme: ThemeLight, DepsBackupLimit: 10}
 	if gotSettings != want {
 		t.Fatalf("settings = %+v, want %+v", gotSettings, want)
 	}
@@ -326,7 +397,7 @@ func TestLoadWithMigrationMigratesLegacy(t *testing.T) {
 	if !migrated {
 		t.Fatal("migrated = false, want true")
 	}
-	want := Settings{DepsDisplay: DepsDisplayAll, Theme: ThemeLight}
+	want := Settings{DepsDisplay: DepsDisplayAll, Theme: ThemeLight, DepsBackupLimit: 10}
 	if gotSettings != want {
 		t.Fatalf("settings = %+v, want %+v", gotSettings, want)
 	}

@@ -32,7 +32,7 @@ func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *tes
 	}
 
 	var offline bool
-	msg := restoreDependencyBackup(root, info.Name, dependencyOperation{
+	msg := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
 		runCommand: func(_ string, args ...string) ([]byte, error) {
 			if strings.Join(args, " ") != "mod tidy" {
@@ -150,7 +150,7 @@ func TestRestoreDependencyBackup_TidyFailureHasContext(t *testing.T) {
 		t.Fatalf("SaveDependencyBackup: %v", err)
 	}
 
-	msg := restoreDependencyBackup(root, info.Name, dependencyOperation{
+	msg := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
 		runCommand: func(_ string, args ...string) ([]byte, error) {
 			if strings.Join(args, " ") != "mod tidy" {
@@ -219,7 +219,7 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 	}
 
 	restoreCalls := 0
-	msg := restoreDependencyBackup(root, info.Name, dependencyOperation{
+	msg := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
 		restoreFiles: func(moduleDir string, snap *DependencySnapshot) error {
 			restoreCalls++

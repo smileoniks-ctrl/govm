@@ -41,7 +41,7 @@ func (m Model) applyUpdateChoice() (tea.Model, tea.Cmd) {
 	m.Deps.Updating = true
 	m.Message = "Updating dependencies..."
 	m.MessageType = "info"
-	return m, utils.UpdateModuleDependencies(m.Deps.ModuleDir, m.Deps.Dependencies)
+	return m, utils.UpdateModuleDependencies(m.Deps.ModuleDir, m.Deps.Dependencies, m.Settings.Values.DepsBackupLimit)
 }
 
 // handleChecksConfirmKey handles key presses while the "run checks?"
@@ -188,5 +188,5 @@ func (m Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
 	m.Deps.RestoringBackup = true
 	m.Message = "Restoring dependency backup..."
 	m.MessageType = "info"
-	return m, utils.RestoreDependencyBackup(m.Deps.ModuleDir, backup.Name)
+	return m, utils.RestoreDependencyBackup(m.Deps.ModuleDir, backup.Name, m.Settings.Values.DepsBackupLimit)
 }

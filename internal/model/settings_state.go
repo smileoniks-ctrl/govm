@@ -2,7 +2,7 @@ package model
 
 import "github.com/smileoniks-ctrl/govm/internal/config"
 
-const settingsRowCount = 2
+const settingsRowCount = 3
 
 type SettingsState struct {
 	Values config.Settings

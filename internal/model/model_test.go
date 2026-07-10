@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -214,6 +215,7 @@ func TestSettingsTabRendersRowsAndHelp(t *testing.T) {
 		"Settings",
 		"Deps display: Direct only",
 		"Theme: Current",
+		"Deps backups: 10",
 		"↑/↓",
 		"enter",
 		"tab",
@@ -222,6 +224,49 @@ func TestSettingsTabRendersRowsAndHelp(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected settings view to contain %q, got:\n%s", want, view)
 		}
+	}
+}
+
+func TestSettingsDepsBackupLimitControlsAndSaves(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   tea.KeyPressMsg
+		start int
+		want  int
+	}{
+		{name: "left wraps minimum to maximum", key: tea.KeyPressMsg{Code: tea.KeyLeft}, start: 1, want: 100},
+		{name: "right wraps maximum to minimum", key: tea.KeyPressMsg{Code: tea.KeyRight}, start: 100, want: 1},
+		{name: "h wraps minimum to maximum", key: tea.KeyPressMsg{Code: 'h'}, start: 1, want: 100},
+		{name: "l wraps maximum to minimum", key: tea.KeyPressMsg{Code: 'l'}, start: 100, want: 1},
+		{name: "space wraps maximum to minimum", key: tea.KeyPressMsg{Code: ' '}, start: 100, want: 1},
+		{name: "enter increments limit", key: tea.KeyPressMsg{Code: tea.KeyEnter}, start: 1, want: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.CurrentTab = SettingsTab
+			m.Settings.Cursor = 2
+			m.Settings.Values.DepsBackupLimit = tt.start
+
+			updated, _ := m.Update(tt.key)
+			m = updated.(Model)
+			if got := m.Settings.Values.DepsBackupLimit; got != tt.want {
+				t.Fatalf("backup limit after %q = %d, want %d", tt.key.String(), got, tt.want)
+			}
+
+			data, err := os.ReadFile(m.Settings.Path)
+			if err != nil {
+				t.Fatalf("read saved settings JSON: %v", err)
+			}
+			var saved config.Settings
+			if err := json.Unmarshal(data, &saved); err != nil {
+				t.Fatalf("unmarshal saved settings JSON: %v", err)
+			}
+			if got := saved.DepsBackupLimit; got != tt.want {
+				t.Fatalf("saved JSON backup limit after %q = %d, want %d", tt.key.String(), got, tt.want)
+			}
+		})
 	}
 }
 

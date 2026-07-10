@@ -185,8 +185,20 @@ func (m Model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.Settings.MoveUp()
 	case "down", "j":
 		m.Settings.MoveDown()
-	case "enter", "space", "left", "right", "h", "l":
+	case "enter", "space":
 		m.toggleSelectedSetting()
+	case "left", "h":
+		if m.Settings.Cursor == 2 {
+			m.adjustDepsBackupLimit(-1)
+		} else {
+			m.toggleSelectedSetting()
+		}
+	case "right", "l":
+		if m.Settings.Cursor == 2 {
+			m.adjustDepsBackupLimit(1)
+		} else {
+			m.toggleSelectedSetting()
+		}
 	}
 	return m, nil
 }
@@ -208,7 +220,21 @@ func (m *Model) toggleSelectedSetting() {
 			m.Settings.Values.Theme = config.ThemeCurrent
 		}
 		m.applyRuntimeTheme()
+	case 2:
+		m.adjustDepsBackupLimit(1)
+		return
 	}
+	m.saveSettings()
+}
+
+func (m *Model) adjustDepsBackupLimit(delta int) {
+	limit := m.Settings.Values.DepsBackupLimit + delta
+	if limit < 1 {
+		limit = 100
+	} else if limit > 100 {
+		limit = 1
+	}
+	m.Settings.Values.DepsBackupLimit = limit
 	m.saveSettings()
 }
 

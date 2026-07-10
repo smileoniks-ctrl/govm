@@ -203,11 +203,11 @@ func UpdatableDirectDependencies(deps []ModuleDependency) []ModuleDependency {
 // dependency in deps, then `go mod tidy`, and finally re-checks
 // available updates. It takes a snapshot of go.mod and go.sum before
 // running go get so the caller can roll back on check failure.
-func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency) tea.Cmd {
-	return updateModuleDependencies(moduleDir, deps, defaultDependencyOperation())
+func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency, backupLimit int) tea.Cmd {
+	return updateModuleDependencies(moduleDir, deps, backupLimit, defaultDependencyOperation())
 }
 
-func updateModuleDependencies(moduleDir string, deps []ModuleDependency, operation dependencyOperation) tea.Cmd {
+func updateModuleDependencies(moduleDir string, deps []ModuleDependency, backupLimit int, operation dependencyOperation) tea.Cmd {
 	updatable := UpdatableDirectDependencies(deps)
 	if len(updatable) == 0 {
 		return func() tea.Msg {
@@ -234,7 +234,7 @@ func updateModuleDependencies(moduleDir string, deps []ModuleDependency, operati
 			return DependencyErrMsg{Err: err}
 		}
 		snap.Updatable = entries
-		if _, err := operation.save(context, snap, DependencyBackupKindPreUpdate); err != nil {
+		if _, err := operation.save(context, snap, DependencyBackupKindPreUpdate, backupLimit); err != nil {
 			return DependencyErrMsg{Err: err}
 		}
 
@@ -359,7 +359,7 @@ type dependencyOperation struct {
 	restoreFiles   func(string, *DependencySnapshot) error
 	runCommand     func(string, ...string) ([]byte, error)
 	load           func(string, bool) tea.Msg
-	saveBackup     func(moduleContext, *DependencySnapshot, string) (DependencyBackupInfo, error)
+	saveBackup     func(moduleContext, *DependencySnapshot, string, int) (DependencyBackupInfo, error)
 	loadBackup     func(moduleContext, string) (*DependencyBackup, error)
 }
 
@@ -374,7 +374,7 @@ func defaultDependencyOperation() dependencyOperation {
 			return cmd.CombinedOutput()
 		},
 		load:       loadDependencies,
-		saveBackup: saveDependencyBackupResolved,
+		saveBackup: saveDependencyBackupResolvedWithRetention,
 		loadBackup: loadDependencyBackupResolved,
 	}
 }
@@ -390,11 +390,11 @@ func (operation dependencyOperation) resolve(moduleDir string) (moduleContext, e
 	return resolveModuleContext(root)
 }
 
-func (operation dependencyOperation) save(context moduleContext, snap *DependencySnapshot, kind string) (DependencyBackupInfo, error) {
+func (operation dependencyOperation) save(context moduleContext, snap *DependencySnapshot, kind string, backupLimit int) (DependencyBackupInfo, error) {
 	if operation.saveBackup == nil {
-		return saveDependencyBackupResolved(context, snap, kind)
+		return saveDependencyBackupResolvedWithRetention(context, snap, kind, backupLimit)
 	}
-	return operation.saveBackup(context, snap, kind)
+	return operation.saveBackup(context, snap, kind, backupLimit)
 }
 
 func (operation dependencyOperation) loadBackupResolved(context moduleContext, name string) (*DependencyBackup, error) {
@@ -455,11 +455,11 @@ func rollbackModuleDependencies(moduleDir string, snap *DependencySnapshot, oper
 // RestoreDependencyBackup restores go.mod and go.sum from a saved
 // dependency backup, saving the current files first as a pre-restore
 // backup so the restore itself can be undone manually.
-func RestoreDependencyBackup(moduleDir, backupName string) tea.Cmd {
-	return restoreDependencyBackup(moduleDir, backupName, defaultDependencyOperation())
+func RestoreDependencyBackup(moduleDir, backupName string, backupLimit int) tea.Cmd {
+	return restoreDependencyBackup(moduleDir, backupName, backupLimit, defaultDependencyOperation())
 }
 
-func restoreDependencyBackup(moduleDir, backupName string, operation dependencyOperation) tea.Cmd {
+func restoreDependencyBackup(moduleDir, backupName string, backupLimit int, operation dependencyOperation) tea.Cmd {
 	return func() tea.Msg {
 		context, err := operation.resolve(moduleDir)
 		if err != nil {
@@ -473,7 +473,7 @@ func restoreDependencyBackup(moduleDir, backupName string, operation dependencyO
 		if err != nil {
 			return DependencyErrMsg{Err: err}
 		}
-		if _, err := operation.save(context, current, DependencyBackupKindPreRestore); err != nil {
+		if _, err := operation.save(context, current, DependencyBackupKindPreRestore, backupLimit); err != nil {
 			return DependencyErrMsg{Err: err}
 		}
 		if err := operation.restore(context.Root, backup.Snapshot); err != nil {

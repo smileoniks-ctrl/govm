@@ -19,6 +19,7 @@ const (
 	DependencyBackupKindPreUpdate  = "pre-update"
 	DependencyBackupKindPreRestore = "pre-restore"
 	dependencyBackupSchemaVersion  = 1
+	defaultDependencyBackupLimit   = 10
 )
 
 type moduleContext struct {
@@ -43,18 +44,20 @@ func resolveModuleContext(moduleDir string) (moduleContext, error) {
 }
 
 type dependencyBackupStore struct {
-	now   func() time.Time
-	write func(*os.File, []byte) (int, error)
-	sync  func(*os.File) error
-	close func(*os.File) error
+	now    func() time.Time
+	write  func(*os.File, []byte) (int, error)
+	sync   func(*os.File) error
+	close  func(*os.File) error
+	remove func(string) error
 }
 
 func defaultDependencyBackupStore() dependencyBackupStore {
 	return dependencyBackupStore{
-		now:   time.Now,
-		write: (*os.File).Write,
-		sync:  (*os.File).Sync,
-		close: (*os.File).Close,
+		now:    time.Now,
+		write:  (*os.File).Write,
+		sync:   (*os.File).Sync,
+		close:  (*os.File).Close,
+		remove: os.Remove,
 	}
 }
 
@@ -124,6 +127,9 @@ func listDependencyBackupsResolved(context moduleContext) ([]DependencyBackupInf
 	}
 
 	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].CreatedAt.Equal(backups[j].CreatedAt) {
+			return backups[i].Name > backups[j].Name
+		}
 		return backups[i].CreatedAt.After(backups[j].CreatedAt)
 	})
 	return backups, nil
@@ -181,9 +187,20 @@ func saveDependencyBackupResolved(context moduleContext, snap *DependencySnapsho
 	return defaultDependencyBackupStore().save(context, snap, kind)
 }
 
+func saveDependencyBackupResolvedWithRetention(context moduleContext, snap *DependencySnapshot, kind string, retentionLimit int) (DependencyBackupInfo, error) {
+	return defaultDependencyBackupStore().saveWithRetention(context, snap, kind, retentionLimit)
+}
+
 func (store dependencyBackupStore) save(context moduleContext, snap *DependencySnapshot, kind string) (DependencyBackupInfo, error) {
+	return store.saveWithRetention(context, snap, kind, defaultDependencyBackupLimit)
+}
+
+func (store dependencyBackupStore) saveWithRetention(context moduleContext, snap *DependencySnapshot, kind string, retentionLimit int) (DependencyBackupInfo, error) {
 	if snap == nil {
 		return DependencyBackupInfo{}, fmt.Errorf("save dependency backup: nil snapshot")
+	}
+	if retentionLimit < 1 {
+		return DependencyBackupInfo{}, fmt.Errorf("save dependency backup: retention limit must be positive")
 	}
 	if store.now == nil {
 		store.now = time.Now
@@ -196,6 +213,9 @@ func (store dependencyBackupStore) save(context moduleContext, snap *DependencyS
 	}
 	if store.close == nil {
 		store.close = (*os.File).Close
+	}
+	if store.remove == nil {
+		store.remove = os.Remove
 	}
 	createdAt := store.now().UTC()
 	dir, err := dependencyBackupProjectDir(context.Path)
@@ -221,7 +241,47 @@ func (store dependencyBackupStore) save(context moduleContext, snap *DependencyS
 	if err != nil {
 		return DependencyBackupInfo{}, fmt.Errorf("write dependency backup: %w", err)
 	}
-	return backupInfo(name, path, backup), nil
+	info := backupInfo(name, path, backup)
+	if err := store.prune(dir, context.Path, retentionLimit); err != nil {
+		return info, fmt.Errorf("prune dependency backups: %w", err)
+	}
+	return info, nil
+}
+
+func (store dependencyBackupStore) prune(dir, modulePath string, retentionLimit int) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+
+	backups := make([]DependencyBackupInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		backup, err := readDependencyBackupFile(path)
+		if err != nil || backup.ModulePath != modulePath {
+			continue
+		}
+		backups = append(backups, backupInfo(entry.Name(), path, backup))
+	}
+
+	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].CreatedAt.Equal(backups[j].CreatedAt) {
+			return backups[i].Name > backups[j].Name
+		}
+		return backups[i].CreatedAt.After(backups[j].CreatedAt)
+	})
+	if len(backups) <= retentionLimit {
+		return nil
+	}
+	for _, backup := range backups[retentionLimit:] {
+		if err := store.remove(backup.Path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func (store dependencyBackupStore) writeFile(dir string, createdAt time.Time, bytes []byte) (string, string, error) {

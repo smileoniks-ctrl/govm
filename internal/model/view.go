@@ -180,6 +180,7 @@ func renderSettingsView(settings SettingsState) string {
 	rows := []string{
 		fmt.Sprintf("Deps display: %s", depsDisplayLabel(values.DepsDisplay)),
 		fmt.Sprintf("Theme: %s", themeLabel(values.Theme)),
+		fmt.Sprintf("Deps backups: %d", values.DepsBackupLimit),
 	}
 	for i, row := range rows {
 		prefix := "  "
