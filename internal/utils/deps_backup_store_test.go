@@ -61,6 +61,31 @@ func TestDependencyBackupStore_SaveCreatesUniqueNamesForSameTimestamp(t *testing
 	}
 }
 
+func TestDependencyBackupStore_SaveWithRetentionKeepsPublishedBackupAtSameTimestamp(t *testing.T) {
+	setTestHome(t)
+	context := dependencyBackupTestContext(t)
+	now := time.Date(2026, 7, 10, 12, 34, 56, 0, time.UTC)
+	store := dependencyBackupStore{
+		now: func() time.Time { return now },
+	}
+
+	first, err := store.saveWithRetention(context, &DependencySnapshot{}, DependencyBackupKindPreUpdate, 1)
+	if err != nil {
+		t.Fatalf("first saveWithRetention: %v", err)
+	}
+	second, err := store.saveWithRetention(context, &DependencySnapshot{}, DependencyBackupKindPreRestore, 1)
+	if err != nil {
+		t.Fatalf("second saveWithRetention: %v", err)
+	}
+
+	if _, err := os.Stat(second.Path); err != nil {
+		t.Errorf("published backup %q: %v", second.Name, err)
+	}
+	if _, err := os.Stat(first.Path); !os.IsNotExist(err) {
+		t.Errorf("first backup still exists or stat failed: %v", err)
+	}
+}
+
 func TestDependencyBackupStore_SaveWithRetentionPrunesOldestValidBackups(t *testing.T) {
 	setTestHome(t)
 	context := dependencyBackupTestContext(t)

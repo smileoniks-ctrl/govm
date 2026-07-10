@@ -15,10 +15,9 @@ import (
 // DepsService encapsulates the CLI dependency workflow and lets tests
 // substitute individual operations.
 type DepsService struct {
-	ModuleDir       string
-	Stdout          io.Writer
-	Stdin           io.Reader
-	DepsBackupLimit int
+	ModuleDir string
+	Stdout    io.Writer
+	Stdin     io.Reader
 
 	// Confirm asks the user a yes/no question. The default answer
 	// (used on empty input or EOF) is defaultYes. The default
@@ -62,22 +61,22 @@ func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) *DepsSe
 	if err != nil {
 		settings = config.DefaultSettings()
 	}
+	backupLimit := settings.DepsBackupLimit
 	return &DepsService{
-		ModuleDir:       moduleDir,
-		Stdout:          stdout,
-		Stdin:           stdin,
-		DepsBackupLimit: settings.DepsBackupLimit,
-		Confirm:         defaultConfirm(stdin, stdout),
-		ListDeps:        defaultListDeps,
-		CheckDeps:       defaultCheckDeps,
+		ModuleDir: moduleDir,
+		Stdout:    stdout,
+		Stdin:     stdin,
+		Confirm:   defaultConfirm(stdin, stdout),
+		ListDeps:  defaultListDeps,
+		CheckDeps: defaultCheckDeps,
 		Update: func(moduleDir string, deps []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error) {
-			return defaultUpdate(moduleDir, deps, settings.DepsBackupLimit)
+			return defaultUpdate(moduleDir, deps, backupLimit)
 		},
 		RunChecks:   defaultRunChecks,
 		Rollback:    defaultRollback,
 		ListBackups: defaultListBackups,
 		RestoreBackup: func(moduleDir, name string) (utils.DependenciesRestoredMsg, error) {
-			return defaultRestoreBackup(moduleDir, name, settings.DepsBackupLimit)
+			return defaultRestoreBackup(moduleDir, name, backupLimit)
 		},
 	}
 }

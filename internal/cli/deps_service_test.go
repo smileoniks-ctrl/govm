@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -23,23 +22,6 @@ type fakeOps struct {
 	runChecksCalls int
 	rollbackCalls  int
 	restoreCalls   int
-}
-
-func TestNewDepsServiceLoadsConfiguredBackupLimit(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	settings := config.DefaultSettings()
-	settings.DepsBackupLimit = 3
-	if err := config.Save("", settings); err != nil {
-		t.Fatalf("save settings: %v", err)
-	}
-
-	service := NewDepsService(t.TempDir(), &bytes.Buffer{}, &bytes.Buffer{})
-
-	if service.DepsBackupLimit != settings.DepsBackupLimit {
-		t.Fatalf("backup limit = %d, want %d", service.DepsBackupLimit, settings.DepsBackupLimit)
-	}
 }
 
 func TestRunBackupsPrintsNewestBackups(t *testing.T) {

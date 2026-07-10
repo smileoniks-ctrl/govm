@@ -242,13 +242,13 @@ func (store dependencyBackupStore) saveWithRetention(context moduleContext, snap
 		return DependencyBackupInfo{}, fmt.Errorf("write dependency backup: %w", err)
 	}
 	info := backupInfo(name, path, backup)
-	if err := store.prune(dir, context.Path, retentionLimit); err != nil {
+	if err := store.prune(dir, context.Path, retentionLimit, info.Path); err != nil {
 		return info, fmt.Errorf("prune dependency backups: %w", err)
 	}
 	return info, nil
 }
 
-func (store dependencyBackupStore) prune(dir, modulePath string, retentionLimit int) error {
+func (store dependencyBackupStore) prune(dir, modulePath string, retentionLimit int, protectedPath string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
@@ -273,10 +273,15 @@ func (store dependencyBackupStore) prune(dir, modulePath string, retentionLimit 
 		}
 		return backups[i].CreatedAt.After(backups[j].CreatedAt)
 	})
-	if len(backups) <= retentionLimit {
-		return nil
-	}
-	for _, backup := range backups[retentionLimit:] {
+	remaining := retentionLimit - 1
+	for _, backup := range backups {
+		if backup.Path == protectedPath {
+			continue
+		}
+		if remaining > 0 {
+			remaining--
+			continue
+		}
 		if err := store.remove(backup.Path); err != nil && !os.IsNotExist(err) {
 			return err
 		}
