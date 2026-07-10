@@ -48,6 +48,8 @@ func TestPrintUsageShowsVersion(t *testing.T) {
 		"govm deps list",
 		"govm deps check",
 		"govm deps update",
+		"govm deps backups",
+		"govm deps restore <file>",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected help output to contain %q, got:\n%s", want, output)

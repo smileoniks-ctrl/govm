@@ -180,6 +180,7 @@ The Deps table mirrors the data in the **Installed** tab, which shows three colu
 |---|---|
 | `r` | Check for available updates online (runs `go list -u`) |
 | `u` | Open the dependency update confirmation dialog |
+| `b` | List saved dependency backups and choose one to restore |
 
 Pressing `u` on the Deps tab opens a confirmation dialog that lists every direct dependency that will be upgraded, e.g.:
 
@@ -218,7 +219,7 @@ Once you confirm, GoVM:
 #### Go dependency commands
 
 The same dependency workflow is also available from the command line as
-`govm deps <list|check|update>`. The commands run in the current working
+`govm deps <list|check|update|backups|restore>`. The commands run in the current working
 directory and follow the same snapshot/update/checks/rollback model that
 the TUI uses.
 
@@ -232,11 +233,22 @@ govm deps check
 # Interactively update direct dependencies, run checks, and roll back
 # on failure (mirrors the TUI Deps tab)
 govm deps update
+
+# List saved dependency backups for the current module
+govm deps backups
+
+# Restore a backup listed by `govm deps backups`
+govm deps restore <file>
 ```
 
 `govm deps update` prompts for confirmation before each step. The default
 for every prompt is `Y` (yes), including the rollback prompt, matching
 the TUI behaviour where the safe option is the default.
+
+Backup filenames are listed by `govm deps backups` and are stored under
+`~/.govm/deps_backup` in a module-specific directory. Before restoring a
+backup, GoVM saves the current `go.mod` and `go.sum` as a pre-restore backup,
+so the restore can be undone manually.
 
 ### Settings
 

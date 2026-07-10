@@ -27,7 +27,7 @@ GoVM uses [Github pull requests](https://github.com/smileoniks-ctrl/govm/pulls).
  *  All commands and functionality should be documented appropriately
  *  All new functionality/features should have appropriate unit testing
 
-GoVM strives to have a consistent set of documentation that matches the command structure and any new functionality must have accompanying documentation in the PR.
+GoVM strives to have a consistent set of documentation that matches the command structure and any new functionality must have accompanying documentation in the PR. Changes to dependency backups must keep `govm deps backups` and `govm deps restore <file>` synchronized across CLI help, README documentation, and unit tests.
 
 ## Licensing
 

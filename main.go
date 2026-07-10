@@ -98,7 +98,7 @@ func printUsage() {
 	fmt.Println("  govm deps check        Check for available dependency updates")
 	fmt.Println("  govm deps update       Update direct dependencies (interactive)")
 	fmt.Println("  govm deps backups      List saved dependency backups")
-	fmt.Println("  govm deps restore      Restore a saved dependency backup")
+	fmt.Println("  govm deps restore <file> Restore a saved dependency backup")
 	fmt.Println("  govm help              Show this help message")
 	fmt.Println("\nExamples:")
 	fmt.Println("  govm install 1.21      Install Go 1.21.x (latest)")
