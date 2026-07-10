@@ -22,6 +22,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.CurrentTab == SettingsTab {
 		return m.handleSettingsKey(msg)
 	}
+	if m.CurrentTab == DepsTab && m.Deps.operationInProgress() {
+		switch msg.String() {
+		case "u", "r", "b":
+			return m, nil
+		}
+	}
 	switch msg.String() {
 	case "i":
 		return m.handleInstallKey()

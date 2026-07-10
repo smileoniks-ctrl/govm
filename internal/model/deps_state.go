@@ -56,3 +56,12 @@ func NewDepsState(moduleDir string, tbl table.Model) DepsState {
 		},
 	}
 }
+
+func (s DepsState) operationInProgress() bool {
+	return s.Checking ||
+		s.Updating ||
+		s.RunningChecks ||
+		s.RollingBack ||
+		s.LoadingBackups ||
+		s.RestoringBackup
+}
