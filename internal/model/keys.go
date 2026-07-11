@@ -64,6 +64,10 @@ func (m Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 		var cmd tea.Cmd
 		m.InstalledTable, cmd = m.InstalledTable.Update(msg)
 		return m, cmd
+	case DepsTab:
+		var cmd tea.Cmd
+		m.Deps.Table, cmd = m.Deps.Table.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
