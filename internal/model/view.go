@@ -23,15 +23,12 @@ func (m Model) View() tea.View {
 	if m.TermHeight > 0 {
 		viewport.Height = m.TermHeight
 	}
-	if (m.TermWidth > 0 || m.TermHeight > 0) &&
+	if (m.TermWidth > 0 || m.TermHeight > 0 || (m.Width == 1 && m.Height == 1)) &&
 		(m.TermWidth < styles.MinTermWidth || m.TermHeight < styles.MinTermHeight) {
-		return tea.NewView(fmt.Sprintf(
-			"Minimum terminal size is %dx%d. Current size: %dx%d.",
-			styles.MinTermWidth,
-			styles.MinTermHeight,
-			m.TermWidth,
-			m.TermHeight,
-		))
+		v := tea.NewView(renderMinimumViewport(m.TermWidth, m.TermHeight))
+		v.BackgroundColor = styles.MinimumViewportBackground
+		v.AltScreen = true
+		return v
 	}
 
 	if m.Err != nil {
@@ -105,6 +102,36 @@ func (m Model) View() tea.View {
 	v := tea.NewView(rendered)
 	v.AltScreen = true
 	return v
+}
+
+func renderMinimumViewport(width, height int) string {
+	width = maxInt(1, width)
+	height = maxInt(1, height)
+
+	lines := []string{
+		fmt.Sprintf("Minimum terminal size is %dx%d.", styles.MinTermWidth, styles.MinTermHeight),
+		fmt.Sprintf("Current size: %dx%d.", width, height),
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for i, line := range lines {
+		lines[i] = ansi.Cut(line, 0, width)
+	}
+
+	message := lipgloss.NewStyle().
+		Foreground(styles.MinimumViewportText).
+		Render(strings.Join(lines, "\n"))
+	background := lipgloss.NewStyle().Background(styles.MinimumViewportBackground)
+	return lipgloss.Place(
+		width,
+		height,
+		lipgloss.Center,
+		lipgloss.Center,
+		message,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceStyle(background),
+	)
 }
 
 // composeStatus returns the current status message and type, taking

@@ -36,6 +36,9 @@ var (
 	Surface = lipgloss.Color("#1F2937")
 	Text    = lipgloss.Color("#E5E7EB")
 
+	MinimumViewportBackground = lipgloss.Color("#111827")
+	MinimumViewportText       = lipgloss.Color("#F9FAFB")
+
 	HighlightStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 	SuccessStyle   = lipgloss.NewStyle().Foreground(Success)
 
