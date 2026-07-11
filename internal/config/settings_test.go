@@ -24,6 +24,29 @@ func TestDefaultSettings(t *testing.T) {
 	}
 }
 
+func TestValidateDepsBackupLimit(t *testing.T) {
+	tests := []struct {
+		name    string
+		limit   int
+		wantErr bool
+	}{
+		{name: "minimum", limit: 1},
+		{name: "in range", limit: 42},
+		{name: "maximum", limit: 100},
+		{name: "below range", limit: 0, wantErr: true},
+		{name: "above range", limit: 101, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateDepsBackupLimit(tt.limit)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateDepsBackupLimit(%d) error = %v, wantErr %t", tt.limit, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestNormalizeUnknowns(t *testing.T) {
 	tests := []struct {
 		name     string

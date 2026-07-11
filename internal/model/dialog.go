@@ -10,8 +10,8 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
-// Static styles for the dependency update dialogs. They are recomputed only
-// when the user changes the active theme.
+// Static styles for modal dialogs. They are recomputed only when the user
+// changes the active theme.
 var (
 	dialogTitleStyle    lipgloss.Style
 	dialogWarningStyle  lipgloss.Style
@@ -64,7 +64,7 @@ func rebuildDialogStyles() {
 
 const maxDependencyListLines = 6
 
-func dependencyDialogWidth(viewportWidth []int) int {
+func dialogWidth(viewportWidth []int) int {
 	width := 64
 	if len(viewportWidth) > 0 {
 		width = viewportWidth[0]
@@ -75,8 +75,8 @@ func dependencyDialogWidth(viewportWidth []int) int {
 	return min(64, width)
 }
 
-func renderDependencyDialog(content string, errorStyle bool, viewportWidth []int) string {
-	width := dependencyDialogWidth(viewportWidth)
+func renderDialog(content string, errorStyle bool, viewportWidth []int) string {
+	width := dialogWidth(viewportWidth)
 	contentWidth := max(1, width-6)
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
@@ -135,7 +135,7 @@ func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.Dependency
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
-	return renderDependencyDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
+	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
 }
 
 func renderDependencyChecksDialog(yesSelected bool, viewportWidth ...int) string {
@@ -164,7 +164,7 @@ func renderDependencyChecksDialog(yesSelected bool, viewportWidth ...int) string
 		buttons,
 	}
 
-	return renderDependencyDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
+	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
 }
 
 func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCheckResultMsg, viewportWidth ...int) string {
@@ -198,7 +198,7 @@ func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCh
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
-	return renderDependencyDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), true, viewportWidth)
+	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), true, viewportWidth)
 }
 
 func renderDependencyRestoreDialog(yesSelected bool, backups []utils.DependencyBackupInfo, cursor int, viewportWidth ...int) string {
@@ -256,7 +256,7 @@ func renderDependencyRestoreDialog(yesSelected bool, backups []utils.DependencyB
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
-	return renderDependencyDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
+	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
 }
 
 func overlayDialog(background, dialog string, width, height int) string {

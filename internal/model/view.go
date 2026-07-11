@@ -50,7 +50,7 @@ func (m Model) View() tea.View {
 		components = append(components, renderStatus(statusType, status, width))
 	}
 
-	components = append(components, renderHelp(
+	help := renderHelp(
 		m.CurrentTab,
 		m.ConfirmingDelete,
 		m.Deps.Dialog.ConfirmingUpdate,
@@ -60,10 +60,19 @@ func (m Model) View() tea.View {
 		m.Deps.Dialog.RestoreChoiceYes,
 		width,
 		m.Layout,
-	))
+	)
+	if m.Settings.EditingDepsBackupLimit {
+		help = renderKeyHints([][2]string{
+			{"enter", "save"},
+			{"esc", "cancel"},
+		}, width, m.Layout)
+	}
+	components = append(components, help)
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
 
-	if m.Deps.Dialog.ConfirmingUpdate {
+	if m.Settings.EditingDepsBackupLimit {
+		rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(m.Settings, viewportWidth), viewportWidth, height)
+	} else if m.Deps.Dialog.ConfirmingUpdate {
 		updatable := utils.UpdatableDirectDependencies(m.Deps.Dependencies)
 		entries := make([]utils.DependencyUpdateEntry, 0, len(updatable))
 		for _, d := range updatable {

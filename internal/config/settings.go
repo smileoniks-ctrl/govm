@@ -27,8 +27,8 @@ const (
 const (
 	tempFilePrefix         = ".settings-"
 	defaultDepsBackupLimit = 10
-	minDepsBackupLimit     = 1
-	maxDepsBackupLimit     = 100
+	MinDepsBackupLimit     = 1
+	MaxDepsBackupLimit     = 100
 )
 
 type Settings struct {
@@ -52,10 +52,17 @@ func Normalize(settings Settings) Settings {
 	if settings.Theme != ThemeCurrent && settings.Theme != ThemeLight {
 		settings.Theme = ThemeCurrent
 	}
-	if settings.DepsBackupLimit < minDepsBackupLimit || settings.DepsBackupLimit > maxDepsBackupLimit {
+	if ValidateDepsBackupLimit(settings.DepsBackupLimit) != nil {
 		settings.DepsBackupLimit = defaultDepsBackupLimit
 	}
 	return settings
+}
+
+func ValidateDepsBackupLimit(limit int) error {
+	if limit < MinDepsBackupLimit || limit > MaxDepsBackupLimit {
+		return fmt.Errorf("must be between %d and %d", MinDepsBackupLimit, MaxDepsBackupLimit)
+	}
+	return nil
 }
 
 // DefaultPath returns the canonical settings file location under

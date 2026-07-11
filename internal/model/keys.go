@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strconv"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
@@ -186,6 +187,9 @@ func (m Model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.Settings.MoveDown()
 	case "enter", "space":
+		if m.Settings.Cursor == 2 {
+			return m, m.Settings.OpenDepsBackupLimitInput()
+		}
 		m.toggleSelectedSetting()
 	case "left", "h":
 		if m.Settings.Cursor == 2 {
@@ -220,9 +224,6 @@ func (m *Model) toggleSelectedSetting() {
 			m.Settings.Values.Theme = config.ThemeCurrent
 		}
 		m.applyRuntimeTheme()
-	case 2:
-		m.adjustDepsBackupLimit(1)
-		return
 	}
 	m.saveSettings()
 }
@@ -238,8 +239,50 @@ func (m *Model) adjustDepsBackupLimit(delta int) {
 	m.saveSettings()
 }
 
+func (m Model) handleDepsBackupLimitInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.Settings.CloseDepsBackupLimitInput()
+		return m, nil
+	case "enter":
+		if err := m.Settings.DepsBackupLimitInput.Err; err != nil {
+			m.Settings.DepsBackupLimitInputErr = err.Error()
+			return m, nil
+		}
+
+		limit, err := strconv.Atoi(m.Settings.DepsBackupLimitInput.Value())
+		if err != nil {
+			m.Settings.DepsBackupLimitInputErr = "Enter a whole number."
+			return m, nil
+		}
+		if err := config.ValidateDepsBackupLimit(limit); err != nil {
+			m.Settings.DepsBackupLimitInputErr = err.Error()
+			return m, nil
+		}
+
+		values := m.Settings.Values
+		values.DepsBackupLimit = limit
+		if err := config.Save(m.Settings.Path, values); err != nil {
+			m.Settings.DepsBackupLimitInputErr = fmt.Sprintf("Failed to save settings: %v", err)
+			return m, nil
+		}
+
+		m.Settings.Values = values
+		m.Settings.CloseDepsBackupLimitInput()
+		m.Message = "Settings saved."
+		m.MessageType = "info"
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.Settings.DepsBackupLimitInput, cmd = m.Settings.DepsBackupLimitInput.Update(msg)
+		m.Settings.DepsBackupLimitInputErr = ""
+		return m, cmd
+	}
+}
+
 func (m *Model) applyRuntimeTheme() {
 	ApplyTheme(styles.ThemeName(m.Settings.Values.Theme))
+	m.Settings.ApplyTheme()
 	m.Spinner.Style = styles.SpinnerStyle
 	m.InstalledTable.SetStyles(tableStyles())
 	m.Deps.Table.SetStyles(tableStyles())

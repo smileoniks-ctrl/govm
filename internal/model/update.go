@@ -12,6 +12,16 @@ import (
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	if m.Settings.EditingDepsBackupLimit {
+		if key, ok := msg.(tea.KeyPressMsg); ok {
+			return m.handleDepsBackupLimitInputKey(key)
+		}
+
+		var cmd tea.Cmd
+		m.Settings.DepsBackupLimitInput, cmd = m.Settings.DepsBackupLimitInput.Update(msg)
+		cmds = append(cmds, cmd)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		if m.Deps.Dialog.ConfirmingUpdate {

@@ -75,6 +75,14 @@ func TestViewRespectsTerminalWidth(t *testing.T) {
 				}}
 			},
 		},
+		{
+			name: "backup limit dialog",
+			setup: func(m *Model) {
+				m.CurrentTab = SettingsTab
+				m.Settings.Cursor = 2
+				m.Settings.OpenDepsBackupLimitInput()
+			},
+		},
 	}
 
 	for _, width := range []int{30, 59, 60, 120} {
