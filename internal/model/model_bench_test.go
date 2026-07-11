@@ -126,7 +126,7 @@ func BenchmarkView_DepsTabWithDialog(b *testing.B) {
 }
 
 func BenchmarkView_DepsTabWithPhysicalViewport(b *testing.B) {
-	for _, width := range []int{30, 59, 60, 120} {
+	for _, width := range []int{64, 80, 120} {
 		b.Run(strconv.Itoa(width), func(b *testing.B) {
 			m := benchModel(b)
 			m.CurrentTab = DepsTab
@@ -145,7 +145,7 @@ func BenchmarkView_DepsTabWithPhysicalViewport(b *testing.B) {
 }
 
 func BenchmarkView_DepsTabWithPhysicalViewportWithoutDialog(b *testing.B) {
-	for _, width := range []int{30, 59, 60, 120} {
+	for _, width := range []int{64, 80, 120} {
 		b.Run(strconv.Itoa(width), func(b *testing.B) {
 			m := benchModelAtViewport(b, width)
 			m.CurrentTab = DepsTab
@@ -160,7 +160,7 @@ func BenchmarkView_DepsTabWithPhysicalViewportWithoutDialog(b *testing.B) {
 }
 
 func BenchmarkView_DepsTabWithPhysicalViewportWithDialog(b *testing.B) {
-	for _, width := range []int{30, 59, 60, 120} {
+	for _, width := range []int{64, 80, 120} {
 		b.Run(strconv.Itoa(width), func(b *testing.B) {
 			m := benchModelAtViewport(b, width)
 			m.CurrentTab = DepsTab
@@ -173,15 +173,6 @@ func BenchmarkView_DepsTabWithPhysicalViewportWithDialog(b *testing.B) {
 				_ = m.View()
 			}
 		})
-	}
-}
-
-func BenchmarkTruncateViewWidth_NoOverflow(b *testing.B) {
-	rendered := "first short line\nsecond short line\nthird short line"
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = truncateViewWidth(rendered, 80)
 	}
 }
 
@@ -229,7 +220,7 @@ func BenchmarkOverlayDialog(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = overlayDialog(bg, dlg, 80, 24)
+		_ = overlayDialog(bg, dlg, viewportSize{Width: 80, Height: 24})
 	}
 }
 
@@ -252,12 +243,12 @@ func BenchmarkRenderDependencyUpdateDialog(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = renderDependencyUpdateDialog(true, entries)
-		_ = renderDependencyUpdateDialog(false, entries)
+		_ = renderDependencyUpdateDialog(true, entries, viewportSize{Width: 64, Height: 20})
+		_ = renderDependencyUpdateDialog(false, entries, viewportSize{Width: 64, Height: 20})
 	}
 }
 
-func BenchmarkRenderDependencyDialogsCompact(b *testing.B) {
+func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
 	result := &utils.DependencyCheckResultMsg{
 		Command: "go test ./...",
 		Output:  "FAIL: dependency test output that is deliberately longer than the compact dialog content area",
@@ -268,14 +259,15 @@ func BenchmarkRenderDependencyDialogsCompact(b *testing.B) {
 		Updated: 1,
 	}}
 
-	for _, width := range []int{30, 59, 60} {
+	for _, width := range []int{64, 80} {
 		b.Run(strconv.Itoa(width), func(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = renderDependencyChecksDialog(true, width)
-				_ = renderDependencyRollbackDialog(true, result, width)
-				_ = renderDependencyRestoreDialog(true, backups, 0, width)
+				viewport := viewportSize{Width: width, Height: 20}
+				_ = renderDependencyChecksDialog(true, viewport)
+				_ = renderDependencyRollbackDialog(true, result, viewport)
+				_ = renderDependencyRestoreDialog(true, backups, 0, viewport)
 			}
 		})
 	}

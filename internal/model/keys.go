@@ -75,6 +75,9 @@ func (m Model) handleTabKey() (tea.Model, tea.Cmd) {
 		m.Deps.Checking = true
 		return m, utils.ListModuleDependencies(m.Deps.ModuleDir)
 	}
+	if m.CurrentTab == SettingsTab {
+		return m, tea.ClearScreen
+	}
 	return m, nil
 }
 

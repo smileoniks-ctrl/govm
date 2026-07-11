@@ -7,7 +7,7 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/config"
 )
 
-func renderDepsBackupLimitDialog(settings SettingsState, viewportWidth int) string {
+func renderDepsBackupLimitDialog(settings SettingsState, viewport viewportSize) string {
 	errMessage := settings.DepsBackupLimitInputErr
 	if errMessage == "" && settings.DepsBackupLimitInput.Err != nil {
 		errMessage = settings.DepsBackupLimitInput.Err.Error()
@@ -34,6 +34,6 @@ func renderDepsBackupLimitDialog(settings SettingsState, viewportWidth int) stri
 	return renderDialog(
 		lipgloss.JoinVertical(lipgloss.Left, lines...),
 		errMessage != "",
-		[]int{viewportWidth},
+		viewport,
 	)
 }

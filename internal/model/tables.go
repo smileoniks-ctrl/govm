@@ -61,13 +61,7 @@ func dependencyStatus(d utils.ModuleDependency) string {
 }
 
 func installedTableColumns(width int, layout styles.LayoutMode) []table.Column {
-	var versionWidth, statusWidth, minPathWidth int
-	switch layout {
-	case styles.LayoutCompact:
-		versionWidth, statusWidth, minPathWidth = 8, 6, 8
-	default:
-		versionWidth, statusWidth, minPathWidth = 10, 10, 18
-	}
+	versionWidth, statusWidth, minPathWidth := 10, 10, 18
 
 	pathWidth := width - versionWidth - statusWidth - 6
 	if pathWidth < minPathWidth {
@@ -82,13 +76,7 @@ func installedTableColumns(width int, layout styles.LayoutMode) []table.Column {
 }
 
 func dependencyTableColumns(width int, layout styles.LayoutMode) []table.Column {
-	var pathWidth, versionWidth, latestWidth, statusWidth, minPathWidth int
-	switch layout {
-	case styles.LayoutCompact:
-		pathWidth, versionWidth, latestWidth, statusWidth, minPathWidth = 12, 7, 7, 6, 10
-	default:
-		pathWidth, versionWidth, latestWidth, statusWidth, minPathWidth = 24, 9, 9, 10, 10
-	}
+	pathWidth, versionWidth, latestWidth, statusWidth, minPathWidth := 0, 9, 9, 10, 10
 
 	used := versionWidth + latestWidth + statusWidth + 12
 	pathWidth = width - used

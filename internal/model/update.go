@@ -51,8 +51,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		const fixedUIElements = 6
 		contentHeight := msg.Height - frameV - fixedUIElements
-		if contentHeight < styles.MinTermHeight {
-			contentHeight = styles.MinTermHeight
+		if contentHeight < 1 {
+			contentHeight = 1
 		}
 
 		m.Width = contentWidth

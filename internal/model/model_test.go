@@ -128,6 +128,104 @@ func TestWindowSizeMsgKeepsContentSizesPositive(t *testing.T) {
 	}
 }
 
+func TestWindowSizeMsgRespectsMinimumViewportHeight(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 64, Height: 20})
+	m = updated.(Model)
+
+	if m.Height != 12 {
+		t.Fatalf("content height = %d, want 12", m.Height)
+	}
+
+	lineCount := len(strings.Split(stripANSI(m.View().Content), "\n"))
+	if lineCount > 20 {
+		t.Fatalf("normal view line count = %d, want at most 20", lineCount)
+	}
+}
+
+func TestViewReportsMinimumViewportSize(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		width    int
+		height   int
+		wantHint bool
+	}{
+		{name: "one column too narrow", width: 63, height: 20, wantHint: true},
+		{name: "one row too short", width: 64, height: 19, wantHint: true},
+		{name: "minimum supported viewport", width: 64, height: 20, wantHint: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
+			m = updated.(Model)
+
+			view := stripANSI(m.View().Content)
+			const minimumSizeHint = "Minimum terminal size is 64x20."
+			if got := strings.Contains(view, minimumSizeHint); got != tt.wantHint {
+				t.Fatalf("minimum-size hint present = %t, want %t for %dx%d viewport:\n%s", got, tt.wantHint, tt.width, tt.height, view)
+			}
+		})
+	}
+}
+
+func TestViewHasEqualHeightAcrossTabsAtStandardViewport(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = updated.(Model)
+
+	var lineCount int
+	for tab := AvailableTab; tab < tabCount; tab++ {
+		m.CurrentTab = tab
+		got := len(strings.Split(m.View().Content, "\n"))
+		if tab == AvailableTab {
+			lineCount = got
+			continue
+		}
+		if got != lineCount {
+			t.Fatalf("tab %d view line count = %d, want %d", tab, got, lineCount)
+		}
+	}
+}
+
+func TestRenderContentCanvasClearsEveryRowToCanvasWidth(t *testing.T) {
+	const width = 10
+	got := strings.Split(renderContentCanvas("row", width, 3), "\n")
+
+	if len(got) != 3 {
+		t.Fatalf("canvas line count = %d, want 3", len(got))
+	}
+	for i, line := range got {
+		if visibleWidth := ansi.StringWidth(line); visibleWidth != width {
+			t.Errorf("canvas line %d visible width = %d, want %d; line = %q", i, visibleWidth, width, line)
+		}
+	}
+}
+
+func TestSettingsBackupLimitDialogFitsMinimumViewport(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+	m.Settings.Cursor = 2
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 64, Height: 20})
+	m = updated.(Model)
+	m.Settings.OpenDepsBackupLimitInput()
+	m.Settings.DepsBackupLimitInput.SetValue("0")
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+
+	view := stripANSI(m.View().Content)
+	for _, want := range []string{
+		"Set dependency backup limit",
+		"must be between 1 and 100",
+		"enter: save  esc: cancel",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected minimum-viewport dialog to contain %q, got:\n%s", want, view)
+		}
+	}
+}
+
 func TestTabSwitchingCyclesThroughFourTabs(t *testing.T) {
 	m := newTestModel(t)
 
@@ -157,6 +255,22 @@ func TestTabSwitchingCyclesThroughFourTabs(t *testing.T) {
 	m = updated.(Model)
 	if m.CurrentTab != AvailableTab {
 		t.Fatalf("expected available tab after fourth switch, got %d", m.CurrentTab)
+	}
+}
+
+func TestHandleTabKeyClearsScreenWhenSwitchingToSettings(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = DepsTab
+
+	updated, cmd := m.handleTabKey()
+	if got := updated.(Model).CurrentTab; got != SettingsTab {
+		t.Fatalf("current tab = %d, want %d", got, SettingsTab)
+	}
+	if cmd == nil {
+		t.Fatal("expected clear screen command when switching to settings")
+	}
+	if got, want := reflect.TypeOf(cmd()), reflect.TypeOf(tea.ClearScreen()); got != want {
+		t.Fatalf("command message type = %v, want %v", got, want)
 	}
 }
 
@@ -479,13 +593,13 @@ func TestApplyThemeRebuildsDependencyDialogStyles(t *testing.T) {
 	})
 
 	ApplyTheme(styles.ThemeCurrent)
-	currentDialog := renderDependencyChecksDialog(true)
+	currentDialog := renderDependencyChecksDialog(true, viewportSize{Width: 64, Height: 20})
 
 	if got := ApplyTheme(styles.ThemeLight); got != styles.ThemeLight {
 		t.Fatalf("expected light theme, got %q", got)
 	}
 
-	lightDialog := renderDependencyChecksDialog(true)
+	lightDialog := renderDependencyChecksDialog(true, viewportSize{Width: 64, Height: 20})
 	if lightDialog == currentDialog {
 		t.Fatal("expected light theme to change dependency dialog output")
 	}
@@ -537,15 +651,15 @@ func TestWindowSizeMsgResizesDepsTable(t *testing.T) {
 	}
 }
 
-func TestWindowSizeMsgCompactUsesPhysicalContentWidth(t *testing.T) {
+func TestWindowSizeMsgUsesNormalContentWidth(t *testing.T) {
 	tests := []struct {
 		name      string
 		termWidth int
 		wantWidth int
 	}{
-		{name: "minimum terminal", termWidth: 30, wantWidth: 28},
-		{name: "below compact breakpoint", termWidth: 59, wantWidth: 57},
-		{name: "compact breakpoint", termWidth: 60, wantWidth: 56},
+		{name: "minimum terminal", termWidth: 64, wantWidth: 60},
+		{name: "normal terminal", termWidth: 80, wantWidth: 76},
+		{name: "wide breakpoint", termWidth: 130, wantWidth: 124},
 	}
 
 	for _, tt := range tests {
@@ -560,73 +674,6 @@ func TestWindowSizeMsgCompactUsesPhysicalContentWidth(t *testing.T) {
 			if got.Deps.Table.Width() != tt.wantWidth {
 				t.Fatalf("deps table width = %d, want %d", got.Deps.Table.Width(), tt.wantWidth)
 			}
-		})
-	}
-}
-
-func TestTruncateViewWidth(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		width int
-		check func(t *testing.T, got string)
-	}{
-		{
-			name:  "ANSI-styled line that overflows retains its reset sequence and width <= max",
-			input: "\x1b[31mabcdef\x1b[0m",
-			width: 3,
-			check: func(t *testing.T, got string) {
-				t.Helper()
-				if !strings.Contains(got, "\x1b[0m") {
-					t.Fatalf("expected ANSI reset sequence in %q", got)
-				}
-				if gotWidth := ansi.StringWidth(got); gotWidth > 3 {
-					t.Fatalf("line width = %d, want <= 3: %q", gotWidth, got)
-				}
-			},
-		},
-		{
-			name:  "multiple lines preserves normal lines",
-			input: "first\nthis line overflows\nlast",
-			width: 6,
-			check: func(t *testing.T, got string) {
-				t.Helper()
-				if !strings.Contains(got, "first") || !strings.Contains(got, "last") {
-					t.Fatalf("expected normal lines preserved, got %q", got)
-				}
-			},
-		},
-		{
-			name:  "trailing empty line/newline preserved",
-			input: "this line overflows\n",
-			width: 4,
-			check: func(t *testing.T, got string) {
-				t.Helper()
-				if !strings.HasSuffix(got, "\n") {
-					t.Fatalf("expected trailing newline preserved, got %q", got)
-				}
-				if gotLines := strings.Split(got, "\n"); len(gotLines) != 2 || gotLines[1] != "" {
-					t.Fatalf("expected trailing empty line preserved, got %q", got)
-				}
-			},
-		},
-		{
-			name:  "no-overflow returns identical content",
-			input: "\x1b[32mshort\x1b[0m\nsecond",
-			width: 10,
-			check: func(t *testing.T, got string) {
-				t.Helper()
-				if got != "\x1b[32mshort\x1b[0m\nsecond" {
-					t.Fatalf("got %q, want identical input", got)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := truncateViewWidth(tt.input, tt.width)
-			tt.check(t, got)
 		})
 	}
 }
@@ -753,14 +800,14 @@ func TestDependenciesMsgPopulatesTable(t *testing.T) {
 }
 
 func TestDependencyTableColumns(t *testing.T) {
-	cols := dependencyTableColumns(60, styles.LayoutCompact)
+	cols := dependencyTableColumns(64, styles.LayoutNormal)
 
 	if len(cols) != 4 {
 		t.Fatalf("expected 4 columns, got %d", len(cols))
 	}
 
 	if cols[0].Width < 5 || cols[1].Width < 3 || cols[2].Width < 3 || cols[3].Width < 3 {
-		t.Fatal("expected positive column widths in compact mode")
+		t.Fatal("expected positive column widths at the minimum viewport")
 	}
 }
 
@@ -986,7 +1033,7 @@ func TestDependencyTableIndirectUpdateStatus(t *testing.T) {
 }
 
 func TestRenderDependencyUpdateDialogContainsWarning(t *testing.T) {
-	dialog := stripANSI(renderDependencyUpdateDialog(true, nil))
+	dialog := stripANSI(renderDependencyUpdateDialog(true, nil, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Warning", "will be updated", "Yes", "No"} {
 		if !strings.Contains(dialog, want) {
@@ -1000,7 +1047,7 @@ func TestRenderDependencyUpdateDialogListsModules(t *testing.T) {
 		{Path: "github.com/example/lib", OldVersion: "v1.0.0", NewVersion: "v1.1.0"},
 		{Path: "github.com/example/other", OldVersion: "v2.0.0", NewVersion: "v2.1.0"},
 	}
-	dialog := stripANSI(renderDependencyUpdateDialog(true, entries))
+	dialog := stripANSI(renderDependencyUpdateDialog(true, entries, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"github.com/example/lib", "v1.0.0", "v1.1.0", "github.com/example/other"} {
 		if !strings.Contains(dialog, want) {
@@ -1018,7 +1065,7 @@ func TestRenderDependencyUpdateDialogTruncatesLongLists(t *testing.T) {
 			NewVersion: "v1.1.0",
 		})
 	}
-	dialog := stripANSI(renderDependencyUpdateDialog(true, entries))
+	dialog := stripANSI(renderDependencyUpdateDialog(true, entries, viewportSize{Width: 64, Height: 20}))
 
 	if !strings.Contains(dialog, "and") || !strings.Contains(dialog, "more") {
 		t.Fatalf("expected truncation hint in dialog, got:\n%s", dialog)
@@ -1035,7 +1082,7 @@ func TestRenderDependencyRestoreDialogKeepsCursorVisible(t *testing.T) {
 		})
 	}
 
-	dialog := stripANSI(renderDependencyRestoreDialog(true, backups, 6))
+	dialog := stripANSI(renderDependencyRestoreDialog(true, backups, 6, viewportSize{Width: 64, Height: 20}))
 
 	if !strings.Contains(dialog, "> 2026-07-09_12-00-06.json") {
 		t.Fatalf("expected selected backup to be visible, got:\n%s", dialog)
@@ -1043,7 +1090,7 @@ func TestRenderDependencyRestoreDialogKeepsCursorVisible(t *testing.T) {
 }
 
 func TestRenderDependencyChecksDialogContainsCommands(t *testing.T) {
-	dialog := stripANSI(renderDependencyChecksDialog(true))
+	dialog := stripANSI(renderDependencyChecksDialog(true, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Run checks?", "go test", "go vet", "Yes", "No"} {
 		if !strings.Contains(dialog, want) {
@@ -1058,7 +1105,7 @@ func TestRenderDependencyRollbackDialogContainsCommand(t *testing.T) {
 		Command: "go test ./...",
 		Output:  "FAIL: example_test.go:10: expected 1, got 2",
 	}
-	dialog := stripANSI(renderDependencyRollbackDialog(true, result))
+	dialog := stripANSI(renderDependencyRollbackDialog(true, result, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Checks failed", "go test ./...", "FAIL: example_test", "Roll back", "Keep"} {
 		if !strings.Contains(dialog, want) {
@@ -1085,13 +1132,13 @@ func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
 			render: func(width int) string {
 				return renderDependencyUpdateDialog(true, []utils.DependencyUpdateEntry{{
 					Path: longPath, OldVersion: "v1.0.0", NewVersion: "v1.1.0",
-				}}, width)
+				}}, viewportSize{Width: width, Height: 20})
 			},
 		},
 		{
 			name: "checks",
 			render: func(width int) string {
-				return renderDependencyChecksDialog(true, width)
+				return renderDependencyChecksDialog(true, viewportSize{Width: width, Height: 20})
 			},
 		},
 		{
@@ -1100,18 +1147,18 @@ func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
 				return renderDependencyRollbackDialog(true, &utils.DependencyCheckResultMsg{
 					Command: longPath,
 					Output:  longOutput,
-				}, width)
+				}, viewportSize{Width: width, Height: 20})
 			},
 		},
 		{
 			name: "restore",
 			render: func(width int) string {
-				return renderDependencyRestoreDialog(true, backups, 0, width)
+				return renderDependencyRestoreDialog(true, backups, 0, viewportSize{Width: width, Height: 20})
 			},
 		},
 	}
 
-	for _, width := range []int{30, 59, 60} {
+	for _, width := range []int{64, 80, 120} {
 		for _, tt := range tests {
 			t.Run(fmt.Sprintf("%s-%d", tt.name, width), func(t *testing.T) {
 				for _, line := range strings.Split(tt.render(width), "\n") {
@@ -1169,7 +1216,7 @@ func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
 		},
 	}
 
-	for _, width := range []int{30, 59, 60} {
+	for _, width := range []int{64, 80, 120} {
 		for _, tt := range tests {
 			t.Run(fmt.Sprintf("%s-%d", tt.name, width), func(t *testing.T) {
 				m := newTestModel(t)
@@ -1221,8 +1268,7 @@ func TestInstalledTableColumns_AllLayouts(t *testing.T) {
 		width  int
 		layout styles.LayoutMode
 	}{
-		{"compact-min", 20, styles.LayoutCompact},
-		{"compact-wide", 120, styles.LayoutCompact},
+		{"normal-min", 64, styles.LayoutNormal},
 		{"normal", 100, styles.LayoutNormal},
 		{"wide", 160, styles.LayoutWide},
 	}
@@ -1248,8 +1294,7 @@ func TestDependencyTableColumns_AllLayouts(t *testing.T) {
 		width  int
 		layout styles.LayoutMode
 	}{
-		{"compact-min", 20, styles.LayoutCompact},
-		{"compact-wide", 120, styles.LayoutCompact},
+		{"normal-min", 64, styles.LayoutNormal},
 		{"normal", 100, styles.LayoutNormal},
 		{"wide", 160, styles.LayoutWide},
 	}
@@ -1374,7 +1419,7 @@ func TestMaxInt(t *testing.T) {
 func TestOverlayDialog_ReplacesCenterRegion(t *testing.T) {
 	bg := strings.Repeat("line\n", 9) + "line"
 	dlg := "AAA\nBBB\nCCC"
-	out := overlayDialog(bg, dlg, 20, 10)
+	out := overlayDialog(bg, dlg, viewportSize{Width: 20, Height: 10})
 	stripped := stripANSI(out)
 	for _, want := range []string{"AAA", "BBB", "CCC"} {
 		if !strings.Contains(stripped, want) {
@@ -1390,7 +1435,7 @@ func TestOverlayDialog_ReplacesCenterRegion(t *testing.T) {
 func TestOverlayDialog_ClampsToSize(t *testing.T) {
 	bg := strings.Repeat("bg\n", 15) + "bg"
 	dlg := "VISIBLE"
-	out := overlayDialog(bg, dlg, 0, 0)
+	out := overlayDialog(bg, dlg, viewportSize{})
 	stripped := stripANSI(out)
 	if !strings.Contains(stripped, "VISIBLE") {
 		t.Fatalf("expected dialog content in output, got:\n%s", out)
@@ -1412,7 +1457,7 @@ func TestOverlayDialog_PreservesRowsOutsideDialog(t *testing.T) {
 	bg := strings.Join(lines, "\n")
 	dlg := "AAA\nBBB\nCCC"
 
-	out := overlayDialog(bg, dlg, 30, 20)
+	out := overlayDialog(bg, dlg, viewportSize{Width: 30, Height: 20})
 	stripped := stripANSI(out)
 	strippedLines := strings.Split(stripped, "\n")
 
@@ -1504,10 +1549,10 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 	}
 }
 
-func TestRenderHelp_DepsCompactTruncates(t *testing.T) {
-	got := renderHelp(2, false, false, false, false, false, false, 20, styles.LayoutCompact)
+func TestRenderHelp_DepsTruncatesToWidth(t *testing.T) {
+	got := renderHelp(2, false, false, false, false, false, false, 20, styles.LayoutNormal)
 	if got == "" {
-		t.Fatal("expected non-empty help for deps compact")
+		t.Fatal("expected non-empty help for deps")
 	}
 }
 

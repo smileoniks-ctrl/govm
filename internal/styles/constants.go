@@ -7,30 +7,23 @@ import (
 )
 
 const (
-	CompactBreakpoint = 60
-	NormalBreakpoint  = 90
-	WideBreakpoint    = 130
-	MinTermWidth      = 30
-	MinTermHeight     = 8
+	WideBreakpoint = 130
+	MinTermWidth   = 64
+	MinTermHeight  = 20
 )
 
 type LayoutMode int
 
 const (
-	LayoutCompact LayoutMode = iota
-	LayoutNormal
+	LayoutNormal LayoutMode = iota
 	LayoutWide
 )
 
 func GetLayoutMode(width int) LayoutMode {
-	switch {
-	case width < CompactBreakpoint:
-		return LayoutCompact
-	case width < WideBreakpoint:
-		return LayoutNormal
-	default:
+	if width >= WideBreakpoint {
 		return LayoutWide
 	}
+	return LayoutNormal
 }
 
 var (
@@ -112,8 +105,6 @@ var (
 
 func AppStyleFor(mode LayoutMode) lipgloss.Style {
 	switch mode {
-	case LayoutCompact:
-		return lipgloss.NewStyle().Padding(0, 1)
 	case LayoutWide:
 		return lipgloss.NewStyle().
 			Padding(1, 2).
@@ -129,8 +120,6 @@ func AppStyleFor(mode LayoutMode) lipgloss.Style {
 
 func FrameOverhead(mode LayoutMode) (horizontal, vertical int) {
 	switch mode {
-	case LayoutCompact:
-		return 2, 0
 	case LayoutWide:
 		return 6, 4
 	default:

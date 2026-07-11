@@ -16,11 +16,22 @@ func (m Model) View() tea.View {
 	appStyle := styles.AppStyleFor(m.Layout)
 	width := m.viewWidth()
 	height := m.viewHeight()
-	viewportWidth := width
-	physicalViewportWidth := 0
+	viewport := viewportSize{Width: width, Height: height}
 	if m.TermWidth > 0 {
-		viewportWidth = m.TermWidth
-		physicalViewportWidth = m.TermWidth
+		viewport.Width = m.TermWidth
+	}
+	if m.TermHeight > 0 {
+		viewport.Height = m.TermHeight
+	}
+	if (m.TermWidth > 0 || m.TermHeight > 0) &&
+		(m.TermWidth < styles.MinTermWidth || m.TermHeight < styles.MinTermHeight) {
+		return tea.NewView(fmt.Sprintf(
+			"Minimum terminal size is %dx%d. Current size: %dx%d.",
+			styles.MinTermWidth,
+			styles.MinTermHeight,
+			m.TermWidth,
+			m.TermHeight,
+		))
 	}
 
 	if m.Err != nil {
@@ -37,13 +48,13 @@ func (m Model) View() tea.View {
 
 	switch m.CurrentTab {
 	case AvailableTab:
-		components = append(components, m.List.View())
+		components = append(components, renderContentCanvas(m.List.View(), width, height))
 	case InstalledTab:
-		components = append(components, m.InstalledTable.View())
+		components = append(components, renderContentCanvas(m.InstalledTable.View(), width, height))
 	case DepsTab:
-		components = append(components, m.Deps.Table.View())
+		components = append(components, renderContentCanvas(m.Deps.Table.View(), width, height))
 	case SettingsTab:
-		components = append(components, renderSettingsView(m.Settings))
+		components = append(components, renderContentCanvas(renderSettingsView(m.Settings), width, height))
 	}
 
 	if status, statusType := m.composeStatus(); status != "" {
@@ -71,7 +82,7 @@ func (m Model) View() tea.View {
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
 
 	if m.Settings.EditingDepsBackupLimit {
-		rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(m.Settings, viewportWidth), viewportWidth, height)
+		rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(m.Settings, viewport), viewport)
 	} else if m.Deps.Dialog.ConfirmingUpdate {
 		updatable := utils.UpdatableDirectDependencies(m.Deps.Dependencies)
 		entries := make([]utils.DependencyUpdateEntry, 0, len(updatable))
@@ -82,16 +93,13 @@ func (m Model) View() tea.View {
 				NewVersion: d.Latest,
 			})
 		}
-		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.Deps.Dialog.UpdateChoiceYes, entries, viewportWidth), viewportWidth, height)
+		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.Deps.Dialog.UpdateChoiceYes, entries, viewport), viewport)
 	} else if m.Deps.Dialog.ConfirmingChecks {
-		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.Deps.Dialog.CheckChoiceYes, viewportWidth), viewportWidth, height)
+		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.Deps.Dialog.CheckChoiceYes, viewport), viewport)
 	} else if m.Deps.Dialog.ConfirmingRollback {
-		rendered = overlayDialog(rendered, renderDependencyRollbackDialog(m.Deps.Dialog.RollbackChoiceYes, m.Deps.LastCheckResult, viewportWidth), viewportWidth, height)
+		rendered = overlayDialog(rendered, renderDependencyRollbackDialog(m.Deps.Dialog.RollbackChoiceYes, m.Deps.LastCheckResult, viewport), viewport)
 	} else if m.Deps.Dialog.ConfirmingRestoreBackup {
-		rendered = overlayDialog(rendered, renderDependencyRestoreDialog(m.Deps.Dialog.RestoreChoiceYes, m.Deps.Backups, m.Deps.BackupCursor, viewportWidth), viewportWidth, height)
-	}
-	if shouldClampViewWidth(physicalViewportWidth, m.Layout) {
-		rendered = truncateViewWidth(rendered, physicalViewportWidth)
+		rendered = overlayDialog(rendered, renderDependencyRestoreDialog(m.Deps.Dialog.RestoreChoiceYes, m.Deps.Backups, m.Deps.BackupCursor, viewport), viewport)
 	}
 
 	v := tea.NewView(rendered)
@@ -126,28 +134,17 @@ func (m Model) composeStatus() (string, string) {
 func renderHeader(width int, layout styles.LayoutMode) string {
 	title := styles.TitleStyle.Render("GoVM")
 
-	if layout == styles.LayoutCompact {
-		return title
-	}
-
 	meta := styles.HeaderMetaStyle.Render(fmt.Sprintf("Go Version Manager %s", utils.GetVersion()))
 	spacerWidth := maxInt(1, width-lipgloss.Width(title)-lipgloss.Width(meta))
 	return lipgloss.JoinHorizontal(lipgloss.Top, title, strings.Repeat(" ", spacerWidth), meta)
 }
 
 func renderTabs(currentTab int, layout styles.LayoutMode) string {
-	var availableLabel, installedLabel, depsLabel, settingsLabel string
-	if layout == styles.LayoutCompact {
-		availableLabel, installedLabel, depsLabel, settingsLabel = "All", "Local", "Deps", "Set"
-	} else {
-		availableLabel, installedLabel, depsLabel, settingsLabel = "Available", "Installed", "Deps", "Settings"
-	}
-
 	tabs := []string{
-		renderTab(availableLabel, currentTab == AvailableTab),
-		renderTab(installedLabel, currentTab == InstalledTab),
-		renderTab(depsLabel, currentTab == DepsTab),
-		renderTab(settingsLabel, currentTab == SettingsTab),
+		renderTab("Available", currentTab == AvailableTab),
+		renderTab("Installed", currentTab == InstalledTab),
+		renderTab("Deps", currentTab == DepsTab),
+		renderTab("Settings", currentTab == SettingsTab),
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Left, tabs...)
 }
@@ -263,124 +260,39 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			{"q", "quit"},
 		}
 	} else if currentTab == AvailableTab {
-		if layout == styles.LayoutCompact {
-			hints = [][2]string{
-				{"i", "inst"},
-				{"u", "use"},
-				{"d", "del"},
-				{"tab", "sw"},
-				{"q", "quit"},
-			}
-		} else {
-			hints = [][2]string{
-				{"i", "install"},
-				{"u", "use"},
-				{"d", "delete"},
-				{"r", "refresh"},
-				{"tab", "switch"},
-				{"q", "quit"},
-			}
+		hints = [][2]string{
+			{"i", "install"},
+			{"u", "use"},
+			{"d", "delete"},
+			{"r", "refresh"},
+			{"tab", "switch"},
+			{"q", "quit"},
 		}
 	} else if currentTab == DepsTab {
-		if layout == styles.LayoutCompact {
-			hints = [][2]string{
-				{"r", "check"},
-				{"u", "update"},
-				{"b", "bkup"},
-				{"tab", "sw"},
-				{"q", "quit"},
-			}
-		} else {
-			hints = [][2]string{
-				{"r", "check updates"},
-				{"u", "update"},
-				{"b", "backups"},
-				{"tab", "switch"},
-				{"q", "quit"},
-			}
+		hints = [][2]string{
+			{"r", "check updates"},
+			{"u", "update"},
+			{"b", "backups"},
+			{"tab", "switch"},
+			{"q", "quit"},
 		}
 	} else if currentTab == SettingsTab {
-		if layout == styles.LayoutCompact {
-			hints = [][2]string{
-				{"↑/↓", "move"},
-				{"enter", "tog"},
-				{"tab", "sw"},
-				{"q", "quit"},
-			}
-		} else {
-			hints = [][2]string{
-				{"↑/↓", "move"},
-				{"enter", "toggle"},
-				{"tab", "switch"},
-				{"q", "quit"},
-			}
+		hints = [][2]string{
+			{"↑/↓", "move"},
+			{"enter", "toggle"},
+			{"tab", "switch"},
+			{"q", "quit"},
 		}
 	} else {
-		if layout == styles.LayoutCompact {
-			hints = [][2]string{
-				{"u", "use"},
-				{"d", "del"},
-				{"tab", "sw"},
-				{"q", "quit"},
-			}
-		} else {
-			hints = [][2]string{
-				{"u", "use"},
-				{"d", "delete"},
-				{"tab", "switch"},
-				{"q", "quit"},
-			}
+		hints = [][2]string{
+			{"u", "use"},
+			{"d", "delete"},
+			{"tab", "switch"},
+			{"q", "quit"},
 		}
 	}
 
 	return renderKeyHints(hints, width, layout)
-}
-
-func shouldClampViewWidth(physicalViewportWidth int, layout styles.LayoutMode) bool {
-	return physicalViewportWidth > 0 && layout == styles.LayoutCompact
-}
-
-func truncateViewWidth(rendered string, width int) string {
-	if width < 1 {
-		return rendered
-	}
-
-	var truncated strings.Builder
-	overflowed := false
-	lineStart := 0
-	for {
-		lineEnd := strings.IndexByte(rendered[lineStart:], '\n')
-		if lineEnd < 0 {
-			lineEnd = len(rendered)
-		} else {
-			lineEnd += lineStart
-		}
-
-		line := rendered[lineStart:lineEnd]
-		if ansi.StringWidth(line) > width {
-			if !overflowed {
-				truncated.Grow(len(rendered))
-				truncated.WriteString(rendered[:lineStart])
-			}
-			overflowed = true
-			truncated.WriteString(ansi.Cut(line, 0, width))
-		} else if overflowed {
-			truncated.WriteString(line)
-		}
-
-		if lineEnd == len(rendered) {
-			break
-		}
-		if overflowed {
-			truncated.WriteByte('\n')
-		}
-		lineStart = lineEnd + 1
-	}
-
-	if !overflowed {
-		return rendered
-	}
-	return truncated.String()
 }
 
 func renderKeyHints(hints [][2]string, width int, layout styles.LayoutMode) string {
@@ -391,15 +303,33 @@ func renderKeyHints(hints [][2]string, width int, layout styles.LayoutMode) stri
 
 	helpText := strings.Join(parts, "  ")
 
-	if layout == styles.LayoutCompact && lipgloss.Width(helpText) > width {
-		helpText = strings.Join(parts, " ")
-	}
-
 	if lipgloss.Width(helpText) > width {
 		helpText = styles.TruncateText(helpText, width)
 	}
 
 	return helpText
+}
+
+func renderContentCanvas(content string, width, height int) string {
+	if height < 1 {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		lines = nil
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	for i, line := range lines {
+		if padding := width - ansi.StringWidth(line); padding > 0 {
+			lines[i] = line + strings.Repeat(" ", padding)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func maxInt(a, b int) int {

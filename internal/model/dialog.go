@@ -64,19 +64,21 @@ func rebuildDialogStyles() {
 
 const maxDependencyListLines = 6
 
-func dialogWidth(viewportWidth []int) int {
-	width := 64
-	if len(viewportWidth) > 0 {
-		width = viewportWidth[0]
-	}
+type viewportSize struct {
+	Width  int
+	Height int
+}
+
+func dialogWidth(viewport viewportSize) int {
+	width := viewport.Width
 	if width < 1 {
-		width = 1
+		width = 64
 	}
 	return min(64, width)
 }
 
-func renderDialog(content string, errorStyle bool, viewportWidth []int) string {
-	width := dialogWidth(viewportWidth)
+func renderDialog(content string, errorStyle bool, viewport viewportSize) string {
+	width := dialogWidth(viewport)
 	contentWidth := max(1, width-6)
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
@@ -90,7 +92,7 @@ func renderDialog(content string, errorStyle bool, viewportWidth []int) string {
 	return style.Width(width).Render(strings.Join(lines, "\n"))
 }
 
-func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.DependencyUpdateEntry, viewportWidth ...int) string {
+func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.DependencyUpdateEntry, viewport viewportSize) string {
 	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
 	if yesSelected {
 		yesBtn = dialogActiveStyle
@@ -135,10 +137,10 @@ func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.Dependency
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
-	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
+	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewport)
 }
 
-func renderDependencyChecksDialog(yesSelected bool, viewportWidth ...int) string {
+func renderDependencyChecksDialog(yesSelected bool, viewport viewportSize) string {
 	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
 	if yesSelected {
 		yesBtn = dialogActiveStyle
@@ -164,10 +166,10 @@ func renderDependencyChecksDialog(yesSelected bool, viewportWidth ...int) string
 		buttons,
 	}
 
-	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
+	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewport)
 }
 
-func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCheckResultMsg, viewportWidth ...int) string {
+func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCheckResultMsg, viewport viewportSize) string {
 	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
 	if yesSelected {
 		yesBtn = dialogActiveStyle
@@ -188,8 +190,16 @@ func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCh
 	if result != nil {
 		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf("Command: %s", result.Command)))
 		if result.Output != "" {
-			for _, l := range strings.Split(result.Output, "\n") {
+			output := strings.Split(result.Output, "\n")
+			visible := output
+			if len(visible) > maxDependencyListLines {
+				visible = visible[:maxDependencyListLines]
+			}
+			for _, l := range visible {
 				lines = append(lines, dialogMutedStyle.Render(l))
+			}
+			if extra := len(output) - len(visible); extra > 0 {
+				lines = append(lines, dialogMutedStyle.Render(fmt.Sprintf("…and %d more", extra)))
 			}
 		}
 		lines = append(lines, "")
@@ -198,10 +208,10 @@ func renderDependencyRollbackDialog(yesSelected bool, result *utils.DependencyCh
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
-	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), true, viewportWidth)
+	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), true, viewport)
 }
 
-func renderDependencyRestoreDialog(yesSelected bool, backups []utils.DependencyBackupInfo, cursor int, viewportWidth ...int) string {
+func renderDependencyRestoreDialog(yesSelected bool, backups []utils.DependencyBackupInfo, cursor int, viewport viewportSize) string {
 	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
 	if yesSelected {
 		yesBtn = dialogActiveStyle
@@ -256,48 +266,40 @@ func renderDependencyRestoreDialog(yesSelected bool, backups []utils.DependencyB
 	lines = append(lines, "")
 	lines = append(lines, buttons)
 
-	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewportWidth)
+	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewport)
 }
 
-func overlayDialog(background, dialog string, width, height int) string {
-	if width <= 0 {
+func overlayDialog(background, dialog string, viewport viewportSize) string {
+	width, height := viewport.Width, viewport.Height
+	if width < 1 {
 		width = 80
 	}
-	if height <= 0 {
+	if height < 1 {
 		height = 24
 	}
-	_ = width
 
-	// The dialog already has its own border/padding rendered by
-	// dialogBoxStyle; we must not pad it out to a full-height canvas,
-	// otherwise every background line outside the modal gets overwritten
-	// with whitespace (the bug behind CleanShot 2026-06-27 at 17.54.47@2x.png
-	// where the deps table was shredded by the confirm dialog).
 	dialogLines := strings.Split(strings.TrimRight(dialog, "\n"), "\n")
 	bgLines := strings.Split(background, "\n")
-	if len(bgLines) == 0 {
-		return background
+	if len(bgLines) > height {
+		bgLines = bgLines[:height]
+	}
+	for len(bgLines) < height {
+		bgLines = append(bgLines, strings.Repeat(" ", width))
 	}
 
-	if height > len(bgLines) {
-		height = len(bgLines)
-	}
-
-	// Center the actual dialog lines vertically on the background.
 	startRow := 0
-	if len(bgLines) > len(dialogLines) {
-		startRow = (len(bgLines) - len(dialogLines)) / 2
+	if height > len(dialogLines) {
+		startRow = (height - len(dialogLines)) / 2
 	}
 	if startRow+len(dialogLines) > height {
-		// Keep the dialog inside the visible viewport.
 		startRow = height - len(dialogLines)
 		if startRow < 0 {
 			startRow = 0
 		}
 	}
 	endRow := startRow + len(dialogLines)
-	if endRow > len(bgLines) {
-		endRow = len(bgLines)
+	if endRow > height {
+		endRow = height
 	}
 	dialogLines = dialogLines[:endRow-startRow]
 
