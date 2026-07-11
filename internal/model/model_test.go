@@ -236,10 +236,10 @@ func TestSettingsDepsBackupLimitShortcutControlsAndSaves(t *testing.T) {
 		start int
 		want  int
 	}{
-		{name: "left wraps minimum to maximum", key: tea.KeyPressMsg{Code: tea.KeyLeft}, start: 1, want: 100},
-		{name: "right wraps maximum to minimum", key: tea.KeyPressMsg{Code: tea.KeyRight}, start: 100, want: 1},
-		{name: "h wraps minimum to maximum", key: tea.KeyPressMsg{Code: 'h'}, start: 1, want: 100},
-		{name: "l wraps maximum to minimum", key: tea.KeyPressMsg{Code: 'l'}, start: 100, want: 1},
+		{name: "left wraps minimum to maximum", key: tea.KeyPressMsg{Code: tea.KeyLeft}, start: config.MinDepsBackupLimit, want: config.MaxDepsBackupLimit},
+		{name: "right wraps maximum to minimum", key: tea.KeyPressMsg{Code: tea.KeyRight}, start: config.MaxDepsBackupLimit, want: config.MinDepsBackupLimit},
+		{name: "h wraps minimum to maximum", key: tea.KeyPressMsg{Code: 'h'}, start: config.MinDepsBackupLimit, want: config.MaxDepsBackupLimit},
+		{name: "l wraps maximum to minimum", key: tea.KeyPressMsg{Code: 'l'}, start: config.MaxDepsBackupLimit, want: config.MinDepsBackupLimit},
 	}
 
 	for _, tt := range tests {

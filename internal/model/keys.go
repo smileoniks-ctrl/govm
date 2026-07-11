@@ -230,10 +230,10 @@ func (m *Model) toggleSelectedSetting() {
 
 func (m *Model) adjustDepsBackupLimit(delta int) {
 	limit := m.Settings.Values.DepsBackupLimit + delta
-	if limit < 1 {
-		limit = 100
-	} else if limit > 100 {
-		limit = 1
+	if limit < config.MinDepsBackupLimit {
+		limit = config.MaxDepsBackupLimit
+	} else if limit > config.MaxDepsBackupLimit {
+		limit = config.MinDepsBackupLimit
 	}
 	m.Settings.Values.DepsBackupLimit = limit
 	m.saveSettings()
