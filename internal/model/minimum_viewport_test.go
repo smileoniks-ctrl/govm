@@ -170,3 +170,68 @@ func assertViewportBounds(t *testing.T, view tea.View, width, height int) {
 		}
 	}
 }
+
+func TestWindowSizeMsgRespectsMinimumViewportHeight(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 64, Height: 20})
+	m = updated.(Model)
+
+	if m.Height != 12 {
+		t.Fatalf("content height = %d, want 12", m.Height)
+	}
+
+	lineCount := len(strings.Split(stripANSI(m.View().Content), "\n"))
+	if lineCount > 20 {
+		t.Fatalf("normal view line count = %d, want at most 20", lineCount)
+	}
+}
+
+func TestViewReportsMinimumViewportSize(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		width    int
+		height   int
+		wantHint bool
+	}{
+		{name: "one column too narrow", width: 63, height: 20, wantHint: true},
+		{name: "one row too short", width: 64, height: 19, wantHint: true},
+		{name: "minimum supported viewport", width: 64, height: 20, wantHint: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
+			m = updated.(Model)
+
+			view := stripANSI(m.View().Content)
+			const minimumSizeHint = "Minimum terminal size is 64x20."
+			if got := strings.Contains(view, minimumSizeHint); got != tt.wantHint {
+				t.Fatalf("minimum-size hint present = %t, want %t for %dx%d viewport:\n%s", got, tt.wantHint, tt.width, tt.height, view)
+			}
+		})
+	}
+}
+
+func TestSettingsBackupLimitDialogFitsMinimumViewport(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+	m.Settings.Cursor = 2
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 64, Height: 20})
+	m = updated.(Model)
+	m.Settings.OpenDepsBackupLimitInput()
+	m.Settings.DepsBackupLimitInput.SetValue("0")
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+
+	view := stripANSI(m.View().Content)
+	for _, want := range []string{
+		"Set dependency backup limit",
+		"must be between 1 and 100",
+		"enter: save  esc: cancel",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected minimum-viewport dialog to contain %q, got:\n%s", want, view)
+		}
+	}
+}

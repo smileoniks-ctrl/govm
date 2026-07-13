@@ -31,6 +31,7 @@ type Model struct {
 	InstallingVersion string
 	Message           string
 	MessageType       string // "success", "error", "warning", or "info"
+	MessageScope      statusScope
 	InstalledTable    table.Model
 	ConfirmingDelete  bool
 	DeleteVersion     string

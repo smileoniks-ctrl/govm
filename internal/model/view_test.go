@@ -1,0 +1,190 @@
+package model
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"charm.land/bubbles/v2/list"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/smileoniks-ctrl/govm/internal/styles"
+	"github.com/smileoniks-ctrl/govm/internal/utils"
+)
+
+func TestViewUsesModernZones(t *testing.T) {
+	m := newTestModel(t)
+
+	prev := utils.Version
+	utils.Version = "v9.9.9-test"
+	defer func() { utils.Version = prev }()
+
+	view := stripANSI(m.View().Content)
+
+	for _, want := range []string{"GoVM", "Go Version Manager", "v9.9.9-test", "● Available", "○ Installed", "✓ Successfully installed Go 1.24.4", "i install", "u use", "d delete", "r refresh", "q quit"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected view to contain %q, got:\n%s", want, view)
+		}
+	}
+
+	if strings.Contains(view, "Press 'i'") || strings.Contains(view, "[ Available Versions ]") {
+		t.Fatalf("expected modern tabs and help text, got:\n%s", view)
+	}
+}
+
+func TestGoDevErrorKeepsTUIClosable(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, _ := m.Update(utils.ErrMsg(errors.New("failed to connect to go.dev: context deadline exceeded")))
+	m = updated.(Model)
+
+	view := stripANSI(m.View().Content)
+
+	for _, want := range []string{"GoVM", "Available", "failed to connect to go.dev", "r refresh", "q quit"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected view to contain %q, got:\n%s", want, view)
+		}
+	}
+}
+
+func TestRenderContentCanvasClearsEveryRowToCanvasWidth(t *testing.T) {
+	const width = 10
+	got := strings.Split(renderContentCanvas("row", width, 3), "\n")
+
+	if len(got) != 3 {
+		t.Fatalf("canvas line count = %d, want 3", len(got))
+	}
+	for i, line := range got {
+		if visibleWidth := ansi.StringWidth(line); visibleWidth != width {
+			t.Errorf("canvas line %d visible width = %d, want %d; line = %q", i, visibleWidth, width, line)
+		}
+	}
+}
+
+func TestSettingsTabRendersRowsAndHelp(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+
+	view := stripANSI(m.View().Content)
+
+	for _, want := range []string{
+		"Settings",
+		"Deps display: Direct only",
+		"Theme: Current",
+		"Deps backups: 10",
+		"↑/↓",
+		"enter",
+		"tab",
+		"q",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected settings view to contain %q, got:\n%s", want, view)
+		}
+	}
+}
+
+func TestDepsTabRenders(t *testing.T) {
+	m := newTestModel(t)
+
+	// Switch to deps tab
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
+	m = updated.(Model)
+
+	view := stripANSI(m.View().Content)
+
+	if !strings.Contains(view, "Deps") {
+		t.Fatalf("expected deps tab label in view, got:\n%s", view)
+	}
+
+	if !strings.Contains(view, "check updates") {
+		t.Fatalf("expected 'check updates' help hint, got:\n%s", view)
+	}
+}
+
+func TestPluralize(t *testing.T) {
+	if pluralize(1, "dep", "deps") != "dep" {
+		t.Fatal("expected singular for n=1")
+	}
+	if pluralize(0, "dep", "deps") != "deps" {
+		t.Fatal("expected plural for n=0")
+	}
+	if pluralize(5, "dep", "deps") != "deps" {
+		t.Fatal("expected plural for n>1")
+	}
+}
+
+func TestMaxInt(t *testing.T) {
+	if maxInt(3, 7) != 7 {
+		t.Fatal("expected 7")
+	}
+	if maxInt(7, 3) != 7 {
+		t.Fatal("expected 7")
+	}
+	if maxInt(4, 4) != 4 {
+		t.Fatal("expected 4")
+	}
+}
+
+func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
+	got := renderHelp(0, true, false, false, false, false, false, 80, styles.LayoutNormal)
+	if !strings.Contains(stripANSI(got), "confirm") {
+		t.Fatalf("expected confirm hint, got: %s", got)
+	}
+	if !strings.Contains(stripANSI(got), "cancel") {
+		t.Fatalf("expected cancel hint, got: %s", got)
+	}
+}
+
+func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
+	tests := []struct {
+		name             string
+		restoreChoiceYes bool
+		want             string
+	}{
+		{name: "restore selected", restoreChoiceYes: true, want: "enter restore"},
+		{name: "cancel selected", restoreChoiceYes: false, want: "enter cancel"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripANSI(renderHelp(DepsTab, false, false, false, false, true, tt.restoreChoiceYes, 80, styles.LayoutNormal))
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("expected help to contain %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestRenderHelp_DepsTruncatesToWidth(t *testing.T) {
+	got := renderHelp(2, false, false, false, false, false, false, 20, styles.LayoutNormal)
+	if got == "" {
+		t.Fatal("expected non-empty help for deps")
+	}
+}
+
+func TestRenderStatus_EmptyMessage(t *testing.T) {
+	if renderStatus("info", "", 80) != "" {
+		t.Fatal("expected empty result for empty message")
+	}
+}
+
+func TestRenderStatus_AllTypes(t *testing.T) {
+	types := []string{"success", "error", "warning", "info", "unknown"}
+	for _, ty := range types {
+		got := renderStatus(ty, "msg", 80)
+		if !strings.Contains(stripANSI(got), "msg") {
+			t.Fatalf("status type %q should include message, got: %s", ty, got)
+		}
+	}
+}
+
+func TestView_NoPanicWhenListEmpty(t *testing.T) {
+	m := newTestModel(t)
+	m.List.SetItems([]list.Item{})
+	m.Versions = nil
+	view := m.View()
+	if view.Content == "" {
+		t.Fatal("expected non-empty view")
+	}
+}

@@ -20,8 +20,7 @@ func (m Model) handleUpdateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case "n", "N", "esc":
 		m.Deps.Dialog.ConfirmingUpdate = false
 		m.Deps.Dialog.UpdateChoiceYes = false
-		m.Message = "Update canceled."
-		m.MessageType = "info"
+		m.setTabStatus("Update canceled.", "info")
 		return m, nil
 	}
 	return m, nil
@@ -31,16 +30,14 @@ func (m Model) applyUpdateChoice() (tea.Model, tea.Cmd) {
 	if !m.Deps.Dialog.UpdateChoiceYes {
 		m.Deps.Dialog.ConfirmingUpdate = false
 		m.Deps.Dialog.UpdateChoiceYes = false
-		m.Message = "Update canceled."
-		m.MessageType = "info"
+		m.setTabStatus("Update canceled.", "info")
 		return m, nil
 	}
 
 	m.Deps.Dialog.ConfirmingUpdate = false
 	m.Deps.Dialog.UpdateChoiceYes = false
 	m.Deps.Updating = true
-	m.Message = "Updating dependencies..."
-	m.MessageType = "info"
+	m.setGlobalStatus("Updating dependencies...", "info")
 	return m, utils.UpdateModuleDependencies(m.Deps.ModuleDir, m.Deps.Dependencies, m.Settings.Values.DepsBackupLimit)
 }
 
@@ -61,8 +58,7 @@ func (m Model) handleChecksConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.Deps.Dialog.ConfirmingChecks = false
 		m.Deps.Dialog.CheckChoiceYes = false
 		m.Deps.clearRollbackContext()
-		m.Message = "Update complete. Checks skipped."
-		m.MessageType = "info"
+		m.setGlobalStatus("Update complete. Checks skipped.", "info")
 		return m, nil
 	}
 	return m, nil
@@ -73,16 +69,14 @@ func (m Model) applyChecksChoice() (tea.Model, tea.Cmd) {
 		m.Deps.Dialog.ConfirmingChecks = false
 		m.Deps.Dialog.CheckChoiceYes = false
 		m.Deps.clearRollbackContext()
-		m.Message = "Update complete. Checks skipped."
-		m.MessageType = "info"
+		m.setGlobalStatus("Update complete. Checks skipped.", "info")
 		return m, nil
 	}
 
 	m.Deps.Dialog.ConfirmingChecks = false
 	m.Deps.Dialog.CheckChoiceYes = false
 	m.Deps.RunningChecks = true
-	m.Message = "Running checks..."
-	m.MessageType = "info"
+	m.setGlobalStatus("Running checks...", "info")
 	return m, utils.RunModuleDependencyChecks(m.Deps.ModuleDir)
 }
 
@@ -113,16 +107,14 @@ func (m Model) applyRollbackChoice() (tea.Model, tea.Cmd) {
 	if m.Deps.Snapshot == nil {
 		m.Deps.Dialog.ConfirmingRollback = false
 		m.Deps.Dialog.RollbackChoiceYes = false
-		m.Message = "Rollback unavailable: snapshot is missing."
-		m.MessageType = "error"
+		m.setTabStatus("Rollback unavailable: snapshot is missing.", "error")
 		return m, nil
 	}
 
 	m.Deps.Dialog.ConfirmingRollback = false
 	m.Deps.Dialog.RollbackChoiceYes = false
 	m.Deps.RollingBack = true
-	m.Message = "Rolling back dependencies..."
-	m.MessageType = "info"
+	m.setGlobalStatus("Rolling back dependencies...", "info")
 	snap := m.Deps.Snapshot
 	return m, utils.RollbackModuleDependencies(m.Deps.ModuleDir, snap)
 }
@@ -131,8 +123,7 @@ func (m Model) keepUpdatedDependencies() (tea.Model, tea.Cmd) {
 	m.Deps.Dialog.ConfirmingRollback = false
 	m.Deps.Dialog.RollbackChoiceYes = false
 	m.Deps.clearRollbackContext()
-	m.Message = "Update kept. Failed checks were not rolled back."
-	m.MessageType = "warning"
+	m.setGlobalStatus("Update kept. Failed checks were not rolled back.", "warning")
 	return m, nil
 }
 
@@ -159,8 +150,7 @@ func (m Model) handleRestoreBackupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case "n", "N", "esc":
 		m.Deps.Dialog.ConfirmingRestoreBackup = false
 		m.Deps.Dialog.RestoreChoiceYes = false
-		m.Message = "Restore canceled."
-		m.MessageType = "info"
+		m.setTabStatus("Restore canceled.", "info")
 		return m, nil
 	}
 	return m, nil
@@ -170,15 +160,13 @@ func (m Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
 	if !m.Deps.Dialog.RestoreChoiceYes {
 		m.Deps.Dialog.ConfirmingRestoreBackup = false
 		m.Deps.Dialog.RestoreChoiceYes = false
-		m.Message = "Restore canceled."
-		m.MessageType = "info"
+		m.setTabStatus("Restore canceled.", "info")
 		return m, nil
 	}
 	if len(m.Deps.Backups) == 0 || m.Deps.BackupCursor < 0 || m.Deps.BackupCursor >= len(m.Deps.Backups) {
 		m.Deps.Dialog.ConfirmingRestoreBackup = false
 		m.Deps.Dialog.RestoreChoiceYes = false
-		m.Message = "Restore unavailable: no backup selected."
-		m.MessageType = "error"
+		m.setTabStatus("Restore unavailable: no backup selected.", "error")
 		return m, nil
 	}
 
@@ -186,7 +174,6 @@ func (m Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
 	m.Deps.Dialog.ConfirmingRestoreBackup = false
 	m.Deps.Dialog.RestoreChoiceYes = false
 	m.Deps.RestoringBackup = true
-	m.Message = "Restoring dependency backup..."
-	m.MessageType = "info"
+	m.setGlobalStatus("Restoring dependency backup...", "info")
 	return m, utils.RestoreDependencyBackup(m.Deps.ModuleDir, backup.Name, m.Settings.Values.DepsBackupLimit)
 }

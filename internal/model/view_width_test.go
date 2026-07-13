@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -197,5 +198,87 @@ func TestRollbackDialogLimitsLongOutput(t *testing.T) {
 	want := "…and 4 more"
 	if !strings.Contains(content, want) {
 		t.Fatalf("rollback dialog is missing truncated-output indicator %q:\n%s", want, content)
+	}
+}
+
+func TestViewHasEqualHeightAcrossTabsAtStandardViewport(t *testing.T) {
+	m := newTestModel(t)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = updated.(Model)
+
+	var lineCount int
+	for tab := AvailableTab; tab < tabCount; tab++ {
+		m.CurrentTab = tab
+		got := len(strings.Split(m.View().Content, "\n"))
+		if tab == AvailableTab {
+			lineCount = got
+			continue
+		}
+		if got != lineCount {
+			t.Fatalf("tab %d view line count = %d, want %d", tab, got, lineCount)
+		}
+	}
+}
+
+func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Model)
+	}{
+		{
+			name: "update",
+			setup: func(m *Model) {
+				m.Deps.Dialog.ConfirmingUpdate = true
+				m.Deps.Dependencies = []utils.ModuleDependency{{
+					Path:    "github.com/acme/very-long-module-name-that-must-not-overflow-the-terminal",
+					Version: "v1.0.0",
+					Latest:  "v1.1.0",
+				}}
+			},
+		},
+		{
+			name: "checks",
+			setup: func(m *Model) {
+				m.Deps.Dialog.ConfirmingChecks = true
+			},
+		},
+		{
+			name: "rollback",
+			setup: func(m *Model) {
+				m.Deps.Dialog.ConfirmingRollback = true
+				m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
+					Command: "go test ./...",
+					Output:  strings.Repeat("failure output ", 12),
+				}
+			},
+		},
+		{
+			name: "restore",
+			setup: func(m *Model) {
+				m.Deps.Dialog.ConfirmingRestoreBackup = true
+				m.Deps.Backups = []utils.DependencyBackupInfo{{
+					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
+					Kind:    utils.DependencyBackupKindPreUpdate,
+					Updated: 1,
+				}}
+			},
+		},
+	}
+
+	for _, width := range []int{64, 80, 120} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("%s-%d", tt.name, width), func(t *testing.T) {
+				m := newTestModel(t)
+				updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+				m = updated.(Model)
+				tt.setup(&m)
+
+				for _, line := range strings.Split(m.View().Content, "\n") {
+					if got := ansi.StringWidth(line); got > width {
+						t.Fatalf("view line width = %d, want <= %d: %q", got, width, line)
+					}
+				}
+			})
+		}
 	}
 }
