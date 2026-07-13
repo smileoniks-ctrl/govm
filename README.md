@@ -11,7 +11,7 @@ GoVM is a modern tool for managing multiple Go versions on your system. It featu
 
 ## Features
 
-- Beautiful TUI built with [Charm Bubbletea v2](https://charm.land/bubbletea/v2) with a responsive layout that adapts to your terminal size (compact, normal, and wide breakpoints)
+- Beautiful TUI built with [Charm Bubbletea v2](https://charm.land/bubbletea/v2) with a responsive layout that adapts to your terminal size (normal and wide breakpoints) and a minimum viewport of 64x20
 - Version string shown in the TUI header and CLI help output
 - Command-line interface for quick operations
 - Install any available Go version directly from go.dev
@@ -20,9 +20,11 @@ GoVM is a modern tool for managing multiple Go versions on your system. It featu
 - Supports partial version numbers (e.g., `1.21` for latest 1.21.x) and `go` prefix (e.g., `go1.21`)
 - Go module dependency viewer built into the TUI
 - Dependency update flow with a pre-update snapshot, optional `go test ./...` and `go vet ./...` checks, and one-key rollback to the pre-update state if checks fail
-- Settings tab with a dependency display filter (`Direct only` / `All`) and runtime theme switching (`Current` / `Light`)
+- Dependency backup management: each update snapshots `go.mod` and `go.sum`, and the TUI and CLI can list, restore, and prune those snapshots
+- Settings tab with a dependency display filter (`Direct only` / `All`), runtime theme switching (`Current` / `Light`), and a configurable dependency backup retention limit
 - Settings persist between sessions and are stored in a platform-specific config file
 - Resilient error handling: the TUI remains responsive (and closable) when go.dev is unreachable
+- Enforced minimum terminal viewport of 64x20; below that, a centred warning explains the required size
 - Works on macOS, Linux, and Windows (darwin/linux/windows, amd64/arm64)
 
 ## Installation
@@ -96,14 +98,14 @@ The TUI has four tabs that you cycle through with `Tab`:
 - **Available** - all Go versions available for download from go.dev
 - **Installed** - Go versions installed locally on your system
 - **Deps** - Go module dependencies of the current working directory
-- **Settings** - dependency display filter and theme toggle
+- **Settings** - dependency display filter, theme toggle, and the dependency backup retention limit
 
 The TUI layout is responsive and adjusts to your terminal width:
 
 | Width | Mode | Behavior |
 |---|---|---|
-| `< 60` | Compact | Minimal padding, short tab labels (`All`, `Local`, `Deps`, `Set`), short help hints |
-| `60-129` | Normal | Bordered layout, full labels |
+| `< 64` (or height `< 20`) | Minimum viewport | Centred warning explaining the required 64x20 size; the rest of the UI is hidden until the terminal is resized |
+| `64-129` | Normal | Bordered layout, full tab labels and help hints |
 | `>= 130` | Wide | Larger padding, full borders |
 
 The TUI header shows the GoVM version so you always know which build is running.
@@ -117,8 +119,10 @@ The TUI header shows the GoVM version so you always know which build is running.
 | `u` | Switch to the selected version (Available tab) or update direct dependencies (Deps tab) |
 | `d` | Delete the selected installed version with confirmation (Available/Installed tabs) |
 | `r` | Refresh available versions from go.dev (Available tab) or check for dependency updates online (Deps tab) |
-| `↑/↓`, `k/j` | Move the cursor between settings (Settings tab) |
-| `enter`/`space` | Toggle the highlighted setting (Settings tab) |
+| `b` | List saved dependency backups and choose one to restore (Deps tab) |
+| `↑/↓`, `k/j` | Move the cursor between settings (Settings tab) or between dependency backups in the restore dialog |
+| `enter`/`space` | Toggle the highlighted setting (Settings tab); on the Deps backups row it opens a numeric input dialog |
+| `←/→`, `h/l` | Toggle the highlighted setting (Settings tab); on the Deps backups row they bump the limit by 1 |
 | `q`, `ctrl+c` | Quit |
 
 When deleting a version, you will be prompted to confirm with `y` or cancel with `n`. The active version cannot be deleted.
@@ -258,14 +262,20 @@ The **Settings** tab lets you customise GoVM's behaviour. Settings are saved aut
 |---|---|---|---|
 | Deps display | `Direct only` / `All` | `Direct only` | Controls which dependencies are shown on the Deps tab. `Direct only` hides indirect dependencies; `All` shows every dependency. |
 | Theme | `Current` / `Light` | `Current` | Switches the TUI colour palette. `Current` is the dark theme; `Light` is a light-background theme. The change is applied immediately. |
+| Deps backups | `1`-`100` | `10` | Maximum number of dependency backups retained per module. The newest backup is always kept; the oldest are pruned when the limit is exceeded. |
 
 #### Navigating the Settings tab
 
 | Key | Action |
 |---|---|
 | `↑/↓`, `k/j` | Move the cursor between settings |
-| `enter`, `space`, `←/→`, `h/l` | Toggle the highlighted setting |
+| `enter`, `space` | Toggle the highlighted setting; on the Deps backups row it opens a numeric input dialog |
+| `←/→`, `h/l` | Toggle the highlighted setting; on the Deps backups row they bump the limit by 1 (wrapping at the bounds) |
 | `tab` | Switch to the next tab |
+
+#### Editing the backup limit
+
+Pressing `enter` on the **Deps backups** row opens a small dialog that asks for a whole number between `1` and `100`. The dialog supports `enter` to save and `esc` to cancel, and shows an inline error when the value is empty, not numeric, or out of range. Toggling the setting with `←/→` (or `h`/`l`) cycles the value by one, wrapping from `1` to `100` and back.
 
 #### Settings file location
 
@@ -291,7 +301,8 @@ GoVM downloads Go versions from the official go.dev website and installs them in
 - Switching versions simply updates these wrappers to point to a different installation
 - The currently active version is tracked in `~/.govm/active_version`
 - Downloaded archives are temporarily stored in `~/.govm/downloads` and cleaned up after extraction
-- User settings (theme, deps display filter) are stored in `~/.govm/settings.json` (see [Settings](#settings))
+- User settings (theme, deps display filter, and the dependency backup retention limit) are stored in `~/.govm/settings.json` (see [Settings](#settings))
+- Dependency update snapshots and restores live in `~/.govm/deps_backup`, organised by module path
 
 This ensures a seamless experience without needing to manually update environment variables or source scripts each time you switch versions.
 
