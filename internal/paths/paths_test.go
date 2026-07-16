@@ -141,3 +141,28 @@ func TestNewResolverUsesStdlib(t *testing.T) {
 		t.Fatalf("ShimDir() = %q, want %q", got, want)
 	}
 }
+
+func TestIsDirectChild(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "versions")
+
+	cases := []struct {
+		name      string
+		candidate string
+		want      bool
+	}{
+		{"direct child", filepath.Join(root, "go1.24.0"), true},
+		{"cleaned direct child", filepath.Join(root, "go1.24.0", "..", "go1.24.1"), true},
+		{"root", root, false},
+		{"traversal", filepath.Join(root, "..", "outside"), false},
+		{"foreign absolute", filepath.Join(t.TempDir(), "go1.24.0"), false},
+		{"nested child", filepath.Join(root, "go1.24.0", "bin"), false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsDirectChild(root, tc.candidate); got != tc.want {
+				t.Fatalf("IsDirectChild(%q, %q) = %t, want %t", root, tc.candidate, got, tc.want)
+			}
+		})
+	}
+}

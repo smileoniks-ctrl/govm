@@ -47,6 +47,15 @@ func New() *Resolver {
 	}
 }
 
+// IsDirectChild reports whether candidate is an immediate child of root.
+func IsDirectChild(root, candidate string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(candidate))
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && filepath.Dir(rel) == "." && !filepath.IsAbs(rel)
+}
+
 // RootDir returns the govm root directory (e.g. ~/.govm).
 // It does not check that the directory exists.
 func (r *Resolver) RootDir() (string, error) {
