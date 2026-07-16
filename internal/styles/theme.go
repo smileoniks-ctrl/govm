@@ -20,7 +20,6 @@ type themePalette struct {
 	Warning                  color.Color
 	Info                     color.Color
 	Muted                    color.Color
-	Surface                  color.Color
 	Text                     color.Color
 	OnPrimary                color.Color
 	InstalledBadgeForeground color.Color
@@ -37,7 +36,6 @@ var (
 			Warning:                  lipgloss.Color("#F59E0B"),
 			Info:                     lipgloss.Color("#3B82F6"),
 			Muted:                    lipgloss.Color("#6B7280"),
-			Surface:                  lipgloss.Color("#1F2937"),
 			Text:                     lipgloss.Color("#E5E7EB"),
 			OnPrimary:                lipgloss.Color("#FFFFFF"),
 			InstalledBadgeForeground: lipgloss.Color("#F8FAFC"),
@@ -49,7 +47,6 @@ var (
 			Warning:                  lipgloss.Color("#B45309"),
 			Info:                     lipgloss.Color("#2563EB"),
 			Muted:                    lipgloss.Color("#4B5563"),
-			Surface:                  lipgloss.Color("#F8FAFC"),
 			Text:                     lipgloss.Color("#111827"),
 			OnPrimary:                lipgloss.Color("#FFFFFF"),
 			InstalledBadgeForeground: lipgloss.Color("#F8FAFC"),
@@ -80,18 +77,13 @@ func rebuildStyles(palette themePalette) {
 	Warning = palette.Warning
 	Info = palette.Info
 	Muted = palette.Muted
-	Surface = palette.Surface
 	Text = palette.Text
-
-	HighlightStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
-	SuccessStyle = lipgloss.NewStyle().Foreground(Success)
 
 	TitleStyle = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(Text)
 
 	HeaderMetaStyle = lipgloss.NewStyle().Foreground(Muted)
-	SectionStyle = lipgloss.NewStyle().Padding(0, 1)
 
 	ActiveTabStyle = lipgloss.NewStyle().
 		Foreground(palette.OnPrimary).
@@ -112,12 +104,6 @@ func rebuildStyles(palette themePalette) {
 	InstalledBadgeStyle = lipgloss.NewStyle().
 		Foreground(palette.InstalledBadgeForeground).
 		Background(Primary).
-		Padding(0, 1)
-
-	WarningBadgeStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#451A03")).
-		Background(Warning).
-		Bold(true).
 		Padding(0, 1)
 
 	ItemVersionStyle = lipgloss.NewStyle().Foreground(Text).Bold(true)
@@ -145,7 +131,4 @@ func rebuildStyles(palette themePalette) {
 
 	TableCellStyle = lipgloss.NewStyle().Padding(0, 1)
 	SpinnerStyle = lipgloss.NewStyle().Foreground(Primary)
-	ErrorStyle = lipgloss.NewStyle().Foreground(Error)
-	DocStyle = lipgloss.NewStyle().Margin(1, 2)
-	HelpStyle = HelpTextStyle.Render
 }

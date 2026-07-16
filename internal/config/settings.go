@@ -81,21 +81,6 @@ func defaultPathFor(r *paths.Resolver) (string, error) {
 	return r.SettingsFile()
 }
 
-// LegacyPath returns the historical location of the settings file
-// under the platform user-config directory. The bool reports
-// whether a legacy path could be resolved at all (a nil error with
-// an empty path means the host has no user-config directory).
-func LegacyPath() (string, bool, error) {
-	return legacyPathFor(paths.New())
-}
-
-// legacyPathFor returns the legacy settings path using the
-// provided resolver. It mirrors defaultPathFor so test code can
-// drive the migration with deterministic paths.
-func legacyPathFor(r *paths.Resolver) (string, bool, error) {
-	return r.LegacySettingsFile()
-}
-
 func Load(path string) (Settings, error) {
 	if path == "" {
 		defaultPath, err := DefaultPath()

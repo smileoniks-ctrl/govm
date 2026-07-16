@@ -33,21 +33,16 @@ var (
 	Warning = lipgloss.Color("#F59E0B")
 	Info    = lipgloss.Color("#3B82F6")
 	Muted   = lipgloss.Color("#6B7280")
-	Surface = lipgloss.Color("#1F2937")
 	Text    = lipgloss.Color("#E5E7EB")
 
 	MinimumViewportBackground = lipgloss.Color("#111827")
 	MinimumViewportText       = lipgloss.Color("#F9FAFB")
-
-	HighlightStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
-	SuccessStyle   = lipgloss.NewStyle().Foreground(Success)
 
 	TitleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(Text)
 
 	HeaderMetaStyle = lipgloss.NewStyle().Foreground(Muted)
-	SectionStyle    = lipgloss.NewStyle().Padding(0, 1)
 
 	ActiveTabStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
@@ -68,12 +63,6 @@ var (
 	InstalledBadgeStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#F8FAFC")).
 				Background(Primary).
-				Padding(0, 1)
-
-	WarningBadgeStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#451A03")).
-				Background(Warning).
-				Bold(true).
 				Padding(0, 1)
 
 	ItemVersionStyle = lipgloss.NewStyle().Foreground(Text).Bold(true)
@@ -101,9 +90,6 @@ var (
 
 	TableCellStyle = lipgloss.NewStyle().Padding(0, 1)
 	SpinnerStyle   = lipgloss.NewStyle().Foreground(Primary)
-	ErrorStyle     = lipgloss.NewStyle().Foreground(Error)
-	DocStyle       = lipgloss.NewStyle().Margin(1, 2)
-	HelpStyle      = HelpTextStyle.Render
 )
 
 func AppStyleFor(mode LayoutMode) lipgloss.Style {
