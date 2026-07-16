@@ -81,14 +81,6 @@ type DependencyBackupInfo struct {
 	Updated    int
 }
 
-func SaveDependencyBackup(moduleDir string, snap *DependencySnapshot, kind string) (DependencyBackupInfo, error) {
-	context, err := resolveModuleContext(moduleDir)
-	if err != nil {
-		return DependencyBackupInfo{}, err
-	}
-	return saveDependencyBackupResolved(context, snap, kind)
-}
-
 func ListDependencyBackups(moduleDir string) ([]DependencyBackupInfo, error) {
 	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
@@ -102,14 +94,21 @@ func listDependencyBackupsResolved(context moduleContext) ([]DependencyBackupInf
 	if err != nil {
 		return nil, err
 	}
-	entries, err := os.ReadDir(dir)
+	backups, err := loadDependencyBackupInfos(dir, context.Path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []DependencyBackupInfo{}, nil
 		}
 		return nil, fmt.Errorf("read dependency backups: %w", err)
 	}
+	return backups, nil
+}
 
+func loadDependencyBackupInfos(dir, modulePath string) ([]DependencyBackupInfo, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
 	backups := make([]DependencyBackupInfo, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
@@ -120,27 +119,22 @@ func listDependencyBackupsResolved(context moduleContext) ([]DependencyBackupInf
 		if err != nil {
 			continue
 		}
-		if backup.ModulePath != context.Path {
+		if backup.ModulePath != modulePath {
 			continue
 		}
 		backups = append(backups, backupInfo(entry.Name(), path, backup))
 	}
+	sortDependencyBackupsNewestFirst(backups)
+	return backups, nil
+}
 
+func sortDependencyBackupsNewestFirst(backups []DependencyBackupInfo) {
 	sort.Slice(backups, func(i, j int) bool {
 		if backups[i].CreatedAt.Equal(backups[j].CreatedAt) {
 			return backups[i].Name > backups[j].Name
 		}
 		return backups[i].CreatedAt.After(backups[j].CreatedAt)
 	})
-	return backups, nil
-}
-
-func LoadDependencyBackup(moduleDir, name string) (*DependencyBackup, error) {
-	context, err := resolveModuleContext(moduleDir)
-	if err != nil {
-		return nil, err
-	}
-	return loadDependencyBackupResolved(context, name)
 }
 
 func loadDependencyBackupResolved(context moduleContext, name string) (*DependencyBackup, error) {
@@ -159,14 +153,6 @@ func loadDependencyBackupResolved(context moduleContext, name string) (*Dependen
 	return &backup, nil
 }
 
-func ReadModulePath(moduleDir string) (string, error) {
-	context, err := resolveModuleContext(moduleDir)
-	if err != nil {
-		return "", err
-	}
-	return context.Path, nil
-}
-
 func dependencyBackupProjectDir(modulePath string) (string, error) {
 	root, err := paths.New().DepsBackupDir()
 	if err != nil {
@@ -181,10 +167,6 @@ func dependencyBackupProjectDir(modulePath string) (string, error) {
 		return "", fmt.Errorf("resolve dependency backup dir: module path escapes backup root")
 	}
 	return dir, nil
-}
-
-func saveDependencyBackupResolved(context moduleContext, snap *DependencySnapshot, kind string) (DependencyBackupInfo, error) {
-	return defaultDependencyBackupStore().save(context, snap, kind)
 }
 
 func saveDependencyBackupResolvedWithRetention(context moduleContext, snap *DependencySnapshot, kind string, retentionLimit int) (DependencyBackupInfo, error) {
@@ -249,30 +231,11 @@ func (store dependencyBackupStore) saveWithRetention(context moduleContext, snap
 }
 
 func (store dependencyBackupStore) prune(dir, modulePath string, retentionLimit int, protectedPath string) error {
-	entries, err := os.ReadDir(dir)
+	backups, err := loadDependencyBackupInfos(dir, modulePath)
 	if err != nil {
 		return err
 	}
 
-	backups := make([]DependencyBackupInfo, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		backup, err := readDependencyBackupFile(path)
-		if err != nil || backup.ModulePath != modulePath {
-			continue
-		}
-		backups = append(backups, backupInfo(entry.Name(), path, backup))
-	}
-
-	sort.Slice(backups, func(i, j int) bool {
-		if backups[i].CreatedAt.Equal(backups[j].CreatedAt) {
-			return backups[i].Name > backups[j].Name
-		}
-		return backups[i].CreatedAt.After(backups[j].CreatedAt)
-	})
 	remaining := retentionLimit - 1
 	for _, backup := range backups {
 		if backup.Path == protectedPath {

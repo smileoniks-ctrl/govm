@@ -26,9 +26,13 @@ func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *tes
 	}
 	backup.ModFile.Content = restoredMod
 	backup.SumFile.Content = restoredSum
-	info, err := SaveDependencyBackup(root, backup, DependencyBackupKindPreUpdate)
+	context, err := resolveModuleContext(root)
 	if err != nil {
-		t.Fatalf("SaveDependencyBackup: %v", err)
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
+	info, err := defaultDependencyBackupStore().save(context, backup, DependencyBackupKindPreUpdate)
+	if err != nil {
+		t.Fatalf("save dependency backup: %v", err)
 	}
 
 	var offline bool
@@ -82,9 +86,9 @@ func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *tes
 		if candidate.Kind != DependencyBackupKindPreRestore {
 			continue
 		}
-		preRestore, err := LoadDependencyBackup(root, candidate.Name)
+		preRestore, err := loadDependencyBackupResolved(context, candidate.Name)
 		if err != nil {
-			t.Fatalf("LoadDependencyBackup: %v", err)
+			t.Fatalf("loadDependencyBackupResolved: %v", err)
 		}
 		if preRestore.Snapshot.ModFile.Content != currentMod || preRestore.Snapshot.SumFile.Content != currentSum {
 			t.Fatalf("pre-restore snapshot = %+v, want current module bytes", preRestore.Snapshot)
@@ -145,9 +149,13 @@ func TestRestoreDependencyBackup_TidyFailureHasContext(t *testing.T) {
 	}
 	snap.ModFile.Content = restoredMod
 	snap.SumFile.Content = restoredSum
-	info, err := SaveDependencyBackup(root, snap, DependencyBackupKindPreUpdate)
+	context, err := resolveModuleContext(root)
 	if err != nil {
-		t.Fatalf("SaveDependencyBackup: %v", err)
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
+	info, err := defaultDependencyBackupStore().save(context, snap, DependencyBackupKindPreUpdate)
+	if err != nil {
+		t.Fatalf("save dependency backup: %v", err)
 	}
 
 	msg := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
@@ -213,9 +221,13 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 	}
 	backup.ModFile.Content = restoredMod
 	backup.SumFile.Content = restoredSum
-	info, err := SaveDependencyBackup(root, backup, DependencyBackupKindPreUpdate)
+	context, err := resolveModuleContext(root)
 	if err != nil {
-		t.Fatalf("SaveDependencyBackup: %v", err)
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
+	info, err := defaultDependencyBackupStore().save(context, backup, DependencyBackupKindPreUpdate)
+	if err != nil {
+		t.Fatalf("save dependency backup: %v", err)
 	}
 
 	restoreCalls := 0

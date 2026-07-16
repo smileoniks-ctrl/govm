@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -118,6 +119,59 @@ func TestDependencyBackupStore_SaveWithRetentionPrunesOldestValidBackups(t *test
 	}
 	if _, err := os.Stat(filepath.Join(dir, "oldest.json")); !os.IsNotExist(err) {
 		t.Errorf("oldest backup still exists or stat failed: %v", err)
+	}
+}
+
+func TestListDependencyBackupsSortsNewestFirstAndEqualTimesByNameDesc(t *testing.T) {
+	setTestHome(t)
+	context := dependencyBackupTestContext(t)
+	dir, err := dependencyBackupProjectDir(context.Path)
+	if err != nil {
+		t.Fatalf("dependencyBackupProjectDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("create backup directory: %v", err)
+	}
+
+	writeDependencyBackupFile(t, dir, "older.json", context.Path, time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+	writeDependencyBackupFile(t, dir, "same-time-a.json", context.Path, time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	writeDependencyBackupFile(t, dir, "newest.json", context.Path, time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC))
+	writeDependencyBackupFile(t, dir, "same-time-z.json", context.Path, time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+
+	backups, err := listDependencyBackupsResolved(context)
+	if err != nil {
+		t.Fatalf("listDependencyBackupsResolved: %v", err)
+	}
+	got := make([]string, len(backups))
+	for i, backup := range backups {
+		got[i] = backup.Name
+	}
+	want := []string{"newest.json", "same-time-z.json", "same-time-a.json", "older.json"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("backup sort order = %v, want %v", got, want)
+	}
+}
+
+func TestSortDependencyBackupsNewestFirst(t *testing.T) {
+	older := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	sameTime := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	newest := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	backups := []DependencyBackupInfo{
+		{Name: "older.json", CreatedAt: older},
+		{Name: "same-time-a.json", CreatedAt: sameTime},
+		{Name: "newest.json", CreatedAt: newest},
+		{Name: "same-time-z.json", CreatedAt: sameTime},
+	}
+	want := []string{"newest.json", "same-time-z.json", "same-time-a.json", "older.json"}
+
+	sortDependencyBackupsNewestFirst(backups)
+
+	got := make([]string, len(backups))
+	for i, backup := range backups {
+		got[i] = backup.Name
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("backup sort order = %v, want %v", got, want)
 	}
 }
 
@@ -347,23 +401,35 @@ func TestUpdateModuleDependencies_ResolvesContextOnce(t *testing.T) {
 	context := moduleContext{Root: t.TempDir(), Path: "example.com/app"}
 	writeFile(t, context.Root, "go.mod", "module example.com/app\n\ngo 1.26\n")
 	resolves := 0
+	entries := []DependencyUpdateEntry{{Path: "example.com/dep", OldVersion: "v1.0.0", NewVersion: "v1.1.0"}}
 	const backupLimit = 3
 	operation := dependencyOperation{
 		resolveContext: func(string) (moduleContext, error) {
 			resolves++
 			return context, nil
 		},
-		saveBackup: func(_ moduleContext, _ *DependencySnapshot, _ string, gotLimit int) (DependencyBackupInfo, error) {
+		saveBackup: func(_ moduleContext, snap *DependencySnapshot, _ string, gotLimit int) (DependencyBackupInfo, error) {
 			if gotLimit != backupLimit {
 				t.Fatalf("backup limit = %d, want %d", gotLimit, backupLimit)
 			}
+			if !reflect.DeepEqual(snap.Updatable, entries) {
+				t.Fatalf("snapshot entries = %#v, want %#v", snap.Updatable, entries)
+			}
 			return DependencyBackupInfo{}, nil
 		},
-		runCommand: func(string, ...string) ([]byte, error) { return nil, nil },
-		load:       func(string, bool) tea.Msg { return DependenciesMsg{} },
+		runCommand: func(_ string, args ...string) ([]byte, error) {
+			if args[0] == "get" {
+				want := []string{"get", "example.com/dep@v1.1.0"}
+				if !reflect.DeepEqual(args, want) {
+					t.Fatalf("go get args = %#v, want %#v", args, want)
+				}
+			}
+			return nil, nil
+		},
+		load: func(string, bool) tea.Msg { return DependenciesMsg{} },
 	}
 
-	msg := updateModuleDependencies(".", []ModuleDependency{{Path: "example.com/dep", Version: "v1.0.0", Latest: "v1.1.0"}}, backupLimit, operation)()
+	msg := updateModuleDependencies(".", entries, backupLimit, operation)()
 	if _, ok := msg.(DependenciesUpdatedMsg); !ok {
 		t.Fatalf("update result = %T, want DependenciesUpdatedMsg", msg)
 	}
