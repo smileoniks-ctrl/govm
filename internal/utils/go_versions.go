@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
@@ -67,6 +68,12 @@ func CompareGoVersions(v1, v2 string) int {
 func SortGoVersionsDesc(versions []string) {
 	sort.Slice(versions, func(i, j int) bool {
 		return CompareGoVersions(versions[i], versions[j]) > 0
+	})
+}
+
+func sortGoVersionRecordsDesc(records []GoVersion) {
+	sort.SliceStable(records, func(i, j int) bool {
+		return CompareGoVersions(records[i].Version, records[j].Version) > 0
 	})
 }
 
@@ -172,7 +179,7 @@ func GetShimPathInstructions() string {
 func FetchGoVersions() tea.Msg {
 	// I randomly put 10 second here
 	client := &http.Client{
-		Timeout: 10 * 1000000000,
+		Timeout: 10 * time.Second,
 	}
 	resp, err := client.Get("https://go.dev/dl/?mode=json&include=all")
 	if err != nil {
@@ -252,20 +259,7 @@ func FetchGoVersions() tea.Msg {
 			}
 		}
 	}
-	// Sort using the shared helper instead of the previous inline logic
-	// so that the CLI matching helpers and the TUI list stay aligned.
-	stringsOnly := make([]string, len(versions))
-	for i, v := range versions {
-		stringsOnly[i] = v.Version
-	}
-	SortGoVersionsDesc(stringsOnly)
-	order := make(map[string]int, len(stringsOnly))
-	for i, v := range stringsOnly {
-		order[v] = i
-	}
-	sort.SliceStable(versions, func(i, j int) bool {
-		return order[versions[i].Version] < order[versions[j].Version]
-	})
+	sortGoVersionRecordsDesc(versions)
 	return VersionsMsg(versions)
 }
 
