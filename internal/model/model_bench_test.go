@@ -2,14 +2,23 @@ package model
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
+)
+
+var (
+	benchColumnsSink []table.Column
+	benchModelSink   tea.Model
+	benchStringSink  string
+	benchViewSink    tea.View
 )
 
 // benchModel builds a Model that mimics a realistic TUI state for
@@ -43,11 +52,11 @@ func benchModel(b *testing.B) Model {
 	l.SetShowHelp(false)
 
 	installed := table.New(
-		table.WithColumns(installedTableColumns(80, styles.LayoutNormal)),
+		table.WithColumns(installedTableColumns(80)),
 		table.WithHeight(20),
 	)
 	deps := table.New(
-		table.WithColumns(dependencyTableColumns(80, styles.LayoutNormal)),
+		table.WithColumns(dependencyTableColumns(80)),
 		table.WithHeight(20),
 	)
 
@@ -89,7 +98,7 @@ func BenchmarkView_NormalLayout(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.View()
+		benchViewSink = m.View()
 	}
 }
 
@@ -99,7 +108,7 @@ func BenchmarkView_InstalledTab(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.View()
+		benchViewSink = m.View()
 	}
 }
 
@@ -109,7 +118,7 @@ func BenchmarkView_DepsTab(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.View()
+		benchViewSink = m.View()
 	}
 }
 
@@ -121,7 +130,7 @@ func BenchmarkView_DepsTabWithDialog(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = m.View()
+		benchViewSink = m.View()
 	}
 }
 
@@ -138,7 +147,7 @@ func BenchmarkView_DepsTabWithPhysicalViewport(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = m.View()
+				benchViewSink = m.View()
 			}
 		})
 	}
@@ -153,7 +162,7 @@ func BenchmarkView_DepsTabWithPhysicalViewportWithoutDialog(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = m.View()
+				benchViewSink = m.View()
 			}
 		})
 	}
@@ -170,7 +179,7 @@ func BenchmarkView_DepsTabWithPhysicalViewportWithDialog(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = m.View()
+				benchViewSink = m.View()
 			}
 		})
 	}
@@ -183,7 +192,7 @@ func BenchmarkUpdate_WindowSizeMsg(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		updated, _ := m.Update(msg)
-		_ = updated
+		benchModelSink = updated
 	}
 }
 
@@ -194,7 +203,7 @@ func BenchmarkUpdate_KeyPressMsg(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		updated, _ := m.Update(msg)
-		_ = updated
+		benchModelSink = updated
 	}
 }
 
@@ -202,7 +211,7 @@ func BenchmarkDependencyTableColumns(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = dependencyTableColumns(120, styles.LayoutNormal)
+		benchColumnsSink = dependencyTableColumns(120)
 	}
 }
 
@@ -210,27 +219,59 @@ func BenchmarkInstalledTableColumns(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = installedTableColumns(120, styles.LayoutNormal)
+		benchColumnsSink = installedTableColumns(120)
 	}
 }
 
 func BenchmarkOverlayDialog(b *testing.B) {
-	bg := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10"
-	dlg := "AAA\nBBB\nCCC"
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = overlayDialog(bg, dlg, viewportSize{Width: 80, Height: 24})
+	for _, size := range []viewportSize{
+		{Width: 64, Height: 20},
+		{Width: 80, Height: 30},
+		{Width: 140, Height: 40},
+	} {
+		b.Run(strconv.Itoa(size.Width)+"x"+strconv.Itoa(size.Height), func(b *testing.B) {
+			row := strings.Repeat("x", size.Width)
+			bg := strings.TrimSuffix(strings.Repeat(row+"\n", size.Height), "\n")
+			dlg := strings.Repeat("overlay dialog content\n", 4)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchStringSink = overlayDialog(bg, dlg, size)
+			}
+		})
 	}
 }
 
 func BenchmarkSpliceCentered(b *testing.B) {
 	bg := "this is a moderately long background line for benchmarking splice behavior"
 	overlay := "OVERLAY"
+	bgW := ansi.StringWidth(bg)
+	overlayW := ansi.StringWidth(overlay)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = spliceCentered(bg, overlay, 12)
+		benchStringSink = spliceCentered(bg, overlay, 12, bgW, overlayW)
+	}
+}
+
+func BenchmarkRenderContentCanvas(b *testing.B) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{name: "plain", content: "first row\nsecond row\nthird row"},
+		{name: "ANSI", content: "\x1b[31mfirst row\x1b[0m\n\x1b[32msecond row\x1b[0m\n\x1b[34mthird row\x1b[0m"},
+		{name: "wide", content: "界e\u0301😀 first row\n界e\u0301😀 second row\n界e\u0301😀 third row"},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchStringSink = renderContentCanvas(tc.content, 80, 24)
+			}
+		})
 	}
 }
 
@@ -243,8 +284,8 @@ func BenchmarkRenderDependencyUpdateDialog(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = renderDependencyUpdateDialog(true, entries, viewportSize{Width: 64, Height: 20})
-		_ = renderDependencyUpdateDialog(false, entries, viewportSize{Width: 64, Height: 20})
+		benchStringSink = renderDependencyUpdateDialog(true, entries, viewportSize{Width: 64, Height: 20})
+		benchStringSink = renderDependencyUpdateDialog(false, entries, viewportSize{Width: 64, Height: 20})
 	}
 }
 
@@ -265,9 +306,9 @@ func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				viewport := viewportSize{Width: width, Height: 20}
-				_ = renderDependencyChecksDialog(true, viewport)
-				_ = renderDependencyRollbackDialog(true, result, viewport)
-				_ = renderDependencyRestoreDialog(true, backups, 0, viewport)
+				benchStringSink = renderDependencyChecksDialog(true, viewport)
+				benchStringSink = renderDependencyRollbackDialog(true, result, viewport)
+				benchStringSink = renderDependencyRestoreDialog(true, backups, 0, viewport)
 			}
 		})
 	}
