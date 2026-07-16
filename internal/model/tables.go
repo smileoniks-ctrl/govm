@@ -3,7 +3,6 @@ package model
 import (
 	"charm.land/bubbles/v2/table"
 	"github.com/smileoniks-ctrl/govm/internal/config"
-	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -60,7 +59,7 @@ func dependencyStatus(d utils.ModuleDependency) string {
 	}
 }
 
-func installedTableColumns(width int, layout styles.LayoutMode) []table.Column {
+func installedTableColumns(width int) []table.Column {
 	versionWidth, statusWidth, minPathWidth := 10, 10, 18
 
 	pathWidth := width - versionWidth - statusWidth - 6
@@ -75,7 +74,7 @@ func installedTableColumns(width int, layout styles.LayoutMode) []table.Column {
 	}
 }
 
-func dependencyTableColumns(width int, layout styles.LayoutMode) []table.Column {
+func dependencyTableColumns(width int) []table.Column {
 	pathWidth, versionWidth, latestWidth, statusWidth, minPathWidth := 0, 9, 9, 10, 10
 
 	used := versionWidth + latestWidth + statusWidth + 12

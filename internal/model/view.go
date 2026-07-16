@@ -31,16 +31,12 @@ func (m Model) View() tea.View {
 		return v
 	}
 
-	if m.Err != nil {
-		return tea.NewView(appStyle.Render(renderStatus("error", fmt.Sprintf("Error: %s", m.Err), width)))
-	}
-
 	components := make([]string, 0, 6)
-	components = append(components, renderHeader(width, m.Layout))
-	components = append(components, renderTabs(m.CurrentTab, m.Layout))
+	components = append(components, renderHeader(width))
+	components = append(components, renderTabs(m.CurrentTab))
 
-	if !utils.IsShimInPath() {
-		components = append(components, renderStatus("warning", "GoVM is not in your PATH. "+utils.GetShimPathInstructions(), width))
+	if m.ShimPathWarning != "" {
+		components = append(components, renderStatus("warning", m.ShimPathWarning, width))
 	}
 
 	switch m.CurrentTab {
@@ -67,13 +63,12 @@ func (m Model) View() tea.View {
 		m.Deps.Dialog.ConfirmingRestoreBackup,
 		m.Deps.Dialog.RestoreChoiceYes,
 		width,
-		m.Layout,
 	)
 	if m.Settings.EditingDepsBackupLimit {
 		help = renderKeyHints([][2]string{
 			{"enter", "save"},
 			{"esc", "cancel"},
-		}, width, m.Layout)
+		}, width)
 	}
 	components = append(components, help)
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
@@ -81,16 +76,7 @@ func (m Model) View() tea.View {
 	if m.Settings.EditingDepsBackupLimit {
 		rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(m.Settings, viewport), viewport)
 	} else if m.Deps.Dialog.ConfirmingUpdate {
-		updatable := utils.UpdatableDirectDependencies(m.Deps.Dependencies)
-		entries := make([]utils.DependencyUpdateEntry, 0, len(updatable))
-		for _, d := range updatable {
-			entries = append(entries, utils.DependencyUpdateEntry{
-				Path:       d.Path,
-				OldVersion: d.Version,
-				NewVersion: d.Latest,
-			})
-		}
-		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.Deps.Dialog.UpdateChoiceYes, entries, viewport), viewport)
+		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.Deps.Dialog.UpdateChoiceYes, m.Deps.UpdateEntries, viewport), viewport)
 	} else if m.Deps.Dialog.ConfirmingChecks {
 		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.Deps.Dialog.CheckChoiceYes, viewport), viewport)
 	} else if m.Deps.Dialog.ConfirmingRollback {
@@ -158,7 +144,7 @@ func (m Model) composeStatus() (string, string) {
 	return status, statusType
 }
 
-func renderHeader(width int, layout styles.LayoutMode) string {
+func renderHeader(width int) string {
 	title := styles.TitleStyle.Render("GoVM")
 
 	meta := styles.HeaderMetaStyle.Render(fmt.Sprintf("Go Version Manager %s", utils.GetVersion()))
@@ -166,7 +152,7 @@ func renderHeader(width int, layout styles.LayoutMode) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, title, strings.Repeat(" ", spacerWidth), meta)
 }
 
-func renderTabs(currentTab int, layout styles.LayoutMode) string {
+func renderTabs(currentTab int) string {
 	tabs := []string{
 		renderTab("Available", currentTab == AvailableTab),
 		renderTab("Installed", currentTab == InstalledTab),
@@ -239,7 +225,7 @@ func themeLabel(name config.ThemeName) string {
 	return "Current"
 }
 
-func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChecks, confirmingRollback, confirmingRestore, restoreChoiceYes bool, width int, layout styles.LayoutMode) string {
+func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChecks, confirmingRollback, confirmingRestore, restoreChoiceYes bool, width int) string {
 	var hints [][2]string
 
 	switch {
@@ -250,7 +236,7 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			{"esc", "cancel"},
 			{"q", "quit"},
 		}
-		return renderKeyHints(hints, width, layout)
+		return renderKeyHints(hints, width)
 	case confirmingChecks:
 		hints = [][2]string{
 			{"←/→", "choose"},
@@ -258,14 +244,14 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			{"esc", "skip"},
 			{"q", "quit"},
 		}
-		return renderKeyHints(hints, width, layout)
+		return renderKeyHints(hints, width)
 	case confirmingRollback:
 		hints = [][2]string{
 			{"←/→", "choose"},
 			{"enter", "confirm"},
 			{"q", "quit"},
 		}
-		return renderKeyHints(hints, width, layout)
+		return renderKeyHints(hints, width)
 	case confirmingRestore:
 		action := "cancel"
 		if restoreChoiceYes {
@@ -277,7 +263,7 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			{"enter", action},
 			{"esc", "cancel"},
 		}
-		return renderKeyHints(hints, width, layout)
+		return renderKeyHints(hints, width)
 	}
 
 	if confirmingDelete {
@@ -319,10 +305,10 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 		}
 	}
 
-	return renderKeyHints(hints, width, layout)
+	return renderKeyHints(hints, width)
 }
 
-func renderKeyHints(hints [][2]string, width int, layout styles.LayoutMode) string {
+func renderKeyHints(hints [][2]string, width int) string {
 	parts := make([]string, 0, len(hints))
 	for _, hint := range hints {
 		parts = append(parts, fmt.Sprintf("%s %s", styles.HelpKeyStyle.Render(hint[0]), styles.HelpTextStyle.Render(hint[1])))
@@ -341,22 +327,36 @@ func renderContentCanvas(content string, width, height int) string {
 	if height < 1 {
 		return ""
 	}
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		lines = nil
-	}
-	if len(lines) > height {
-		lines = lines[:height]
-	}
-	for len(lines) < height {
-		lines = append(lines, "")
-	}
-	for i, line := range lines {
+
+	content = strings.TrimRight(content, "\n")
+	var canvas strings.Builder
+	canvas.Grow(height * (maxInt(0, width) + 1))
+
+	lineStart := 0
+	for row := 0; row < height; row++ {
+		var line string
+		if lineStart < len(content) {
+			lineEnd := strings.IndexByte(content[lineStart:], '\n')
+			if lineEnd < 0 {
+				line = content[lineStart:]
+				lineStart = len(content)
+			} else {
+				lineEnd += lineStart
+				line = content[lineStart:lineEnd]
+				lineStart = lineEnd + 1
+			}
+		}
+		canvas.WriteString(line)
 		if padding := width - ansi.StringWidth(line); padding > 0 {
-			lines[i] = line + strings.Repeat(" ", padding)
+			for range padding {
+				canvas.WriteByte(' ')
+			}
+		}
+		if row+1 < height {
+			canvas.WriteByte('\n')
 		}
 	}
-	return strings.Join(lines, "\n")
+	return canvas.String()
 }
 
 func maxInt(a, b int) int {
@@ -364,11 +364,4 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func pluralize(n int, singular, plural string) string {
-	if n == 1 {
-		return singular
-	}
-	return plural
 }

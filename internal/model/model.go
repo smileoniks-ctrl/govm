@@ -21,25 +21,24 @@ const (
 type Model struct {
 	List              list.Model
 	Versions          []utils.GoVersion
-	Err               error
 	Loading           bool
 	Spinner           spinner.Model
-	HomeDir           string
-	GoVersionsDir     string
 	CurrentTab        int
-	DownloadProgress  float64
 	InstallingVersion string
 	Message           string
 	MessageType       string // "success", "error", "warning", or "info"
 	MessageScope      statusScope
-	InstalledTable    table.Model
-	ConfirmingDelete  bool
-	DeleteVersion     string
-	Width             int
-	Height            int
-	TermWidth         int
-	TermHeight        int
-	Layout            styles.LayoutMode
+	// ShimPathWarning is the pre-rendered PATH warning captured before
+	// launching the TUI, so View does not resolve PATH on every render.
+	ShimPathWarning  string
+	InstalledTable   table.Model
+	ConfirmingDelete bool
+	DeleteVersion    string
+	Width            int
+	Height           int
+	TermWidth        int
+	TermHeight       int
+	Layout           styles.LayoutMode
 
 	// Deps groups every field and state machine flag related to the
 	// "Deps" tab. Use the helpers in deps_state.go to keep the

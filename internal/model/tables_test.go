@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/smileoniks-ctrl/govm/internal/config"
-	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -42,7 +41,7 @@ func TestDependenciesMsgPopulatesTable(t *testing.T) {
 }
 
 func TestDependencyTableColumns(t *testing.T) {
-	cols := dependencyTableColumns(64, styles.LayoutNormal)
+	cols := dependencyTableColumns(64)
 
 	if len(cols) != 4 {
 		t.Fatalf("expected 4 columns, got %d", len(cols))
@@ -75,18 +74,17 @@ func TestDependencyTableIndirectUpdateStatus(t *testing.T) {
 
 func TestInstalledTableColumns_AllLayouts(t *testing.T) {
 	cases := []struct {
-		name   string
-		width  int
-		layout styles.LayoutMode
+		name  string
+		width int
 	}{
-		{"normal-min", 64, styles.LayoutNormal},
-		{"normal", 100, styles.LayoutNormal},
-		{"wide", 160, styles.LayoutWide},
+		{"minimum", 64},
+		{"standard", 100},
+		{"wide", 160},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cols := installedTableColumns(tc.width, tc.layout)
+			cols := installedTableColumns(tc.width)
 			if len(cols) != 3 {
 				t.Fatalf("expected 3 columns, got %d", len(cols))
 			}
@@ -101,18 +99,17 @@ func TestInstalledTableColumns_AllLayouts(t *testing.T) {
 
 func TestDependencyTableColumns_AllLayouts(t *testing.T) {
 	cases := []struct {
-		name   string
-		width  int
-		layout styles.LayoutMode
+		name  string
+		width int
 	}{
-		{"normal-min", 64, styles.LayoutNormal},
-		{"normal", 100, styles.LayoutNormal},
-		{"wide", 160, styles.LayoutWide},
+		{"minimum", 64},
+		{"standard", 100},
+		{"wide", 160},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cols := dependencyTableColumns(tc.width, tc.layout)
+			cols := dependencyTableColumns(tc.width)
 			if len(cols) != 4 {
 				t.Fatalf("expected 4 columns, got %d", len(cols))
 			}

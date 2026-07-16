@@ -8,7 +8,6 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -47,12 +46,54 @@ func TestGoDevErrorKeepsTUIClosable(t *testing.T) {
 	}
 }
 
+func TestViewDoesNotRenderShimPathWarningWhenEmpty(t *testing.T) {
+	m := newTestModel(t)
+	m.ShimPathWarning = ""
+
+	view := stripANSI(m.View().Content)
+	if strings.Contains(view, "GoVM is not in your PATH.") {
+		t.Fatalf("did not expect PATH warning, got:\n%s", view)
+	}
+}
+
+func TestViewRendersConfiguredShimPathWarning(t *testing.T) {
+	m := newTestModel(t)
+	const warning = "Use the configured shim directory."
+	m.ShimPathWarning = warning
+
+	view := stripANSI(m.View().Content)
+	if !strings.Contains(view, warning) {
+		t.Fatalf("expected PATH warning %q, got:\n%s", warning, view)
+	}
+}
+
 func TestRenderContentCanvasClearsEveryRowToCanvasWidth(t *testing.T) {
 	const width = 10
 	got := strings.Split(renderContentCanvas("row", width, 3), "\n")
 
 	if len(got) != 3 {
 		t.Fatalf("canvas line count = %d, want 3", len(got))
+	}
+	for i, line := range got {
+		if visibleWidth := ansi.StringWidth(line); visibleWidth != width {
+			t.Errorf("canvas line %d visible width = %d, want %d; line = %q", i, visibleWidth, width, line)
+		}
+	}
+}
+
+func TestRenderContentCanvasPreservesANSIAndDisplayWidth(t *testing.T) {
+	content := "\x1b[31m界e\u0301😀\x1b[0m\nplain"
+	const width = 10
+
+	got := strings.Split(renderContentCanvas(content, width, 3), "\n")
+	if len(got) != 3 {
+		t.Fatalf("canvas line count = %d, want 3", len(got))
+	}
+	if !strings.Contains(got[0], "\x1b[31m") || !strings.Contains(got[0], "\x1b[0m") {
+		t.Fatalf("expected ANSI styling to be preserved, got %q", got[0])
+	}
+	if plain := stripANSI(got[0]); !strings.HasPrefix(plain, "界e\u0301😀") {
+		t.Fatalf("first row = %q, want prefix %q", plain, "界e\u0301😀")
 	}
 	for i, line := range got {
 		if visibleWidth := ansi.StringWidth(line); visibleWidth != width {
@@ -102,18 +143,6 @@ func TestDepsTabRenders(t *testing.T) {
 	}
 }
 
-func TestPluralize(t *testing.T) {
-	if pluralize(1, "dep", "deps") != "dep" {
-		t.Fatal("expected singular for n=1")
-	}
-	if pluralize(0, "dep", "deps") != "deps" {
-		t.Fatal("expected plural for n=0")
-	}
-	if pluralize(5, "dep", "deps") != "deps" {
-		t.Fatal("expected plural for n>1")
-	}
-}
-
 func TestMaxInt(t *testing.T) {
 	if maxInt(3, 7) != 7 {
 		t.Fatal("expected 7")
@@ -127,7 +156,7 @@ func TestMaxInt(t *testing.T) {
 }
 
 func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
-	got := renderHelp(0, true, false, false, false, false, false, 80, styles.LayoutNormal)
+	got := renderHelp(0, true, false, false, false, false, false, 80)
 	if !strings.Contains(stripANSI(got), "confirm") {
 		t.Fatalf("expected confirm hint, got: %s", got)
 	}
@@ -148,7 +177,7 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stripANSI(renderHelp(DepsTab, false, false, false, false, true, tt.restoreChoiceYes, 80, styles.LayoutNormal))
+			got := stripANSI(renderHelp(DepsTab, false, false, false, false, true, tt.restoreChoiceYes, 80))
 			if !strings.Contains(got, tt.want) {
 				t.Fatalf("expected help to contain %q, got %q", tt.want, got)
 			}
@@ -157,7 +186,7 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 }
 
 func TestRenderHelp_DepsTruncatesToWidth(t *testing.T) {
-	got := renderHelp(2, false, false, false, false, false, false, 20, styles.LayoutNormal)
+	got := renderHelp(2, false, false, false, false, false, false, 20)
 	if got == "" {
 		t.Fatal("expected non-empty help for deps")
 	}

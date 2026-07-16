@@ -51,7 +51,7 @@ func newTestModel(t *testing.T) Model {
 		table.WithHeight(8),
 	)
 	depTbl := table.New(
-		table.WithColumns(dependencyTableColumns(80, styles.LayoutNormal)),
+		table.WithColumns(dependencyTableColumns(80)),
 		table.WithHeight(20),
 	)
 
@@ -59,8 +59,6 @@ func newTestModel(t *testing.T) Model {
 		List:           l,
 		Versions:       []utils.GoVersion{{Version: "1.24.4", Filename: "go1.24.4.darwin-arm64.tar.gz", Installed: true, Active: true, Path: filepath.Join(home, ".govm", "versions", "go1.24.4")}},
 		Spinner:        spinner.New(),
-		HomeDir:        home,
-		GoVersionsDir:  filepath.Join(home, ".govm", "versions"),
 		InstalledTable: tbl,
 		Deps:           NewDepsState("", depTbl),
 		Settings:       NewSettingsState(filepath.Join(home, ".config", "govm", "settings.json"), config.DefaultSettings()),
