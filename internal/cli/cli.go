@@ -155,40 +155,40 @@ func findInstalledVersion(version string) (utils.GoVersion, error) {
 	}
 
 	query := utils.NormalizeGoVersionQuery(version)
-	exactPath := filepath.Join(goVersionsDir, "go"+query)
-	if _, err := os.Stat(exactPath); err == nil {
-		return utils.GoVersion{
-			Version:   query,
-			Path:      exactPath,
-			Installed: true,
-		}, nil
-	}
-
 	entries, err := os.ReadDir(goVersionsDir)
 	if err != nil {
 		return utils.GoVersion{}, fmt.Errorf("failed to read versions directory: %v", err)
 	}
 
 	var versions []string
-	var versionPaths []string
 	versionToPath := make(map[string]string)
 	for _, entry := range entries {
 		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "go") {
 			continue
 		}
 		versionStr := strings.TrimPrefix(entry.Name(), "go")
+		if versionStr == "" {
+			continue
+		}
+		path := filepath.Join(goVersionsDir, entry.Name())
+		if !paths.IsDirectChild(goVersionsDir, path) {
+			continue
+		}
 		versions = append(versions, versionStr)
-		versionPaths = append(versionPaths, filepath.Join(goVersionsDir, entry.Name()))
-		versionToPath[versionStr] = versionPaths[len(versionPaths)-1]
+		versionToPath[versionStr] = path
 	}
 
 	matched, ok := utils.FindLatestGoVersion(versions, query)
 	if !ok {
 		return utils.GoVersion{}, fmt.Errorf("no installed version matching '%s' found", version)
 	}
+	path := versionToPath[matched]
+	if !paths.IsDirectChild(goVersionsDir, path) {
+		return utils.GoVersion{}, fmt.Errorf("no installed version matching '%s' found", version)
+	}
 	return utils.GoVersion{
 		Version:   matched,
-		Path:      versionToPath[matched],
+		Path:      path,
 		Installed: true,
 	}, nil
 }
