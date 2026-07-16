@@ -112,7 +112,7 @@ func renderDependencyUpdateDialog(yesSelected bool, updatable []utils.Dependency
 	lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf(
 		"%d direct %s will be updated:",
 		len(updatable),
-		pluralize(len(updatable), "dependency", "dependencies"),
+		utils.Pluralize(len(updatable), "dependency", "dependencies"),
 	)))
 
 	visible := updatable
@@ -283,8 +283,9 @@ func overlayDialog(background, dialog string, viewport viewportSize) string {
 	if len(bgLines) > height {
 		bgLines = bgLines[:height]
 	}
+	blankRow := strings.Repeat(" ", width)
 	for len(bgLines) < height {
-		bgLines = append(bgLines, strings.Repeat(" ", width))
+		bgLines = append(bgLines, blankRow)
 	}
 
 	startRow := 0
@@ -312,13 +313,13 @@ func overlayDialog(background, dialog string, viewport viewportSize) string {
 		if bgW > dW {
 			col = (bgW - dW) / 2
 		}
-		bgLines[row] = spliceCentered(bgLine, dline, col)
+		bgLines[row] = spliceCentered(bgLine, dline, col, bgW, dW)
 	}
 
 	return strings.Join(bgLines, "\n")
 }
 
-func spliceCentered(bg, overlay string, col int) string {
+func spliceCentered(bg, overlay string, col, bgW, overlayW int) string {
 	if col < 0 {
 		col = 0
 	}
@@ -327,16 +328,14 @@ func spliceCentered(bg, overlay string, col int) string {
 	// (a) drop a wide rune that straddles the cut point and (b) chop ANSI
 	// escape sequences in half, which corrupts the surrounding styled
 	// table output. Use ANSI-aware cuts instead.
-	bgW := ansi.StringWidth(bg)
 	if col > bgW {
 		col = bgW
 	}
-	ovW := ansi.StringWidth(overlay)
 
 	prefix := ansi.Cut(bg, 0, col)
 	suffix := ""
-	if col+ovW < bgW {
-		suffix = ansi.Cut(bg, col+ovW, bgW)
+	if col+overlayW < bgW {
+		suffix = ansi.Cut(bg, col+overlayW, bgW)
 	}
 	return prefix + overlay + suffix
 }

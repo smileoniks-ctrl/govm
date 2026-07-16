@@ -5,6 +5,17 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
+func (m *Model) resetUpdateConfirmation() {
+	m.Deps.Dialog.ConfirmingUpdate = false
+	m.Deps.Dialog.UpdateChoiceYes = false
+	m.Deps.UpdateEntries = nil
+}
+
+func (m *Model) resetChecksConfirmation() {
+	m.Deps.Dialog.ConfirmingChecks = false
+	m.Deps.Dialog.CheckChoiceYes = false
+}
+
 // handleUpdateConfirmKey handles key presses while the dependency
 // update confirmation dialog is open.
 func (m Model) handleUpdateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -18,8 +29,7 @@ func (m Model) handleUpdateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.Deps.Dialog.UpdateChoiceYes = true
 		return m.applyUpdateChoice()
 	case "n", "N", "esc":
-		m.Deps.Dialog.ConfirmingUpdate = false
-		m.Deps.Dialog.UpdateChoiceYes = false
+		m.resetUpdateConfirmation()
 		m.setTabStatus("Update canceled.", "info")
 		return m, nil
 	}
@@ -28,17 +38,16 @@ func (m Model) handleUpdateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 
 func (m Model) applyUpdateChoice() (tea.Model, tea.Cmd) {
 	if !m.Deps.Dialog.UpdateChoiceYes {
-		m.Deps.Dialog.ConfirmingUpdate = false
-		m.Deps.Dialog.UpdateChoiceYes = false
+		m.resetUpdateConfirmation()
 		m.setTabStatus("Update canceled.", "info")
 		return m, nil
 	}
 
-	m.Deps.Dialog.ConfirmingUpdate = false
-	m.Deps.Dialog.UpdateChoiceYes = false
+	entries := m.Deps.UpdateEntries
+	m.resetUpdateConfirmation()
 	m.Deps.Updating = true
 	m.setGlobalStatus("Updating dependencies...", "info")
-	return m, utils.UpdateModuleDependencies(m.Deps.ModuleDir, m.Deps.Dependencies, m.Settings.Values.DepsBackupLimit)
+	return m, utils.UpdateModuleDependencies(m.Deps.ModuleDir, entries, m.Settings.Values.DepsBackupLimit)
 }
 
 // handleChecksConfirmKey handles key presses while the "run checks?"
@@ -55,8 +64,7 @@ func (m Model) handleChecksConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.Deps.Dialog.CheckChoiceYes = true
 		return m.applyChecksChoice()
 	case "n", "N", "esc":
-		m.Deps.Dialog.ConfirmingChecks = false
-		m.Deps.Dialog.CheckChoiceYes = false
+		m.resetChecksConfirmation()
 		m.Deps.clearRollbackContext()
 		m.setGlobalStatus("Update complete. Checks skipped.", "info")
 		return m, nil
@@ -66,15 +74,13 @@ func (m Model) handleChecksConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 
 func (m Model) applyChecksChoice() (tea.Model, tea.Cmd) {
 	if !m.Deps.Dialog.CheckChoiceYes {
-		m.Deps.Dialog.ConfirmingChecks = false
-		m.Deps.Dialog.CheckChoiceYes = false
+		m.resetChecksConfirmation()
 		m.Deps.clearRollbackContext()
 		m.setGlobalStatus("Update complete. Checks skipped.", "info")
 		return m, nil
 	}
 
-	m.Deps.Dialog.ConfirmingChecks = false
-	m.Deps.Dialog.CheckChoiceYes = false
+	m.resetChecksConfirmation()
 	m.Deps.RunningChecks = true
 	m.setGlobalStatus("Running checks...", "info")
 	return m, utils.RunModuleDependencyChecks(m.Deps.ModuleDir)

@@ -1,11 +1,40 @@
 package model
 
 import (
+	"reflect"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
+
+func TestResetUpdateConfirmationClearsDialogAndEntries(t *testing.T) {
+	m := newTestModel(t)
+	m.Deps.Dialog.ConfirmingUpdate = true
+	m.Deps.Dialog.UpdateChoiceYes = true
+	m.Deps.UpdateEntries = []utils.DependencyUpdateEntry{{Path: "example.com/dependency"}}
+
+	m.resetUpdateConfirmation()
+
+	if m.Deps.Dialog.ConfirmingUpdate || m.Deps.Dialog.UpdateChoiceYes {
+		t.Fatal("expected update dialog state to reset")
+	}
+	if !reflect.DeepEqual(m.Deps.UpdateEntries, []utils.DependencyUpdateEntry(nil)) {
+		t.Fatalf("update entries = %#v, want nil", m.Deps.UpdateEntries)
+	}
+}
+
+func TestResetChecksConfirmationClearsDialog(t *testing.T) {
+	m := newTestModel(t)
+	m.Deps.Dialog.ConfirmingChecks = true
+	m.Deps.Dialog.CheckChoiceYes = true
+
+	m.resetChecksConfirmation()
+
+	if m.Deps.Dialog.ConfirmingChecks || m.Deps.Dialog.CheckChoiceYes {
+		t.Fatal("expected checks dialog state to reset")
+	}
+}
 
 func TestRestoreBackupDialogEnterTriggersRestoreCmd(t *testing.T) {
 	m := newTestModel(t)
@@ -29,25 +58,6 @@ func TestRestoreBackupDialogEnterTriggersRestoreCmd(t *testing.T) {
 	}
 }
 
-func TestUpdatableDirectDependenciesFilter(t *testing.T) {
-	deps := []utils.ModuleDependency{
-		{Path: "direct-updatable", Version: "v1.0.0", Latest: "v1.1.0"},
-		{Path: "indirect-updatable", Version: "v0.5.0", Latest: "v0.6.0", Indirect: true},
-		{Path: "direct-current", Version: "v2.0.0", Latest: "v2.0.0"},
-		{Path: "direct-no-info", Version: "v3.0.0"},
-		{Path: "direct-error", Version: "v4.0.0", Latest: "v4.1.0", Error: "bad module"},
-	}
-
-	updatable := utils.UpdatableDirectDependencies(deps)
-
-	if len(updatable) != 1 {
-		t.Fatalf("expected 1 updatable direct dep, got %d (%v)", len(updatable), updatable)
-	}
-	if updatable[0].Path != "direct-updatable" {
-		t.Fatalf("expected direct-updatable, got %q", updatable[0].Path)
-	}
-}
-
 func TestEscClosesConfirmDialog(t *testing.T) {
 	m := newTestModel(t)
 
@@ -64,11 +74,18 @@ func TestEscClosesConfirmDialog(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
 
+	if len(m.Deps.UpdateEntries) != 1 {
+		t.Fatalf("expected 1 cached update entry, got %d", len(m.Deps.UpdateEntries))
+	}
+
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 
 	if m.Deps.Dialog.ConfirmingUpdate {
 		t.Fatal("expected dialog to close on esc")
+	}
+	if len(m.Deps.UpdateEntries) != 0 {
+		t.Fatalf("expected cached update entries to clear on cancel, got %d", len(m.Deps.UpdateEntries))
 	}
 }
 
@@ -148,6 +165,9 @@ func TestConfirmOnYesTriggersUpdateCmd(t *testing.T) {
 	}
 	if !m.Deps.Updating {
 		t.Fatal("expected UpdatingDependencies to be true after choosing Yes")
+	}
+	if len(m.Deps.UpdateEntries) != 0 {
+		t.Fatalf("expected cached update entries to clear on confirm, got %d", len(m.Deps.UpdateEntries))
 	}
 	if cmd == nil {
 		t.Fatal("expected a command to be returned after confirming Yes")

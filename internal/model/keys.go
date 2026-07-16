@@ -121,11 +121,12 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.CurrentTab == DepsTab && m.Deps.Loaded && !m.Deps.Updating {
-		updatable := utils.UpdatableDirectDependencies(m.Deps.Dependencies)
-		if len(updatable) == 0 {
+		entries := utils.DirectDependencyUpdateEntries(m.Deps.Dependencies)
+		if len(entries) == 0 {
 			m.setTabStatus("No direct dependency updates available.", "warning")
 			return m, nil
 		}
+		m.Deps.UpdateEntries = entries
 		m.Deps.Dialog.ConfirmingUpdate = true
 		m.Deps.Dialog.UpdateChoiceYes = true
 		m.clearStatus()

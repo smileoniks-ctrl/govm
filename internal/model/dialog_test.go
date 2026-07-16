@@ -178,7 +178,8 @@ func TestDialogRendersOverDepsView(t *testing.T) {
 }
 
 func TestSpliceCentered_Basic(t *testing.T) {
-	got := spliceCentered("hello world", "ABC", 3)
+	bg, overlay := "hello world", "ABC"
+	got := spliceCentered(bg, overlay, 3, ansi.StringWidth(bg), ansi.StringWidth(overlay))
 	want := "helABCworld"
 	if got != want {
 		t.Fatalf("spliceCentered: got %q, want %q", got, want)
@@ -197,11 +198,11 @@ func TestSpliceCentered_EdgeCases(t *testing.T) {
 		{"col-negative-clamped", "abcdef", "XY", -5, "XYcdef"},
 		{"col-beyond-bg-clamped", "abc", "XYZ", 100, "abcXYZ"},
 		{"col-at-end", "abc", "XY", 3, "abcXY"},
-		{"unicode-runes", "abcdefgh", "OK", 3, "abcOKfgh"},
+		{"middle-replacement", "abcdefgh", "OK", 3, "abcOKfgh"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := spliceCentered(tc.bg, tc.overlay, tc.col)
+			got := spliceCentered(tc.bg, tc.overlay, tc.col, ansi.StringWidth(tc.bg), ansi.StringWidth(tc.overlay))
 			if got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
@@ -292,7 +293,7 @@ func TestSpliceCentered_UsesVisibleColumnsWithANSI(t *testing.T) {
 	// col is measured in visible cells; placing at col=4 must REPLACE the
 	// "o" at cell 4 with "X" and keep the trailing 4 spaces plus the
 	// surrounding ANSI codes intact.
-	got := spliceCentered(styled, overlay, 4)
+	got := spliceCentered(styled, overlay, 4, ansi.StringWidth(styled), ansi.StringWidth(overlay))
 
 	if w := ansi.StringWidth(got); w != 9 {
 		t.Fatalf("expected result width 9, got %d (raw: %q)", w, got)
@@ -309,6 +310,43 @@ func TestSpliceCentered_UsesVisibleColumnsWithANSI(t *testing.T) {
 	}
 	if !strings.Contains(got, "\x1b[0m") {
 		t.Fatalf("expected ANSI reset sequence to be preserved, got %q", got)
+	}
+}
+
+func TestOverlayDialogPreservesANSIWideAndCombiningContent(t *testing.T) {
+	background := strings.Join([]string{
+		"\x1b[32mROW_00  界e\u0301😀      \x1b[0m",
+		"\x1b[32mROW_01  界e\u0301😀      \x1b[0m",
+		"\x1b[32mROW_02  界e\u0301😀      \x1b[0m",
+		"\x1b[32mROW_03  界e\u0301😀      \x1b[0m",
+		"\x1b[32mROW_04  界e\u0301😀      \x1b[0m",
+	}, "\n")
+	dialog := "\x1b[35m界e\u0301😀\x1b[0m"
+
+	got := overlayDialog(background, dialog, viewportSize{Width: 20, Height: 5})
+	lines := strings.Split(got, "\n")
+	if len(lines) != 5 {
+		t.Fatalf("line count = %d, want 5", len(lines))
+	}
+	if !strings.Contains(lines[2], "\x1b[35m") || !strings.Contains(lines[2], "\x1b[0m") {
+		t.Fatalf("expected ANSI dialog styling to be preserved, got %q", lines[2])
+	}
+	if plain := stripANSI(lines[2]); !strings.Contains(plain, "界e\u0301😀") {
+		t.Fatalf("center row = %q, want dialog content", plain)
+	}
+	for i, line := range lines {
+		wantWidth := 19
+		if i == 2 {
+			// ansi.Cut preserves a grapheme that straddles the replacement
+			// boundary rather than splitting the emoji cell.
+			wantWidth = 20
+		}
+		if width := ansi.StringWidth(line); width != wantWidth {
+			t.Errorf("line %d width = %d, want %d", i, width, wantWidth)
+		}
+	}
+	if !strings.Contains(stripANSI(lines[0]), "ROW_00") || !strings.Contains(stripANSI(lines[4]), "ROW_04") {
+		t.Fatalf("expected rows outside dialog to remain intact, got:\n%s", stripANSI(got))
 	}
 }
 

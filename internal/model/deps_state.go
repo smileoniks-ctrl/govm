@@ -27,6 +27,7 @@ type DepsState struct {
 	ModuleDir       string
 	Table           table.Model
 	Dependencies    []utils.ModuleDependency
+	UpdateEntries   []utils.DependencyUpdateEntry
 	Loaded          bool
 	Checking        bool
 	Updating        bool

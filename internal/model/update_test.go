@@ -2,11 +2,59 @@ package model
 
 import (
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
+
+func TestDependenciesMsgInvalidatesStaleUpdateConfirmation(t *testing.T) {
+	m := newTestModel(t)
+	m.Deps.Dialog.ConfirmingUpdate = true
+	m.Deps.Dependencies = []utils.ModuleDependency{
+		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
+	}
+	m.Deps.UpdateEntries = []utils.DependencyUpdateEntry{
+		{Path: "github.com/example/lib", OldVersion: "v1.0.0", NewVersion: "v1.1.0"},
+	}
+
+	incoming := utils.DependenciesMsg{
+		{Path: "github.com/example/lib", Version: "v1.0.1", Latest: "v1.1.0"},
+	}
+	updated, _ := m.Update(incoming)
+	got := updated.(Model)
+
+	if got.Deps.Dialog.ConfirmingUpdate {
+		t.Fatal("expected stale update confirmation to close")
+	}
+	if len(got.Deps.UpdateEntries) != 0 {
+		t.Fatalf("expected cached update entries to clear, got %d", len(got.Deps.UpdateEntries))
+	}
+	if !reflect.DeepEqual(got.Deps.Dependencies, []utils.ModuleDependency(incoming)) {
+		t.Fatalf("dependencies = %+v, want %+v", got.Deps.Dependencies, incoming)
+	}
+	rows := got.Deps.Table.Rows()
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 dependency table row, got %d", len(rows))
+	}
+	if rows[0][0] != incoming[0].Path ||
+		rows[0][1] != incoming[0].Version ||
+		rows[0][2] != incoming[0].Latest ||
+		rows[0][3] != "update avail" {
+		t.Fatalf("dependency table row = %q, want %q", rows[0], []string{
+			incoming[0].Path,
+			incoming[0].Version,
+			incoming[0].Latest,
+			"update avail",
+		})
+	}
+	if !strings.Contains(strings.ToLower(got.Message), "review") ||
+		!strings.Contains(strings.ToLower(got.Message), "again") {
+		t.Fatalf("expected status to tell the user to review updates again, got %q", got.Message)
+	}
+}
 
 func TestWindowSizeMsgKeepsContentSizesPositive(t *testing.T) {
 	m := newTestModel(t)

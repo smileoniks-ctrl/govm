@@ -60,20 +60,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.List.SetSize(contentWidth, contentHeight)
 		m.InstalledTable.SetWidth(contentWidth)
 		m.InstalledTable.SetHeight(contentHeight)
-		m.InstalledTable.SetColumns(installedTableColumns(contentWidth, m.Layout))
+		m.InstalledTable.SetColumns(installedTableColumns(contentWidth))
 		m.Deps.Table.SetWidth(contentWidth)
 		m.Deps.Table.SetHeight(contentHeight)
-		m.Deps.Table.SetColumns(dependencyTableColumns(contentWidth, m.Layout))
+		m.Deps.Table.SetColumns(dependencyTableColumns(contentWidth))
 		return m, nil
 
 	case utils.ErrMsg:
-		m.Err = nil
 		m.Loading = false
 		m.setGlobalStatus(msg.Error(), "error")
 		return m, nil
 
 	case utils.VersionsMsg:
-		m.Err = nil
 		m.Versions = msg
 		items := make([]list.Item, len(m.Versions))
 		for i, v := range m.Versions {
@@ -90,11 +88,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependenciesMsg:
+		updateConfirmationOpen := m.Deps.Dialog.ConfirmingUpdate
 		m.Deps.Dependencies = msg
 		m.Deps.Loaded = true
 		m.Deps.Checking = false
 		m.updateDependencyTable()
-		m.clearTabStatus()
+		if updateConfirmationOpen {
+			m.resetUpdateConfirmation()
+			m.setTabStatus("Dependency updates changed. Please review them again.", "warning")
+		} else {
+			m.clearTabStatus()
+		}
 		return m, nil
 
 	case utils.DependencyBackupsMsg:
@@ -116,14 +120,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Deps.Snapshot = msg.Snapshot
 		m.Deps.LastCheckResult = nil
 		m.updateDependencyTable()
-		m.setGlobalStatus(fmt.Sprintf("Updated %d direct %s. Run checks?", msg.Updated, pluralize(msg.Updated, "dependency", "dependencies")), "success")
+		m.setGlobalStatus(fmt.Sprintf("Updated %d direct %s. Run checks?", msg.Updated, utils.Pluralize(msg.Updated, "dependency", "dependencies")), "success")
 		m.Deps.Dialog.ConfirmingChecks = true
 		m.Deps.Dialog.CheckChoiceYes = true
 		return m, nil
 
 	case utils.DependencyCheckResultMsg:
 		m.Deps.RunningChecks = false
-		m.Deps.Dialog.ConfirmingChecks = false
+		m.resetChecksConfirmation()
 		if msg.OK {
 			m.setGlobalStatus("Checks passed.", "success")
 			m.Deps.clearRollbackContext()
