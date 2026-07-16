@@ -180,48 +180,44 @@ func RestoreModuleFiles(moduleDir string, snap *DependencySnapshot) error {
 	return nil
 }
 
-// UpdatableDirectDependencies returns direct dependencies that have
-// an available update.
-func UpdatableDirectDependencies(deps []ModuleDependency) []ModuleDependency {
-	var out []ModuleDependency
+// DirectDependencyUpdateEntries returns immutable update entries for
+// direct dependencies that have an available update.
+func DirectDependencyUpdateEntries(deps []ModuleDependency) []DependencyUpdateEntry {
+	var entries []DependencyUpdateEntry
 	for _, d := range deps {
-		if d.Indirect {
+		if d.Indirect || d.Error != "" || d.Latest == "" || d.Latest == d.Version {
 			continue
 		}
-		if d.Error != "" {
-			continue
-		}
-		if d.Latest == "" || d.Latest == d.Version {
-			continue
-		}
-		out = append(out, d)
-	}
-	return out
-}
-
-// UpdateModuleDependencies runs `go get` for each updatable direct
-// dependency in deps, then `go mod tidy`, and finally re-checks
-// available updates. It takes a snapshot of go.mod and go.sum before
-// running go get so the caller can roll back on check failure.
-func UpdateModuleDependencies(moduleDir string, deps []ModuleDependency, backupLimit int) tea.Cmd {
-	return updateModuleDependencies(moduleDir, deps, backupLimit, defaultDependencyOperation())
-}
-
-func updateModuleDependencies(moduleDir string, deps []ModuleDependency, backupLimit int, operation dependencyOperation) tea.Cmd {
-	updatable := UpdatableDirectDependencies(deps)
-	if len(updatable) == 0 {
-		return func() tea.Msg {
-			return DependencyErrMsg{Err: fmt.Errorf("no direct dependency updates available")}
-		}
-	}
-
-	entries := make([]DependencyUpdateEntry, 0, len(updatable))
-	for _, d := range updatable {
 		entries = append(entries, DependencyUpdateEntry{
 			Path:       d.Path,
 			OldVersion: d.Version,
 			NewVersion: d.Latest,
 		})
+	}
+	return entries
+}
+
+// Pluralize returns singular when n is one, otherwise plural.
+func Pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
+
+// UpdateModuleDependencies runs `go get` for each update entry, then
+// `go mod tidy`, and finally re-checks
+// available updates. It takes a snapshot of go.mod and go.sum before
+// running go get so the caller can roll back on check failure.
+func UpdateModuleDependencies(moduleDir string, entries []DependencyUpdateEntry, backupLimit int) tea.Cmd {
+	return updateModuleDependencies(moduleDir, entries, backupLimit, defaultDependencyOperation())
+}
+
+func updateModuleDependencies(moduleDir string, entries []DependencyUpdateEntry, backupLimit int, operation dependencyOperation) tea.Cmd {
+	if len(entries) == 0 {
+		return func() tea.Msg {
+			return DependencyErrMsg{Err: fmt.Errorf("no direct dependency updates available")}
+		}
 	}
 
 	return func() tea.Msg {
@@ -239,8 +235,8 @@ func updateModuleDependencies(moduleDir string, deps []ModuleDependency, backupL
 		}
 
 		args := []string{"get"}
-		for _, d := range updatable {
-			args = append(args, fmt.Sprintf("%s@%s", d.Path, d.Latest))
+		for _, entry := range entries {
+			args = append(args, fmt.Sprintf("%s@%s", entry.Path, entry.NewVersion))
 		}
 
 		if out, err := operation.runCommand(context.Root, args...); err != nil {
@@ -263,7 +259,7 @@ func updateModuleDependencies(moduleDir string, deps []ModuleDependency, backupL
 		}
 
 		return DependenciesUpdatedMsg{
-			Updated:      len(updatable),
+			Updated:      len(entries),
 			Dependencies: []ModuleDependency(depsMsg),
 			Snapshot:     snap,
 		}
@@ -516,9 +512,6 @@ func restoreDependencyBackup(moduleDir, backupName string, backupLimit int, oper
 }
 
 const maxCheckOutputLines = 8
-
-// MaxCheckOutputLinesForTest exposes the bound for tests.
-func MaxCheckOutputLinesForTest() int { return maxCheckOutputLines }
 
 func trimOutput(out string) string {
 	lines := strings.Split(strings.TrimSpace(out), "\n")

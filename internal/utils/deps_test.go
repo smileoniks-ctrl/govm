@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -34,18 +35,51 @@ func fixedDependencyBackupStore(now time.Time) dependencyBackupStore {
 	}
 }
 
+func TestPluralize(t *testing.T) {
+	if Pluralize(1, "dep", "deps") != "dep" {
+		t.Fatal("expected singular for n=1")
+	}
+	if Pluralize(0, "dep", "deps") != "deps" {
+		t.Fatal("expected plural for n=0")
+	}
+	if Pluralize(5, "dep", "deps") != "deps" {
+		t.Fatal("expected plural for n>1")
+	}
+}
+
+func TestDirectDependencyUpdateEntriesFiltersAndMaps(t *testing.T) {
+	deps := []ModuleDependency{
+		{Path: "direct-updatable", Version: "v1.0.0", Latest: "v1.1.0"},
+		{Path: "indirect-updatable", Version: "v2.0.0", Latest: "v2.1.0", Indirect: true},
+		{Path: "direct-current", Version: "v3.0.0", Latest: "v3.0.0"},
+		{Path: "direct-no-latest", Version: "v4.0.0"},
+		{Path: "direct-error", Version: "v5.0.0", Latest: "v5.1.0", Error: "unavailable"},
+	}
+
+	entries := DirectDependencyUpdateEntries(deps)
+
+	want := []DependencyUpdateEntry{{
+		Path:       "direct-updatable",
+		OldVersion: "v1.0.0",
+		NewVersion: "v1.1.0",
+	}}
+	if !reflect.DeepEqual(entries, want) {
+		t.Fatalf("DirectDependencyUpdateEntries() = %#v, want %#v", entries, want)
+	}
+}
+
 func TestReadModulePath_QuotedDirective(t *testing.T) {
 	requireGoToolchain(t)
 
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module \"example.com/app\"\n\ngo 1.26\n")
 
-	modulePath, err := ReadModulePath(dir)
+	context, err := resolveModuleContext(dir)
 	if err != nil {
-		t.Fatalf("ReadModulePath: %v", err)
+		t.Fatalf("resolveModuleContext: %v", err)
 	}
-	if modulePath != "example.com/app" {
-		t.Fatalf("ReadModulePath = %q, want %q", modulePath, "example.com/app")
+	if context.Path != "example.com/app" {
+		t.Fatalf("module path = %q, want %q", context.Path, "example.com/app")
 	}
 }
 
@@ -71,12 +105,12 @@ func TestReadModulePath_MalformedOrMissingDirective(t *testing.T) {
 			dir := t.TempDir()
 			writeFile(t, dir, "go.mod", tt.goMod)
 
-			_, err := ReadModulePath(dir)
+			_, err := resolveModuleContext(dir)
 			if err == nil {
-				t.Fatal("expected ReadModulePath to reject a go.mod without a valid module directive")
+				t.Fatal("expected resolveModuleContext to reject a go.mod without a valid module directive")
 			}
 			if !strings.Contains(err.Error(), "read go.mod: module path not found") {
-				t.Fatalf("ReadModulePath error = %q, want contextual module-path error", err)
+				t.Fatalf("resolveModuleContext error = %q, want contextual module-path error", err)
 			}
 		})
 	}
@@ -169,7 +203,7 @@ func TestSaveDependencyBackupUsesModulePathAndTimestamp(t *testing.T) {
 	store := fixedDependencyBackupStore(time.Date(2026, 7, 9, 12, 34, 56, 0, time.UTC))
 	info, err := store.save(context, snap, DependencyBackupKindPreUpdate)
 	if err != nil {
-		t.Fatalf("SaveDependencyBackup: %v", err)
+		t.Fatalf("save dependency backup: %v", err)
 	}
 
 	wantPath := filepath.Join(home, ".govm", "deps_backup", "github.com_acme_my-app", "2026-07-09_12-34-56.json")
@@ -309,7 +343,7 @@ func TestListDependencyBackupsSkipsInvalidBackupFiles(t *testing.T) {
 	store := fixedDependencyBackupStore(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
 	info, err := store.save(context, snap, DependencyBackupKindPreUpdate)
 	if err != nil {
-		t.Fatalf("SaveDependencyBackup: %v", err)
+		t.Fatalf("save dependency backup: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(filepath.Dir(info.Path), "broken.json"), []byte("{not json"), 0644); err != nil {
 		t.Fatalf("write broken backup: %v", err)
@@ -350,7 +384,11 @@ func TestLoadDependencyBackupRejectsDifferentModule(t *testing.T) {
 		t.Fatalf("write backup: %v", err)
 	}
 
-	_, err = LoadDependencyBackup(dir, "bad.json")
+	context, err := resolveModuleContext(dir)
+	if err != nil {
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
+	_, err = loadDependencyBackupResolved(context, "bad.json")
 	if err == nil || !strings.Contains(err.Error(), "belongs to module") {
 		t.Fatalf("expected module mismatch error, got %v", err)
 	}
@@ -365,9 +403,13 @@ func TestDependencyBackups_RemainAvailableAfterQuotedModuleIsNormalized(t *testi
 	if err != nil {
 		t.Fatalf("SnapshotModuleFiles: %v", err)
 	}
-	info, err := SaveDependencyBackup(dir, snap, DependencyBackupKindPreUpdate)
+	context, err := resolveModuleContext(dir)
 	if err != nil {
-		t.Fatalf("SaveDependencyBackup: %v", err)
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
+	info, err := defaultDependencyBackupStore().save(context, snap, DependencyBackupKindPreUpdate)
+	if err != nil {
+		t.Fatalf("save dependency backup: %v", err)
 	}
 
 	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
@@ -380,9 +422,13 @@ func TestDependencyBackups_RemainAvailableAfterQuotedModuleIsNormalized(t *testi
 		t.Fatalf("ListDependencyBackups = %+v, want backup %q", backups, info.Name)
 	}
 
-	backup, err := LoadDependencyBackup(dir, info.Name)
+	context, err = resolveModuleContext(dir)
 	if err != nil {
-		t.Fatalf("LoadDependencyBackup: %v", err)
+		t.Fatalf("resolveModuleContext: %v", err)
+	}
+	backup, err := loadDependencyBackupResolved(context, info.Name)
+	if err != nil {
+		t.Fatalf("loadDependencyBackupResolved: %v", err)
 	}
 	if backup.ModulePath != "github.com/acme/my-app" {
 		t.Fatalf("loaded ModulePath = %q, want %q", backup.ModulePath, "github.com/acme/my-app")
