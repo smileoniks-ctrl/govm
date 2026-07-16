@@ -33,7 +33,7 @@ type DepsService struct {
 	CheckDeps func(moduleDir string) ([]utils.ModuleDependency, error)
 
 	// Update runs go get + go mod tidy and returns the resulting message.
-	Update func(moduleDir string, deps []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error)
+	Update func(moduleDir string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error)
 
 	// RunChecks runs go test ./... and go vet ./....
 	RunChecks func(moduleDir string) (utils.DependencyCheckResultMsg, error)
@@ -69,8 +69,8 @@ func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) *DepsSe
 		Confirm:   defaultConfirm(stdin, stdout),
 		ListDeps:  defaultListDeps,
 		CheckDeps: defaultCheckDeps,
-		Update: func(moduleDir string, deps []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error) {
-			return defaultUpdate(moduleDir, deps, backupLimit)
+		Update: func(moduleDir string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error) {
+			return defaultUpdate(moduleDir, entries, backupLimit)
 		},
 		RunChecks:   defaultRunChecks,
 		Rollback:    defaultRollback,
@@ -105,8 +105,8 @@ func defaultCheckDeps(moduleDir string) ([]utils.ModuleDependency, error) {
 	return []utils.ModuleDependency(deps), nil
 }
 
-func defaultUpdate(moduleDir string, deps []utils.ModuleDependency, backupLimit int) (utils.DependenciesUpdatedMsg, error) {
-	msg := utils.UpdateModuleDependencies(moduleDir, deps, backupLimit)()
+func defaultUpdate(moduleDir string, entries []utils.DependencyUpdateEntry, backupLimit int) (utils.DependenciesUpdatedMsg, error) {
+	msg := utils.UpdateModuleDependencies(moduleDir, entries, backupLimit)()
 	if updated, ok := msg.(utils.DependenciesUpdatedMsg); ok {
 		return updated, nil
 	}
@@ -220,24 +220,16 @@ func (s *DepsService) RunList() error {
 	if len(deps) == 0 {
 		fmt.Fprintln(s.Stdout, "  (no dependencies)")
 	} else {
-		for _, line := range formatDepRows(deps) {
-			fmt.Fprintf(s.Stdout, "  %s\n", line)
+		for _, d := range deps {
+			kind := "direct"
+			if d.Indirect {
+				kind = "indirect"
+			}
+			fmt.Fprintf(s.Stdout, "  %s\t%s\t%s\n", d.Path, d.Version, kind)
 		}
 	}
 	fmt.Fprintf(s.Stdout, "\n✅ %d direct, %d indirect dependencies.\n", direct, indirect)
 	return nil
-}
-
-func formatDepRows(deps []utils.ModuleDependency) []string {
-	rows := make([]string, 0, len(deps))
-	for _, d := range deps {
-		kind := "direct"
-		if d.Indirect {
-			kind = "indirect"
-		}
-		rows = append(rows, fmt.Sprintf("%s\t%s\t%s", d.Path, d.Version, kind))
-	}
-	return rows
 }
 
 // RunCheck prints the dependencies and marks available updates.
@@ -251,8 +243,21 @@ func (s *DepsService) RunCheck() error {
 	if len(deps) == 0 {
 		fmt.Fprintln(s.Stdout, "  (no dependencies)")
 	} else {
-		for _, line := range formatCheckRows(deps) {
-			fmt.Fprintf(s.Stdout, "  %s\n", line)
+		for _, d := range deps {
+			status := "current"
+			version := d.Version
+			switch {
+			case d.Error != "":
+				status = "error: " + d.Error
+			case d.Deprecated != "" && d.Latest != "" && d.Latest != d.Version:
+				status = "update available (deprecated)"
+			case d.Latest != "" && d.Latest != d.Version:
+				status = "update available"
+				version = fmt.Sprintf("%s → %s", d.Version, d.Latest)
+			case d.Deprecated != "":
+				status = "deprecated"
+			}
+			fmt.Fprintf(s.Stdout, "  %s\t%s\t%s\n", d.Path, version, status)
 		}
 	}
 	if updates == 0 {
@@ -314,28 +319,7 @@ func (s *DepsService) RunRestore(name string) error {
 }
 
 func countDirectUpdates(deps []utils.ModuleDependency) int {
-	return len(utils.UpdatableDirectDependencies(deps))
-}
-
-func formatCheckRows(deps []utils.ModuleDependency) []string {
-	rows := make([]string, 0, len(deps))
-	for _, d := range deps {
-		status := "current"
-		version := d.Version
-		switch {
-		case d.Error != "":
-			status = "error: " + d.Error
-		case d.Deprecated != "" && d.Latest != "" && d.Latest != d.Version:
-			status = "update available (deprecated)"
-		case d.Latest != "" && d.Latest != d.Version:
-			status = "update available"
-			version = fmt.Sprintf("%s → %s", d.Version, d.Latest)
-		case d.Deprecated != "":
-			status = "deprecated"
-		}
-		rows = append(rows, fmt.Sprintf("%s\t%s\t%s", d.Path, version, status))
-	}
-	return rows
+	return len(utils.DirectDependencyUpdateEntries(deps))
 }
 
 // RunUpdate runs the full scenario: check, confirm, update, optional
@@ -346,16 +330,16 @@ func (s *DepsService) RunUpdate() error {
 	if err != nil {
 		return fmt.Errorf("failed to check dependencies: %w", err)
 	}
-	updatable := utils.UpdatableDirectDependencies(deps)
-	if len(updatable) == 0 {
+	entries := utils.DirectDependencyUpdateEntries(deps)
+	if len(entries) == 0 {
 		fmt.Fprintln(s.Stdout, "ℹ️  No direct dependency updates available.")
 		return nil
 	}
 
 	fmt.Fprintf(s.Stdout, "\n⚠️  %d direct %s will be updated:\n",
-		len(updatable), pluralize(len(updatable), "dependency", "dependencies"))
-	for _, line := range formatUpdateEntries(buildUpdateEntries(updatable)) {
-		fmt.Fprintf(s.Stdout, "  - %s\n", line)
+		len(entries), utils.Pluralize(len(entries), "dependency", "dependencies"))
+	for _, e := range entries {
+		fmt.Fprintf(s.Stdout, "  - %s  %s → %s\n", e.Path, e.OldVersion, e.NewVersion)
 	}
 	ok, err := s.Confirm("\nApply these updates?", true)
 	if err != nil {
@@ -366,12 +350,12 @@ func (s *DepsService) RunUpdate() error {
 		return nil
 	}
 
-	updated, err := s.Update(s.ModuleDir, deps)
+	updated, err := s.Update(s.ModuleDir, entries)
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}
 	fmt.Fprintf(s.Stdout, "✅ Updated %d direct %s.\n",
-		updated.Updated, pluralize(updated.Updated, "dependency", "dependencies"))
+		updated.Updated, utils.Pluralize(updated.Updated, "dependency", "dependencies"))
 	if updated.Snapshot == nil {
 		return fmt.Errorf("update completed without a rollback snapshot")
 	}
@@ -411,31 +395,4 @@ func (s *DepsService) RunUpdate() error {
 	}
 	fmt.Fprintln(s.Stdout, "✅ Rolled back to pre-update state.")
 	return nil
-}
-
-func buildUpdateEntries(deps []utils.ModuleDependency) []utils.DependencyUpdateEntry {
-	entries := make([]utils.DependencyUpdateEntry, 0, len(deps))
-	for _, d := range deps {
-		entries = append(entries, utils.DependencyUpdateEntry{
-			Path:       d.Path,
-			OldVersion: d.Version,
-			NewVersion: d.Latest,
-		})
-	}
-	return entries
-}
-
-func formatUpdateEntries(entries []utils.DependencyUpdateEntry) []string {
-	rows := make([]string, 0, len(entries))
-	for _, e := range entries {
-		rows = append(rows, fmt.Sprintf("%s  %s → %s", e.Path, e.OldVersion, e.NewVersion))
-	}
-	return rows
-}
-
-func pluralize(n int, singular, plural string) string {
-	if n == 1 {
-		return singular
-	}
-	return plural
 }

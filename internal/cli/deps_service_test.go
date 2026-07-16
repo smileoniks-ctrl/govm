@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ import (
 type fakeOps struct {
 	listFn         func(string) ([]utils.ModuleDependency, error)
 	checkFn        func(string) ([]utils.ModuleDependency, error)
-	updateFn       func(string, []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error)
+	updateFn       func(string, []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error)
 	runChecksFn    func(string) (utils.DependencyCheckResultMsg, error)
 	rollbackFn     func(string, *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error)
 	listBackupsFn  func(string) ([]utils.DependencyBackupInfo, error)
@@ -93,9 +94,9 @@ func (f *fakeOps) ListDeps(dir string) ([]utils.ModuleDependency, error) {
 func (f *fakeOps) CheckDeps(dir string) ([]utils.ModuleDependency, error) {
 	return f.checkFn(dir)
 }
-func (f *fakeOps) Update(dir string, deps []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error) {
+func (f *fakeOps) Update(dir string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error) {
 	f.updateCalls++
-	return f.updateFn(dir, deps)
+	return f.updateFn(dir, entries)
 }
 func (f *fakeOps) RunChecks(dir string) (utils.DependencyCheckResultMsg, error) {
 	f.runChecksCalls++
@@ -132,7 +133,7 @@ func newFakeDeps(checkFn func(string) ([]utils.ModuleDependency, error), confirm
 	ops.listFn = func(dir string) ([]utils.ModuleDependency, error) {
 		return []utils.ModuleDependency{{Path: "x", Version: "v1.0.0"}}, nil
 	}
-	ops.updateFn = func(dir string, deps []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error) {
+	ops.updateFn = func(dir string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error) {
 		return utils.DependenciesUpdatedMsg{
 			Updated: 1,
 			Snapshot: &utils.DependencySnapshot{
@@ -156,70 +157,55 @@ func newFakeDeps(checkFn func(string) ([]utils.ModuleDependency, error), confirm
 }
 
 func TestRunListPrintsDependencies(t *testing.T) {
-	stdout := &bytes.Buffer{}
-	svc := &DepsService{
-		ModuleDir: "/tmp/m",
-		Stdout:    stdout,
-		Stdin:     &bytes.Buffer{},
-		Confirm:   nil,
-		ListDeps: func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0"},
-				{Path: "github.com/i/y", Version: "v0.5.0", Indirect: true},
-			}, nil
-		},
-		CheckDeps: func(string) ([]utils.ModuleDependency, error) { return nil, nil },
-		Update: func(string, []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error) {
-			return utils.DependenciesUpdatedMsg{}, nil
-		},
-		RunChecks: func(string) (utils.DependencyCheckResultMsg, error) { return utils.DependencyCheckResultMsg{}, nil },
-		Rollback: func(string, *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error) {
-			return utils.DependenciesRolledBackMsg{}, nil
-		},
+	svc, _, stdout := newFakeDeps(
+		func(string) ([]utils.ModuleDependency, error) { return nil, nil },
+		func(string, bool) (bool, error) { return true, nil },
+	)
+	svc.ListDeps = func(string) ([]utils.ModuleDependency, error) {
+		return []utils.ModuleDependency{
+			{Path: "github.com/d/x", Version: "v1.0.0"},
+			{Path: "github.com/i/y", Version: "v0.5.0", Indirect: true},
+		}, nil
 	}
 
 	if err := svc.RunList(); err != nil {
 		t.Fatalf("RunList: %v", err)
 	}
-	out := stdout.String()
-	for _, want := range []string{"github.com/d/x", "v1.0.0", "direct", "github.com/i/y", "indirect", "1 direct, 1 indirect"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("expected output to contain %q, got:\n%s", want, out)
-		}
+	want := "🔍 Reading module dependencies in /tmp/m...\n\n" +
+		"  github.com/d/x\tv1.0.0\tdirect\n" +
+		"  github.com/i/y\tv0.5.0\tindirect\n" +
+		"\n✅ 1 direct, 1 indirect dependencies.\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("RunList output mismatch (-want +got):\nwant:\n%q\ngot:\n%q", want, got)
 	}
 }
 
 func TestRunCheckShowsUpdates(t *testing.T) {
-	stdout := &bytes.Buffer{}
-	svc := &DepsService{
-		ModuleDir: "/tmp/m",
-		Stdout:    stdout,
-		Stdin:     &bytes.Buffer{},
-		Confirm:   nil,
-		ListDeps:  func(string) ([]utils.ModuleDependency, error) { return nil, nil },
-		CheckDeps: func(string) ([]utils.ModuleDependency, error) {
+	svc, _, stdout := newFakeDeps(
+		func(string) ([]utils.ModuleDependency, error) {
 			return []utils.ModuleDependency{
 				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
 				{Path: "github.com/d/y", Version: "v1.0.0", Latest: "v1.0.0"},
 			}, nil
 		},
-		Update: func(string, []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error) {
-			return utils.DependenciesUpdatedMsg{}, nil
-		},
-		RunChecks: func(string) (utils.DependencyCheckResultMsg, error) { return utils.DependencyCheckResultMsg{}, nil },
-		Rollback: func(string, *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error) {
-			return utils.DependenciesRolledBackMsg{}, nil
-		},
+		func(string, bool) (bool, error) { return true, nil },
+	)
+	svc.CheckDeps = func(string) ([]utils.ModuleDependency, error) {
+		return []utils.ModuleDependency{
+			{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
+			{Path: "github.com/d/y", Version: "v1.0.0", Latest: "v1.0.0"},
+		}, nil
 	}
 
 	if err := svc.RunCheck(); err != nil {
 		t.Fatalf("RunCheck: %v", err)
 	}
-	out := stdout.String()
-	for _, want := range []string{"v1.0.0 → v1.1.0", "update available", "v1.0.0\tcurrent", "1 direct update"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("expected output to contain %q, got:\n%s", want, out)
-		}
+	want := "🔍 Checking available updates in /tmp/m...\n\n" +
+		"  github.com/d/x\tv1.0.0 → v1.1.0\tupdate available\n" +
+		"  github.com/d/y\tv1.0.0\tcurrent\n" +
+		"\n📦 1 direct update(s) available.\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("RunCheck output mismatch (-want +got):\nwant:\n%q\ngot:\n%q", want, got)
 	}
 }
 
@@ -254,14 +240,20 @@ func TestRunUpdateDeclineUpdate(t *testing.T) {
 				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
 			}, nil
 		},
-		func(string, bool) (bool, error) { return false, nil },
+		nil,
 	)
+	svc.Stdin = strings.NewReader("n\n")
+	svc.Confirm = defaultConfirm(svc.Stdin, stdout)
 
 	if err := svc.RunUpdate(); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Update canceled") {
-		t.Fatalf("expected cancellation message, got:\n%s", stdout.String())
+	want := "🔍 Checking available updates in /tmp/m...\n\n" +
+		"⚠️  1 direct dependency will be updated:\n" +
+		"  - github.com/d/x  v1.0.0 → v1.1.0\n" +
+		"\nApply these updates? [Y/n]: 🛑 Update canceled.\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("RunUpdate cancellation output mismatch (-want +got):\nwant:\n%q\ngot:\n%q", want, got)
 	}
 	if ops.updateCalls != 0 {
 		t.Fatalf("expected Update to be skipped, got %d calls", ops.updateCalls)
@@ -406,7 +398,15 @@ func TestRunUpdateUpdateError(t *testing.T) {
 		},
 		func(string, bool) (bool, error) { return true, nil },
 	)
-	ops.updateFn = func(string, []utils.ModuleDependency) (utils.DependenciesUpdatedMsg, error) {
+	ops.updateFn = func(_ string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error) {
+		want := []utils.DependencyUpdateEntry{{
+			Path:       "github.com/d/x",
+			OldVersion: "v1.0.0",
+			NewVersion: "v1.1.0",
+		}}
+		if !reflect.DeepEqual(entries, want) {
+			t.Fatalf("update entries = %#v, want %#v", entries, want)
+		}
 		return utils.DependenciesUpdatedMsg{}, errors.New("go get failed")
 	}
 	if err := svc.RunUpdate(); err == nil {
