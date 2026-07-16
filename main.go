@@ -116,13 +116,22 @@ func loadTUISettings(stderr io.Writer, load func() (string, config.Settings, err
 }
 
 func launchTUI() {
-	if !setup.IsShimInPath() {
-		setupModel := setup.New()
+	shimInPath := utils.IsShimInPath()
+	if !shimInPath {
+		setupModel, err := setup.New()
+		if err != nil {
+			fmt.Printf("Error in setup: %v\n", err)
+			return
+		}
 		p := tea.NewProgram(setupModel)
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("Error in setup: %v\n", err)
 			os.Exit(1)
 		}
+	}
+	shimPathWarning := ""
+	if !shimInPath {
+		shimPathWarning = "GoVM is not in your PATH. " + utils.GetShimPathInstructions()
 	}
 	settingsPath, settings := loadTUISettings(os.Stderr, func() (string, config.Settings, error) {
 		path, s, _, err := config.LoadWithMigration()
@@ -148,8 +157,7 @@ func launchTUI() {
 		Selected: styles.TableSelectedStyle,
 		Cell:     styles.TableCellStyle,
 	})
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
+	if _, err := os.UserHomeDir(); err != nil {
 		fmt.Println("Error getting home directory:", err)
 		os.Exit(1)
 	}
@@ -159,8 +167,7 @@ func launchTUI() {
 		os.Exit(1)
 	}
 	resolver := paths.New()
-	goVersionsDir, err := resolver.VersionsDir()
-	if err != nil {
+	if _, err := resolver.VersionsDir(); err != nil {
 		fmt.Println("Error resolving versions directory:", err)
 		os.Exit(1)
 	}
@@ -193,16 +200,15 @@ func launchTUI() {
 	})
 
 	initialModel := model.Model{
-		List:           l,
-		Versions:       []utils.GoVersion{},
-		Spinner:        s,
-		Loading:        true,
-		HomeDir:        homeDir,
-		GoVersionsDir:  goVersionsDir,
-		InstalledTable: t,
-		Layout:         styles.LayoutNormal,
-		Deps:           model.NewDepsState(moduleDir, depTable),
-		Settings:       model.NewSettingsState(settingsPath, settings),
+		List:            l,
+		Versions:        []utils.GoVersion{},
+		Spinner:         s,
+		Loading:         true,
+		InstalledTable:  t,
+		Layout:          styles.LayoutNormal,
+		Deps:            model.NewDepsState(moduleDir, depTable),
+		Settings:        model.NewSettingsState(settingsPath, settings),
+		ShimPathWarning: shimPathWarning,
 	}
 	p := tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {

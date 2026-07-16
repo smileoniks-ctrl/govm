@@ -12,40 +12,32 @@ import (
 )
 
 type Model struct {
-	width       int
-	height      int
-	shimPath    string
-	shellConfig string
-	done        bool
-	keyPrompt   string
+	width     int
+	height    int
+	shimPath  string
+	keyPrompt string
 }
 
-func New() Model {
-	resolver := paths.New()
-	shimPath, _ := resolver.ShimDir()
+type shimDirResolver interface {
+	ShimDir() (string, error)
+}
 
-	shellConfig := "~/.bashrc"
-	if runtime.GOOS == "windows" {
-		shellConfig = "PATH environment variable"
-	} else {
-		shell := os.Getenv("SHELL")
-		if strings.Contains(shell, "zsh") {
-			shellConfig = "~/.zshrc"
-		}
-	}
+func New() (Model, error) {
+	return newWithResolver(paths.New())
+}
 
-	keyPrompt := "Press Enter to continue..."
-	if runtime.GOOS == "windows" {
-		keyPrompt = "Press Enter to continue..."
+func newWithResolver(resolver shimDirResolver) (Model, error) {
+	shimPath, err := resolver.ShimDir()
+	if err != nil {
+		return Model{}, err
 	}
 
 	return Model{
-		shimPath:    shimPath,
-		shellConfig: shellConfig,
-		keyPrompt:   keyPrompt,
-		width:       80,
-		height:      24,
-	}
+		shimPath:  shimPath,
+		keyPrompt: "Press Enter to continue...",
+		width:     80,
+		height:    24,
+	}, nil
 }
 
 func (m Model) Init() tea.Cmd {
@@ -57,7 +49,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "enter", "space":
-			m.done = true
 			return m, tea.Quit
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -161,24 +152,4 @@ func max(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func IsShimInPath() bool {
-	resolver := paths.New()
-	shimDir, err := resolver.ShimDir()
-	if err != nil {
-		return false
-	}
-
-	currentPath := os.Getenv("PATH")
-	pathSeparator := string(os.PathListSeparator)
-	pathEntries := strings.Split(currentPath, pathSeparator)
-
-	for _, entry := range pathEntries {
-		if entry == shimDir {
-			return true
-		}
-	}
-
-	return false
 }
