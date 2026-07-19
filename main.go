@@ -1,9 +1,6 @@
 package main
 
 import (
-	"charm.land/bubbles/v2/list"
-	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"fmt"
 	"github.com/smileoniks-ctrl/govm/internal/cli"
@@ -139,24 +136,6 @@ func launchTUI() {
 	})
 	model.ApplyTheme(styles.ThemeName(settings.Theme))
 
-	s := spinner.New()
-	s.Spinner = spinner.Dot
-	s.Style = styles.SpinnerStyle
-	columns := []table.Column{
-		{Title: "Version", Width: 10},
-		{Title: "Path", Width: 40},
-		{Title: "Status", Width: 10},
-	}
-	t := table.New(
-		table.WithColumns(columns),
-		table.WithFocused(true),
-		table.WithHeight(10),
-	)
-	t.SetStyles(table.Styles{
-		Header:   styles.TableHeaderStyle,
-		Selected: styles.TableSelectedStyle,
-		Cell:     styles.TableCellStyle,
-	})
 	if _, err := os.UserHomeDir(); err != nil {
 		fmt.Println("Error getting home directory:", err)
 		os.Exit(1)
@@ -171,45 +150,8 @@ func launchTUI() {
 		fmt.Println("Error resolving versions directory:", err)
 		os.Exit(1)
 	}
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = styles.TableSelectedStyle
-	delegate.Styles.SelectedDesc = styles.TableSelectedStyle
-	delegate.Styles.NormalDesc = styles.MutedStyle
-	l := list.New([]list.Item{}, delegate, 0, 0)
-	l.Title = "Available Versions"
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetShowHelp(false)
-	l.SetShowPagination(false)
 
-	depsColumns := []table.Column{
-		{Title: "Dependency", Width: 24},
-		{Title: "Current", Width: 9},
-		{Title: "Latest", Width: 9},
-		{Title: "Status", Width: 10},
-	}
-	depTable := table.New(
-		table.WithColumns(depsColumns),
-		table.WithFocused(true),
-		table.WithHeight(15),
-	)
-	depTable.SetStyles(table.Styles{
-		Header:   styles.TableHeaderStyle,
-		Selected: styles.TableSelectedStyle,
-		Cell:     styles.TableCellStyle,
-	})
-
-	initialModel := model.Model{
-		List:            l,
-		Versions:        []utils.GoVersion{},
-		Spinner:         s,
-		Loading:         true,
-		InstalledTable:  t,
-		Layout:          styles.LayoutNormal,
-		Deps:            model.NewDepsState(moduleDir, depTable),
-		Settings:        model.NewSettingsState(settingsPath, settings),
-		ShimPathWarning: shimPathWarning,
-	}
+	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning)
 	p := tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)

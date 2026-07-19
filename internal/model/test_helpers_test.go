@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/list"
-	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/table"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
@@ -40,30 +38,24 @@ func newTestModel(t *testing.T) Model {
 		},
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 80, 10)
-	l.SetShowHelp(false)
-	tbl := table.New(
-		table.WithColumns([]table.Column{
-			{Title: "Version", Width: 12},
-			{Title: "Path", Width: 32},
-			{Title: "Status", Width: 12},
-		}),
-		table.WithHeight(8),
+	m := New(
+		"",
+		filepath.Join(home, ".config", "govm", "settings.json"),
+		config.DefaultSettings(),
+		"",
 	)
-	depTbl := table.New(
-		table.WithColumns(dependencyTableColumns(80)),
-		table.WithHeight(20),
-	)
-
-	return Model{
-		List:           l,
-		Versions:       []utils.GoVersion{{Version: "1.24.4", Filename: "go1.24.4.darwin-arm64.tar.gz", Installed: true, Active: true, Path: filepath.Join(home, ".govm", "versions", "go1.24.4")}},
-		Spinner:        spinner.New(),
-		InstalledTable: tbl,
-		Deps:           NewDepsState("", depTbl),
-		Settings:       NewSettingsState(filepath.Join(home, ".config", "govm", "settings.json"), config.DefaultSettings()),
-		Message:        "Successfully installed Go 1.24.4",
-		MessageType:    "success",
-		Layout:         styles.LayoutWide,
-	}
+	m.List.SetItems(items)
+	m.Versions = []utils.GoVersion{{
+		Version:   "1.24.4",
+		Filename:  "go1.24.4.darwin-arm64.tar.gz",
+		Installed: true,
+		Active:    true,
+		Path:      filepath.Join(home, ".govm", "versions", "go1.24.4"),
+	}}
+	m.Message = "Successfully installed Go 1.24.4"
+	m.MessageType = "success"
+	m.Loading = false
+	m.Layout = styles.LayoutWide
+	return m
 }
+

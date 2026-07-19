@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/list"
-	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -48,18 +48,6 @@ func benchModel(b *testing.B) Model {
 		})
 	}
 
-	l := list.New(items, list.NewDefaultDelegate(), 80, 24)
-	l.SetShowHelp(false)
-
-	installed := table.New(
-		table.WithColumns(installedTableColumns(80)),
-		table.WithHeight(20),
-	)
-	deps := table.New(
-		table.WithColumns(dependencyTableColumns(80)),
-		table.WithHeight(20),
-	)
-
 	depItems := make([]utils.ModuleDependency, 0, 10)
 	for i := 0; i < 10; i++ {
 		depItems = append(depItems, utils.ModuleDependency{
@@ -69,21 +57,16 @@ func benchModel(b *testing.B) Model {
 		})
 	}
 
-	depsState := NewDepsState("", deps)
-	depsState.Dependencies = depItems
-	depsState.Loaded = true
-
-	return Model{
-		List:           l,
-		Versions:       versions,
-		Spinner:        spinner.New(),
-		InstalledTable: installed,
-		Deps:           depsState,
-		CurrentTab:     0,
-		Layout:         styles.LayoutNormal,
-		Width:          80,
-		Height:         24,
-	}
+	m := New("", "", config.DefaultSettings(), "")
+	m.List.SetItems(items)
+	m.List.SetSize(80, 24)
+	m.Versions = versions
+	m.Deps.Dependencies = depItems
+	m.Deps.Loaded = true
+	m.Loading = false
+	m.Width = 80
+	m.Height = 24
+	return m
 }
 
 func benchModelAtViewport(b *testing.B, width int) Model {
