@@ -156,7 +156,7 @@ func TestMaxInt(t *testing.T) {
 }
 
 func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
-	got := renderHelp(0, true, false, false, false, false, false, 80)
+	got := renderHelp(0, true, ConfirmDialog{}, 80)
 	if !strings.Contains(stripANSI(got), "confirm") {
 		t.Fatalf("expected confirm hint, got: %s", got)
 	}
@@ -177,7 +177,7 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stripANSI(renderHelp(DepsTab, false, false, false, false, true, tt.restoreChoiceYes, 80))
+			got := stripANSI(renderHelp(DepsTab, false, ConfirmDialog{Kind: DialogRestore, ChoiceYes: tt.restoreChoiceYes}, 80))
 			if !strings.Contains(got, tt.want) {
 				t.Fatalf("expected help to contain %q, got %q", tt.want, got)
 			}
@@ -186,7 +186,7 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 }
 
 func TestRenderHelp_DepsTruncatesToWidth(t *testing.T) {
-	got := renderHelp(2, false, false, false, false, false, false, 20)
+	got := renderHelp(2, false, ConfirmDialog{}, 20)
 	if got == "" {
 		t.Fatal("expected non-empty help for deps")
 	}

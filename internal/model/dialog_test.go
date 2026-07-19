@@ -11,7 +11,8 @@ import (
 )
 
 func TestRenderDependencyUpdateDialogContainsWarning(t *testing.T) {
-	dialog := stripANSI(renderDependencyUpdateDialog(true, nil, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.
+		Render(DepsState{}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Warning", "will be updated", "Yes", "No"} {
 		if !strings.Contains(dialog, want) {
@@ -25,7 +26,8 @@ func TestRenderDependencyUpdateDialogListsModules(t *testing.T) {
 		{Path: "github.com/example/lib", OldVersion: "v1.0.0", NewVersion: "v1.1.0"},
 		{Path: "github.com/example/other", OldVersion: "v2.0.0", NewVersion: "v2.1.0"},
 	}
-	dialog := stripANSI(renderDependencyUpdateDialog(true, entries, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.
+		Render(DepsState{UpdateEntries: entries}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"github.com/example/lib", "v1.0.0", "v1.1.0", "github.com/example/other"} {
 		if !strings.Contains(dialog, want) {
@@ -43,7 +45,8 @@ func TestRenderDependencyUpdateDialogTruncatesLongLists(t *testing.T) {
 			NewVersion: "v1.1.0",
 		})
 	}
-	dialog := stripANSI(renderDependencyUpdateDialog(true, entries, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.
+		Render(DepsState{UpdateEntries: entries}, viewportSize{Width: 64, Height: 20}))
 
 	if !strings.Contains(dialog, "and") || !strings.Contains(dialog, "more") {
 		t.Fatalf("expected truncation hint in dialog, got:\n%s", dialog)
@@ -60,7 +63,8 @@ func TestRenderDependencyRestoreDialogKeepsCursorVisible(t *testing.T) {
 		})
 	}
 
-	dialog := stripANSI(renderDependencyRestoreDialog(true, backups, 6, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{Kind: DialogRestore, ChoiceYes: true, Cursor: 6, MaxCursor: 6}.
+		Render(DepsState{Backups: backups}, viewportSize{Width: 64, Height: 20}))
 
 	if !strings.Contains(dialog, "> 2026-07-09_12-00-06.json") {
 		t.Fatalf("expected selected backup to be visible, got:\n%s", dialog)
@@ -68,7 +72,8 @@ func TestRenderDependencyRestoreDialogKeepsCursorVisible(t *testing.T) {
 }
 
 func TestRenderDependencyChecksDialogContainsCommands(t *testing.T) {
-	dialog := stripANSI(renderDependencyChecksDialog(true, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}.
+		Render(DepsState{}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Run checks?", "go test", "go vet", "Yes", "No"} {
 		if !strings.Contains(dialog, want) {
@@ -83,7 +88,8 @@ func TestRenderDependencyRollbackDialogContainsCommand(t *testing.T) {
 		Command: "go test ./...",
 		Output:  "FAIL: example_test.go:10: expected 1, got 2",
 	}
-	dialog := stripANSI(renderDependencyRollbackDialog(true, result, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}.
+		Render(DepsState{LastCheckResult: result}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Checks failed", "go test ./...", "FAIL: example_test", "Roll back", "Keep"} {
 		if !strings.Contains(dialog, want) {
@@ -108,30 +114,36 @@ func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
 		{
 			name: "update",
 			render: func(width int) string {
-				return renderDependencyUpdateDialog(true, []utils.DependencyUpdateEntry{{
-					Path: longPath, OldVersion: "v1.0.0", NewVersion: "v1.1.0",
-				}}, viewportSize{Width: width, Height: 20})
+				return ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.Render(
+					DepsState{UpdateEntries: []utils.DependencyUpdateEntry{{
+						Path: longPath, OldVersion: "v1.0.0", NewVersion: "v1.1.0",
+					}}},
+					viewportSize{Width: width, Height: 20})
 			},
 		},
 		{
 			name: "checks",
 			render: func(width int) string {
-				return renderDependencyChecksDialog(true, viewportSize{Width: width, Height: 20})
+				return ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}.
+					Render(DepsState{}, viewportSize{Width: width, Height: 20})
 			},
 		},
 		{
 			name: "rollback",
 			render: func(width int) string {
-				return renderDependencyRollbackDialog(true, &utils.DependencyCheckResultMsg{
-					Command: longPath,
-					Output:  longOutput,
-				}, viewportSize{Width: width, Height: 20})
+				return ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}.Render(
+					DepsState{LastCheckResult: &utils.DependencyCheckResultMsg{
+						Command: longPath,
+						Output:  longOutput,
+					}},
+					viewportSize{Width: width, Height: 20})
 			},
 		},
 		{
 			name: "restore",
 			render: func(width int) string {
-				return renderDependencyRestoreDialog(true, backups, 0, viewportSize{Width: width, Height: 20})
+				return ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}.
+					Render(DepsState{Backups: backups}, viewportSize{Width: width, Height: 20})
 			},
 		},
 	}
@@ -358,8 +370,7 @@ func TestViewShowsRollbackDialog(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
 
-	m.Deps.Dialog.ConfirmingRollback = true
-	m.Deps.Dialog.RollbackChoiceYes = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
 	m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
 		OK:      false,
 		Command: "go test ./...",
@@ -382,8 +393,7 @@ func TestViewShowsChecksDialog(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
-	m.Deps.Dialog.ConfirmingChecks = true
-	m.Deps.Dialog.CheckChoiceYes = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 
 	view := stripANSI(m.View().Content)
 	if !strings.Contains(view, "Run checks?") {

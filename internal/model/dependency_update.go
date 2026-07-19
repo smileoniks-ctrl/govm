@@ -5,180 +5,145 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
-func (m *Model) resetUpdateConfirmation() {
-	m.Deps.Dialog.ConfirmingUpdate = false
-	m.Deps.Dialog.UpdateChoiceYes = false
-	m.Deps.UpdateEntries = nil
+// resetDialog closes any open dependency confirmation dialog. Per-kind
+// teardown (clearing UpdateEntries, rolling back context, etc.) lives
+// in the apply* and cancel* helpers below, which call this after they
+// have finished their kind-specific work.
+func (m *Model) resetDialog() {
+	m.Deps.Dialog = ConfirmDialog{}
 }
 
-func (m *Model) resetChecksConfirmation() {
-	m.Deps.Dialog.ConfirmingChecks = false
-	m.Deps.Dialog.CheckChoiceYes = false
-}
-
-// handleUpdateConfirmKey handles key presses while the dependency
-// update confirmation dialog is open.
-func (m Model) handleUpdateConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "left", "right", "tab", "h", "l":
-		m.Deps.Dialog.UpdateChoiceYes = !m.Deps.Dialog.UpdateChoiceYes
-		return m, nil
-	case "enter":
-		return m.applyUpdateChoice()
-	case "y", "Y":
-		m.Deps.Dialog.UpdateChoiceYes = true
-		return m.applyUpdateChoice()
-	case "n", "N", "esc":
-		m.resetUpdateConfirmation()
-		m.setTabStatus("Update canceled.", "info")
-		return m, nil
+// handleDialogKey is the single entry point for key presses while a
+// dependency confirmation dialog is open. Pure key handling (choice
+// toggle, list navigation for restore) lives in ConfirmDialog.Handle;
+// this method enacts the returned DialogAction by delegating to the
+// per-kind apply*Choice helpers for confirm, or by running the
+// per-kind cancel path for cancel.
+func (m Model) handleDialogKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	newDialog, action := m.Deps.Dialog.Handle(msg)
+	m.Deps.Dialog = newDialog
+	switch action {
+	case DialogConfirm:
+		return m.applyDialogConfirm()
+	case DialogCancel:
+		return m.applyDialogCancel()
 	}
 	return m, nil
 }
 
+// applyDialogConfirm dispatches the confirm action to the per-kind
+// side-effect runner. Each runner returns the tea.Cmd that actually
+// performs the work (UpdateModuleDependencies, RunModuleDependencyChecks,
+// RollbackModuleDependencies, RestoreDependencyBackup).
+func (m Model) applyDialogConfirm() (tea.Model, tea.Cmd) {
+	switch m.Deps.Dialog.Kind {
+	case DialogUpdate:
+		return m.applyUpdateChoice()
+	case DialogChecks:
+		return m.applyChecksChoice()
+	case DialogRollback:
+		return m.applyRollbackChoice()
+	case DialogRestore:
+		return m.applyRestoreBackupChoice()
+	}
+	m.resetDialog()
+	return m, nil
+}
+
+// applyDialogCancel dispatches the cancel action to per-kind teardown.
+// Each kind has its own message and rollback-context policy.
+func (m Model) applyDialogCancel() (tea.Model, tea.Cmd) {
+	switch m.Deps.Dialog.Kind {
+	case DialogUpdate:
+		m.resetDialog()
+		m.Deps.UpdateEntries = nil
+		m.setTabStatus("Update canceled.", "info")
+		return m, nil
+	case DialogChecks:
+		m.resetDialog()
+		m.Deps.clearRollbackContext()
+		m.setGlobalStatus("Update complete. Checks skipped.", "info")
+		return m, nil
+	case DialogRollback:
+		return m.keepUpdatedDependencies()
+	case DialogRestore:
+		m.resetDialog()
+		m.setTabStatus("Restore canceled.", "info")
+		return m, nil
+	}
+	m.resetDialog()
+	return m, nil
+}
+
 func (m Model) applyUpdateChoice() (tea.Model, tea.Cmd) {
-	if !m.Deps.Dialog.UpdateChoiceYes {
-		m.resetUpdateConfirmation()
+	if !m.Deps.Dialog.ChoiceYes {
+		m.resetDialog()
+		m.Deps.UpdateEntries = nil
 		m.setTabStatus("Update canceled.", "info")
 		return m, nil
 	}
 
 	entries := m.Deps.UpdateEntries
-	m.resetUpdateConfirmation()
+	m.resetDialog()
+	m.Deps.UpdateEntries = nil
 	m.Deps.Updating = true
 	m.setGlobalStatus("Updating dependencies...", "info")
 	return m, utils.UpdateModuleDependencies(m.Deps.ModuleDir, entries, m.Settings.Values.DepsBackupLimit)
 }
 
-// handleChecksConfirmKey handles key presses while the "run checks?"
-// dialog is open. The default choice is Yes to encourage users to
-// verify their upgrade.
-func (m Model) handleChecksConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "left", "right", "tab", "h", "l":
-		m.Deps.Dialog.CheckChoiceYes = !m.Deps.Dialog.CheckChoiceYes
-		return m, nil
-	case "enter":
-		return m.applyChecksChoice()
-	case "y", "Y":
-		m.Deps.Dialog.CheckChoiceYes = true
-		return m.applyChecksChoice()
-	case "n", "N", "esc":
-		m.resetChecksConfirmation()
-		m.Deps.clearRollbackContext()
-		m.setGlobalStatus("Update complete. Checks skipped.", "info")
-		return m, nil
-	}
-	return m, nil
-}
-
 func (m Model) applyChecksChoice() (tea.Model, tea.Cmd) {
-	if !m.Deps.Dialog.CheckChoiceYes {
-		m.resetChecksConfirmation()
+	if !m.Deps.Dialog.ChoiceYes {
+		m.resetDialog()
 		m.Deps.clearRollbackContext()
 		m.setGlobalStatus("Update complete. Checks skipped.", "info")
 		return m, nil
 	}
 
-	m.resetChecksConfirmation()
+	m.resetDialog()
 	m.Deps.RunningChecks = true
 	m.setGlobalStatus("Running checks...", "info")
 	return m, utils.RunModuleDependencyChecks(m.Deps.ModuleDir)
 }
 
-// handleRollbackConfirmKey handles key presses while the rollback
-// confirmation dialog is open. The default choice is Rollback to
-// make the safe option the easiest one.
-func (m Model) handleRollbackConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "left", "right", "tab", "h", "l":
-		m.Deps.Dialog.RollbackChoiceYes = !m.Deps.Dialog.RollbackChoiceYes
-		return m, nil
-	case "enter":
-		return m.applyRollbackChoice()
-	case "y", "Y":
-		m.Deps.Dialog.RollbackChoiceYes = true
-		return m.applyRollbackChoice()
-	case "n", "N", "esc":
-		return m.keepUpdatedDependencies()
-	}
-	return m, nil
-}
-
 func (m Model) applyRollbackChoice() (tea.Model, tea.Cmd) {
-	if !m.Deps.Dialog.RollbackChoiceYes {
+	if !m.Deps.Dialog.ChoiceYes {
 		return m.keepUpdatedDependencies()
 	}
 
 	if m.Deps.Snapshot == nil {
-		m.Deps.Dialog.ConfirmingRollback = false
-		m.Deps.Dialog.RollbackChoiceYes = false
+		m.resetDialog()
 		m.setTabStatus("Rollback unavailable: snapshot is missing.", "error")
 		return m, nil
 	}
 
-	m.Deps.Dialog.ConfirmingRollback = false
-	m.Deps.Dialog.RollbackChoiceYes = false
+	snap := m.Deps.Snapshot
+	m.resetDialog()
 	m.Deps.RollingBack = true
 	m.setGlobalStatus("Rolling back dependencies...", "info")
-	snap := m.Deps.Snapshot
 	return m, utils.RollbackModuleDependencies(m.Deps.ModuleDir, snap)
 }
 
 func (m Model) keepUpdatedDependencies() (tea.Model, tea.Cmd) {
-	m.Deps.Dialog.ConfirmingRollback = false
-	m.Deps.Dialog.RollbackChoiceYes = false
+	m.resetDialog()
 	m.Deps.clearRollbackContext()
 	m.setGlobalStatus("Update kept. Failed checks were not rolled back.", "warning")
 	return m, nil
 }
 
-func (m Model) handleRestoreBackupKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "up", "k":
-		if m.Deps.BackupCursor > 0 {
-			m.Deps.BackupCursor--
-		}
-		return m, nil
-	case "down", "j":
-		if m.Deps.BackupCursor < len(m.Deps.Backups)-1 {
-			m.Deps.BackupCursor++
-		}
-		return m, nil
-	case "left", "right", "tab", "h", "l":
-		m.Deps.Dialog.RestoreChoiceYes = !m.Deps.Dialog.RestoreChoiceYes
-		return m, nil
-	case "enter":
-		return m.applyRestoreBackupChoice()
-	case "y", "Y":
-		m.Deps.Dialog.RestoreChoiceYes = true
-		return m.applyRestoreBackupChoice()
-	case "n", "N", "esc":
-		m.Deps.Dialog.ConfirmingRestoreBackup = false
-		m.Deps.Dialog.RestoreChoiceYes = false
-		m.setTabStatus("Restore canceled.", "info")
-		return m, nil
-	}
-	return m, nil
-}
-
 func (m Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
-	if !m.Deps.Dialog.RestoreChoiceYes {
-		m.Deps.Dialog.ConfirmingRestoreBackup = false
-		m.Deps.Dialog.RestoreChoiceYes = false
+	if !m.Deps.Dialog.ChoiceYes {
+		m.resetDialog()
 		m.setTabStatus("Restore canceled.", "info")
 		return m, nil
 	}
-	if len(m.Deps.Backups) == 0 || m.Deps.BackupCursor < 0 || m.Deps.BackupCursor >= len(m.Deps.Backups) {
-		m.Deps.Dialog.ConfirmingRestoreBackup = false
-		m.Deps.Dialog.RestoreChoiceYes = false
+	if len(m.Deps.Backups) == 0 || m.Deps.Dialog.Cursor < 0 || m.Deps.Dialog.Cursor >= len(m.Deps.Backups) {
+		m.resetDialog()
 		m.setTabStatus("Restore unavailable: no backup selected.", "error")
 		return m, nil
 	}
 
-	backup := m.Deps.Backups[m.Deps.BackupCursor]
-	m.Deps.Dialog.ConfirmingRestoreBackup = false
-	m.Deps.Dialog.RestoreChoiceYes = false
+	backup := m.Deps.Backups[m.Deps.Dialog.Cursor]
+	m.resetDialog()
 	m.Deps.RestoringBackup = true
 	m.setGlobalStatus("Restoring dependency backup...", "info")
 	return m, utils.RestoreDependencyBackup(m.Deps.ModuleDir, backup.Name, m.Settings.Values.DepsBackupLimit)

@@ -58,4 +58,3 @@ func newTestModel(t *testing.T) Model {
 	m.Layout = styles.LayoutWide
 	return m
 }
-

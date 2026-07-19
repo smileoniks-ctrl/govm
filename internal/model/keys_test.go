@@ -166,10 +166,10 @@ func TestPressUOnDepsOpensConfirmDialog(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
 
-	if !m.Deps.Dialog.ConfirmingUpdate {
-		t.Fatal("expected ConfirmingDependencyUpdate to be true after pressing u on deps tab")
+	if m.Deps.Dialog.Kind != DialogUpdate {
+		t.Fatal("expected update dialog to be open after pressing u on deps tab")
 	}
-	if !m.Deps.Dialog.UpdateChoiceYes {
+	if !m.Deps.Dialog.ChoiceYes {
 		t.Fatal("expected default choice to be Yes")
 	}
 }
@@ -191,7 +191,7 @@ func TestPressUOnDepsWithoutUpdatesShowsMessage(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
 
-	if m.Deps.Dialog.ConfirmingUpdate {
+	if m.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to stay closed when no updates available")
 	}
 	if m.MessageType != "warning" {

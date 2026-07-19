@@ -108,8 +108,7 @@ func BenchmarkView_DepsTab(b *testing.B) {
 func BenchmarkView_DepsTabWithDialog(b *testing.B) {
 	m := benchModel(b)
 	m.CurrentTab = 2
-	m.Deps.Dialog.ConfirmingUpdate = true
-	m.Deps.Dialog.UpdateChoiceYes = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -124,8 +123,7 @@ func BenchmarkView_DepsTabWithPhysicalViewport(b *testing.B) {
 			m.CurrentTab = DepsTab
 			m.TermWidth = width
 			m.TermHeight = 30
-			m.Deps.Dialog.ConfirmingUpdate = true
-			m.Deps.Dialog.UpdateChoiceYes = true
+			m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -156,8 +154,7 @@ func BenchmarkView_DepsTabWithPhysicalViewportWithDialog(b *testing.B) {
 		b.Run(strconv.Itoa(width), func(b *testing.B) {
 			m := benchModelAtViewport(b, width)
 			m.CurrentTab = DepsTab
-			m.Deps.Dialog.ConfirmingUpdate = true
-			m.Deps.Dialog.UpdateChoiceYes = true
+			m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -264,11 +261,14 @@ func BenchmarkRenderDependencyUpdateDialog(b *testing.B) {
 		{Path: "github.com/example/dep2", OldVersion: "v2.0.0", NewVersion: "v2.1.0"},
 		{Path: "github.com/example/dep3", OldVersion: "v3.0.0", NewVersion: "v3.1.0"},
 	}
+	updateYes := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
+	updateNo := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: false}
+	deps := DepsState{UpdateEntries: entries}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		benchStringSink = renderDependencyUpdateDialog(true, entries, viewportSize{Width: 64, Height: 20})
-		benchStringSink = renderDependencyUpdateDialog(false, entries, viewportSize{Width: 64, Height: 20})
+		benchStringSink = updateYes.Render(deps, viewportSize{Width: 64, Height: 20})
+		benchStringSink = updateNo.Render(deps, viewportSize{Width: 64, Height: 20})
 	}
 }
 
@@ -282,6 +282,11 @@ func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
 		Kind:    utils.DependencyBackupKindPreUpdate,
 		Updated: 1,
 	}}
+	checksDialog := ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
+	rollbackDialog := ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
+	restoreDialog := ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
+	rollbackDeps := DepsState{LastCheckResult: result}
+	restoreDeps := DepsState{Backups: backups}
 
 	for _, width := range []int{64, 80} {
 		b.Run(strconv.Itoa(width), func(b *testing.B) {
@@ -289,9 +294,9 @@ func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				viewport := viewportSize{Width: width, Height: 20}
-				benchStringSink = renderDependencyChecksDialog(true, viewport)
-				benchStringSink = renderDependencyRollbackDialog(true, result, viewport)
-				benchStringSink = renderDependencyRestoreDialog(true, backups, 0, viewport)
+				benchStringSink = checksDialog.Render(DepsState{}, viewport)
+				benchStringSink = rollbackDialog.Render(rollbackDeps, viewport)
+				benchStringSink = restoreDialog.Render(restoreDeps, viewport)
 			}
 		})
 	}

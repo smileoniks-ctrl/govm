@@ -12,7 +12,7 @@ import (
 
 func TestDependenciesMsgInvalidatesStaleUpdateConfirmation(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingUpdate = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 	m.Deps.Dependencies = []utils.ModuleDependency{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
 	}
@@ -26,7 +26,7 @@ func TestDependenciesMsgInvalidatesStaleUpdateConfirmation(t *testing.T) {
 	updated, _ := m.Update(incoming)
 	got := updated.(Model)
 
-	if got.Deps.Dialog.ConfirmingUpdate {
+	if got.Deps.Dialog.Kind == DialogUpdate {
 		t.Fatal("expected stale update confirmation to close")
 	}
 	if len(got.Deps.UpdateEntries) != 0 {
@@ -125,11 +125,11 @@ func TestDependencyBackupsMsgOpensRestoreDialog(t *testing.T) {
 	if got.Deps.LoadingBackups {
 		t.Fatal("expected LoadingBackups to be false after backups load")
 	}
-	if !got.Deps.Dialog.ConfirmingRestoreBackup {
+	if got.Deps.Dialog.Kind != DialogRestore {
 		t.Fatal("expected restore dialog to open")
 	}
-	if got.Deps.BackupCursor != 0 {
-		t.Fatalf("expected backup cursor 0, got %d", got.Deps.BackupCursor)
+	if got.Deps.Dialog.Cursor != 0 {
+		t.Fatalf("expected backup cursor 0, got %d", got.Deps.Dialog.Cursor)
 	}
 }
 
@@ -180,11 +180,11 @@ func TestDependenciesUpdatedMsgStoresSnapshotAndOpensChecksDialog(t *testing.T) 
 	if got.Deps.Snapshot == nil {
 		t.Fatal("expected LastDependencySnapshot to be set")
 	}
-	if !got.Deps.Dialog.ConfirmingChecks {
-		t.Fatal("expected ConfirmingDependencyChecks to be true")
+	if got.Deps.Dialog.Kind != DialogChecks {
+		t.Fatal("expected checks dialog to be open")
 	}
-	if !got.Deps.Dialog.CheckChoiceYes {
-		t.Fatal("expected CheckChoiceYes default to be Yes")
+	if !got.Deps.Dialog.ChoiceYes {
+		t.Fatal("expected default choice to be Yes")
 	}
 	if got.MessageType != "success" {
 		t.Fatalf("expected success message, got %q", got.MessageType)
@@ -193,15 +193,14 @@ func TestDependenciesUpdatedMsgStoresSnapshotAndOpensChecksDialog(t *testing.T) 
 
 func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingChecks = true
-	m.Deps.Dialog.CheckChoiceYes = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 	m.Deps.Snapshot = &utils.DependencySnapshot{}
 
 	updated, _ := m.Update(utils.DependencyCheckResultMsg{OK: true})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.ConfirmingChecks {
-		t.Fatal("expected ConfirmingDependencyChecks to close after success")
+	if got.Deps.Dialog.Active() {
+		t.Fatal("expected checks dialog to close after success")
 	}
 	if got.Deps.RunningChecks {
 		t.Fatal("expected RunningDependencyChecks to be false")
@@ -219,8 +218,7 @@ func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
 
 func TestDependencyCheckResultFailOpensRollbackDialog(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingChecks = true
-	m.Deps.Dialog.CheckChoiceYes = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 	m.Deps.RunningChecks = true
 
 	msg := utils.DependencyCheckResultMsg{
@@ -232,14 +230,14 @@ func TestDependencyCheckResultFailOpensRollbackDialog(t *testing.T) {
 	updated, _ := m.Update(msg)
 	got := updated.(Model)
 
-	if got.Deps.Dialog.ConfirmingChecks {
-		t.Fatal("expected ConfirmingDependencyChecks to close on failure")
+	if got.Deps.Dialog.Kind == DialogChecks {
+		t.Fatal("expected checks dialog to close on failure")
 	}
-	if !got.Deps.Dialog.ConfirmingRollback {
-		t.Fatal("expected ConfirmingDependencyRollback to be true")
+	if got.Deps.Dialog.Kind != DialogRollback {
+		t.Fatal("expected rollback dialog to be open")
 	}
-	if !got.Deps.Dialog.RollbackChoiceYes {
-		t.Fatal("expected RollbackChoiceYes default to be Yes")
+	if !got.Deps.Dialog.ChoiceYes {
+		t.Fatal("expected default choice to be Yes")
 	}
 	if got.MessageType != "error" {
 		t.Fatalf("expected error status, got %q", got.MessageType)

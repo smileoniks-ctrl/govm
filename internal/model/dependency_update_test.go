@@ -10,44 +10,47 @@ import (
 
 func TestResetUpdateConfirmationClearsDialogAndEntries(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingUpdate = true
-	m.Deps.Dialog.UpdateChoiceYes = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 	m.Deps.UpdateEntries = []utils.DependencyUpdateEntry{{Path: "example.com/dependency"}}
 
-	m.resetUpdateConfirmation()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got := updated.(Model)
 
-	if m.Deps.Dialog.ConfirmingUpdate || m.Deps.Dialog.UpdateChoiceYes {
-		t.Fatal("expected update dialog state to reset")
+	if got.Deps.Dialog.Active() {
+		t.Fatal("expected update dialog to close on cancel")
 	}
-	if !reflect.DeepEqual(m.Deps.UpdateEntries, []utils.DependencyUpdateEntry(nil)) {
-		t.Fatalf("update entries = %#v, want nil", m.Deps.UpdateEntries)
+	if !reflect.DeepEqual(got.Deps.UpdateEntries, []utils.DependencyUpdateEntry(nil)) {
+		t.Fatalf("update entries = %#v, want nil", got.Deps.UpdateEntries)
 	}
 }
 
 func TestResetChecksConfirmationClearsDialog(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingChecks = true
-	m.Deps.Dialog.CheckChoiceYes = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 
-	m.resetChecksConfirmation()
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	got := updated.(Model)
 
-	if m.Deps.Dialog.ConfirmingChecks || m.Deps.Dialog.CheckChoiceYes {
-		t.Fatal("expected checks dialog state to reset")
+	if got.Deps.Dialog.Active() {
+		t.Fatal("expected checks dialog to close on cancel")
 	}
 }
 
 func TestRestoreBackupDialogEnterTriggersRestoreCmd(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingRestoreBackup = true
-	m.Deps.Dialog.RestoreChoiceYes = true
 	m.Deps.Backups = []utils.DependencyBackupInfo{
 		{Name: "2026-07-09_12-00-00.json"},
+	}
+	m.Deps.Dialog = ConfirmDialog{
+		Kind:      DialogRestore,
+		ChoiceYes: true,
+		MaxCursor: len(m.Deps.Backups) - 1,
 	}
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.ConfirmingRestoreBackup {
+	if got.Deps.Dialog.Active() {
 		t.Fatal("expected restore dialog to close")
 	}
 	if !got.Deps.RestoringBackup {
@@ -81,7 +84,7 @@ func TestEscClosesConfirmDialog(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = updated.(Model)
 
-	if m.Deps.Dialog.ConfirmingUpdate {
+	if m.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to close on esc")
 	}
 	if len(m.Deps.UpdateEntries) != 0 {
@@ -105,14 +108,14 @@ func TestRightArrowTogglesDialogChoice(t *testing.T) {
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
 
-	if !m.Deps.Dialog.UpdateChoiceYes {
+	if !m.Deps.Dialog.ChoiceYes {
 		t.Fatal("expected default to be Yes")
 	}
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = updated.(Model)
 
-	if m.Deps.Dialog.UpdateChoiceYes {
+	if m.Deps.Dialog.ChoiceYes {
 		t.Fatal("expected right arrow to toggle choice to No")
 	}
 }
@@ -135,7 +138,7 @@ func TestConfirmOnNoClosesDialogWithoutUpdate(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 
-	if m.Deps.Dialog.ConfirmingUpdate {
+	if m.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to close after confirm on No")
 	}
 	if m.Deps.Updating {
@@ -160,7 +163,7 @@ func TestConfirmOnYesTriggersUpdateCmd(t *testing.T) {
 	updated, cmd := updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 
-	if m.Deps.Dialog.ConfirmingUpdate {
+	if m.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to close after confirm on Yes")
 	}
 	if !m.Deps.Updating {
@@ -176,19 +179,18 @@ func TestConfirmOnYesTriggersUpdateCmd(t *testing.T) {
 
 func TestRollbackCmdTriggeredByRollbackYes(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingRollback = true
-	m.Deps.Dialog.RollbackChoiceYes = true
 	m.Deps.Snapshot = &utils.DependencySnapshot{
 		ModFile: utils.ModuleFileSnapshot{Exists: true, Content: "old"},
 		SumFile: utils.ModuleFileSnapshot{Exists: true, Content: "oldsum"},
 	}
 	m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{OK: false, Command: "go test ./..."}
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.ConfirmingRollback {
-		t.Fatal("expected ConfirmingDependencyRollback to close")
+	if got.Deps.Dialog.Active() {
+		t.Fatal("expected rollback dialog to close")
 	}
 	if !got.Deps.RollingBack {
 		t.Fatal("expected RollingBackDependencies to be true")
@@ -200,18 +202,17 @@ func TestRollbackCmdTriggeredByRollbackYes(t *testing.T) {
 
 func TestKeepCmdClearsRollbackDialog(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingRollback = true
-	m.Deps.Dialog.RollbackChoiceYes = true
 	m.Deps.Snapshot = &utils.DependencySnapshot{}
 	m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{OK: false, Command: "go test"}
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
 
 	// Toggle to No then confirm.
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.ConfirmingRollback {
-		t.Fatal("expected ConfirmingDependencyRollback to close when keeping updates")
+	if got.Deps.Dialog.Active() {
+		t.Fatal("expected rollback dialog to close when keeping updates")
 	}
 	if got.Deps.RollingBack {
 		t.Fatal("expected RollingBackDependencies to remain false")
@@ -223,13 +224,12 @@ func TestKeepCmdClearsRollbackDialog(t *testing.T) {
 
 func TestEscOnChecksDialogSkipsChecks(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingChecks = true
-	m.Deps.Dialog.CheckChoiceYes = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.ConfirmingChecks {
+	if got.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to close on esc")
 	}
 	if got.Deps.RunningChecks {
@@ -239,13 +239,12 @@ func TestEscOnChecksDialogSkipsChecks(t *testing.T) {
 
 func TestEscOnRollbackDialogKeepsUpdates(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog.ConfirmingRollback = true
-	m.Deps.Dialog.RollbackChoiceYes = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.ConfirmingRollback {
+	if got.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to close on esc")
 	}
 	if got.Deps.RollingBack {

@@ -47,7 +47,7 @@ func TestDepsTabDownDoesNotMoveTableCursorWhileConfirmingUpdate(t *testing.T) {
 	}
 	m.updateDependencyTable()
 	m.Deps.Table.Focus()
-	m.Deps.Dialog.ConfirmingUpdate = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 
 	before := m.Deps.Table.Cursor()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
@@ -69,7 +69,7 @@ func TestDepsTabGlobalUOpensUpdateConfirmationForDirectUpdate(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
 
-	if !m.Deps.Dialog.ConfirmingUpdate {
+	if m.Deps.Dialog.Kind != DialogUpdate {
 		t.Fatal("expected pressing u on Deps tab to open the update confirmation")
 	}
 }

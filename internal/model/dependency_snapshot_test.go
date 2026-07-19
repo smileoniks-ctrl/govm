@@ -75,7 +75,7 @@ func TestDependencySnapshotLifecycle(t *testing.T) {
 			name: "skip checks with false choice clears rollback context",
 			apply: func(t *testing.T, m Model) Model {
 				m = updatedModel(t)
-				m.Deps.Dialog.CheckChoiceYes = false
+				m.Deps.Dialog.ChoiceYes = false
 				updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 				return updated.(Model)
 			},

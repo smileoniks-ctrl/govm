@@ -23,19 +23,19 @@ func TestViewRespectsTerminalWidth(t *testing.T) {
 		{
 			name: "update dialog",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingUpdate = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 			},
 		},
 		{
 			name: "checks dialog",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingChecks = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 			},
 		},
 		{
 			name: "rollback dialog",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingRollback = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
 				m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
 					Command: "go test ./...",
 					Output:  strings.Repeat("failure output ", 12),
@@ -45,7 +45,7 @@ func TestViewRespectsTerminalWidth(t *testing.T) {
 		{
 			name: "restore dialog",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingRestoreBackup = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
 				m.Deps.Backups = []utils.DependencyBackupInfo{{
 					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
 					Kind:    utils.DependencyBackupKindPreUpdate,
@@ -92,19 +92,19 @@ func TestOverlayModalsRespectPhysicalViewport(t *testing.T) {
 		{
 			name: "dependency update",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingUpdate = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 			},
 		},
 		{
 			name: "dependency checks",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingChecks = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 			},
 		},
 		{
 			name: "dependency rollback",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingRollback = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
 				m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
 					Command: "go test ./...",
 					Output: strings.Join([]string{
@@ -118,7 +118,7 @@ func TestOverlayModalsRespectPhysicalViewport(t *testing.T) {
 		{
 			name: "dependency restore",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingRestoreBackup = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
 				m.Deps.Backups = []utils.DependencyBackupInfo{{
 					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
 					Kind:    utils.DependencyBackupKindPreUpdate,
@@ -183,7 +183,7 @@ func TestRollbackDialogLimitsLongOutput(t *testing.T) {
 	m := newTestModel(t)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 	m = updated.(Model)
-	m.Deps.Dialog.ConfirmingRollback = true
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
 
 	output := make([]string, maxDependencyListLines+4)
 	for i := range output {
@@ -228,7 +228,7 @@ func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
 		{
 			name: "update",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingUpdate = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 				m.Deps.Dependencies = []utils.ModuleDependency{{
 					Path:    "github.com/acme/very-long-module-name-that-must-not-overflow-the-terminal",
 					Version: "v1.0.0",
@@ -239,13 +239,13 @@ func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
 		{
 			name: "checks",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingChecks = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 			},
 		},
 		{
 			name: "rollback",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingRollback = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
 				m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
 					Command: "go test ./...",
 					Output:  strings.Repeat("failure output ", 12),
@@ -255,7 +255,7 @@ func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
 		{
 			name: "restore",
 			setup: func(m *Model) {
-				m.Deps.Dialog.ConfirmingRestoreBackup = true
+				m.Deps.Dialog = ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
 				m.Deps.Backups = []utils.DependencyBackupInfo{{
 					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
 					Kind:    utils.DependencyBackupKindPreUpdate,

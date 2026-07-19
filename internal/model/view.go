@@ -57,11 +57,7 @@ func (m Model) View() tea.View {
 	help := renderHelp(
 		m.CurrentTab,
 		m.ConfirmingDelete,
-		m.Deps.Dialog.ConfirmingUpdate,
-		m.Deps.Dialog.ConfirmingChecks,
-		m.Deps.Dialog.ConfirmingRollback,
-		m.Deps.Dialog.ConfirmingRestoreBackup,
-		m.Deps.Dialog.RestoreChoiceYes,
+		m.Deps.Dialog,
 		width,
 	)
 	if m.Settings.EditingDepsBackupLimit {
@@ -75,14 +71,8 @@ func (m Model) View() tea.View {
 
 	if m.Settings.EditingDepsBackupLimit {
 		rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(m.Settings, viewport), viewport)
-	} else if m.Deps.Dialog.ConfirmingUpdate {
-		rendered = overlayDialog(rendered, renderDependencyUpdateDialog(m.Deps.Dialog.UpdateChoiceYes, m.Deps.UpdateEntries, viewport), viewport)
-	} else if m.Deps.Dialog.ConfirmingChecks {
-		rendered = overlayDialog(rendered, renderDependencyChecksDialog(m.Deps.Dialog.CheckChoiceYes, viewport), viewport)
-	} else if m.Deps.Dialog.ConfirmingRollback {
-		rendered = overlayDialog(rendered, renderDependencyRollbackDialog(m.Deps.Dialog.RollbackChoiceYes, m.Deps.LastCheckResult, viewport), viewport)
-	} else if m.Deps.Dialog.ConfirmingRestoreBackup {
-		rendered = overlayDialog(rendered, renderDependencyRestoreDialog(m.Deps.Dialog.RestoreChoiceYes, m.Deps.Backups, m.Deps.BackupCursor, viewport), viewport)
+	} else if m.Deps.Dialog.Active() {
+		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(m.Deps, viewport), viewport)
 	}
 
 	v := tea.NewView(rendered)
@@ -225,11 +215,11 @@ func themeLabel(name config.ThemeName) string {
 	return "Current"
 }
 
-func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChecks, confirmingRollback, confirmingRestore, restoreChoiceYes bool, width int) string {
+func renderHelp(currentTab int, confirmingDelete bool, dialog ConfirmDialog, width int) string {
 	var hints [][2]string
 
-	switch {
-	case confirmingDeps:
+	switch dialog.Kind {
+	case DialogUpdate:
 		hints = [][2]string{
 			{"←/→", "choose"},
 			{"enter", "confirm"},
@@ -237,7 +227,7 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			{"q", "quit"},
 		}
 		return renderKeyHints(hints, width)
-	case confirmingChecks:
+	case DialogChecks:
 		hints = [][2]string{
 			{"←/→", "choose"},
 			{"enter", "confirm"},
@@ -245,16 +235,16 @@ func renderHelp(currentTab int, confirmingDelete, confirmingDeps, confirmingChec
 			{"q", "quit"},
 		}
 		return renderKeyHints(hints, width)
-	case confirmingRollback:
+	case DialogRollback:
 		hints = [][2]string{
 			{"←/→", "choose"},
 			{"enter", "confirm"},
 			{"q", "quit"},
 		}
 		return renderKeyHints(hints, width)
-	case confirmingRestore:
+	case DialogRestore:
 		action := "cancel"
-		if restoreChoiceYes {
+		if dialog.ChoiceYes {
 			action = "restore"
 		}
 		hints = [][2]string{

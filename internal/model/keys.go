@@ -127,8 +127,7 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Deps.UpdateEntries = entries
-		m.Deps.Dialog.ConfirmingUpdate = true
-		m.Deps.Dialog.UpdateChoiceYes = true
+		m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 		m.clearStatus()
 		return m, nil
 	}

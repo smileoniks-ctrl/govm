@@ -93,9 +93,8 @@ type depsOperationState struct {
 	restoringBackup bool
 	snapshot        *utils.DependencySnapshot
 	backups         []utils.DependencyBackupInfo
-	backupCursor    int
 	lastCheckResult *utils.DependencyCheckResultMsg
-	dialog          DepsDialogState
+	dialog          ConfirmDialog
 }
 
 func dependencyOperationState(deps DepsState) depsOperationState {
@@ -111,7 +110,6 @@ func dependencyOperationState(deps DepsState) depsOperationState {
 		restoringBackup: deps.RestoringBackup,
 		snapshot:        deps.Snapshot,
 		backups:         deps.Backups,
-		backupCursor:    deps.BackupCursor,
 		lastCheckResult: deps.LastCheckResult,
 		dialog:          deps.Dialog,
 	}

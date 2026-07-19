@@ -54,14 +54,16 @@ func TestApplyThemeRebuildsDependencyDialogStyles(t *testing.T) {
 		ApplyTheme(styles.ThemeCurrent)
 	})
 
+	checksDialog := ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
+
 	ApplyTheme(styles.ThemeCurrent)
-	currentDialog := renderDependencyChecksDialog(true, viewportSize{Width: 64, Height: 20})
+	currentDialog := checksDialog.Render(DepsState{}, viewportSize{Width: 64, Height: 20})
 
 	if got := ApplyTheme(styles.ThemeLight); got != styles.ThemeLight {
 		t.Fatalf("expected light theme, got %q", got)
 	}
 
-	lightDialog := renderDependencyChecksDialog(true, viewportSize{Width: 64, Height: 20})
+	lightDialog := checksDialog.Render(DepsState{}, viewportSize{Width: 64, Height: 20})
 	if lightDialog == currentDialog {
 		t.Fatal("expected light theme to change dependency dialog output")
 	}

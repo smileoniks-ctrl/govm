@@ -24,17 +24,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if m.Deps.Dialog.ConfirmingUpdate {
-			return m.handleUpdateConfirmKey(msg)
-		}
-		if m.Deps.Dialog.ConfirmingChecks {
-			return m.handleChecksConfirmKey(msg)
-		}
-		if m.Deps.Dialog.ConfirmingRollback {
-			return m.handleRollbackConfirmKey(msg)
-		}
-		if m.Deps.Dialog.ConfirmingRestoreBackup {
-			return m.handleRestoreBackupKey(msg)
+		if m.Deps.Dialog.Active() {
+			return m.handleDialogKey(msg)
 		}
 		return m.handleKey(msg)
 
@@ -88,13 +79,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependenciesMsg:
-		updateConfirmationOpen := m.Deps.Dialog.ConfirmingUpdate
+		updateConfirmationOpen := m.Deps.Dialog.Kind == DialogUpdate
 		m.Deps.Dependencies = msg
 		m.Deps.Loaded = true
 		m.Deps.Checking = false
 		m.updateDependencyTable()
 		if updateConfirmationOpen {
-			m.resetUpdateConfirmation()
+			m.resetDialog()
+			m.Deps.UpdateEntries = nil
 			m.setTabStatus("Dependency updates changed. Please review them again.", "warning")
 		} else {
 			m.clearTabStatus()
@@ -104,13 +96,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case utils.DependencyBackupsMsg:
 		m.Deps.LoadingBackups = false
 		m.Deps.Backups = msg
-		m.Deps.BackupCursor = 0
 		if len(msg) == 0 {
 			m.setTabStatus("No dependency backups found.", "warning")
 			return m, nil
 		}
-		m.Deps.Dialog.ConfirmingRestoreBackup = true
-		m.Deps.Dialog.RestoreChoiceYes = true
+		m.Deps.Dialog = ConfirmDialog{
+			Kind:      DialogRestore,
+			ChoiceYes: true,
+			MaxCursor: len(msg) - 1,
+		}
 		m.setTabStatus("Select a dependency backup to restore.", "info")
 		return m, nil
 
@@ -121,21 +115,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Deps.LastCheckResult = nil
 		m.updateDependencyTable()
 		m.setGlobalStatus(fmt.Sprintf("Updated %d direct %s. Run checks?", msg.Updated, utils.Pluralize(msg.Updated, "dependency", "dependencies")), "success")
-		m.Deps.Dialog.ConfirmingChecks = true
-		m.Deps.Dialog.CheckChoiceYes = true
+		m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 		return m, nil
 
 	case utils.DependencyCheckResultMsg:
 		m.Deps.RunningChecks = false
-		m.resetChecksConfirmation()
+		m.resetDialog()
 		if msg.OK {
 			m.setGlobalStatus("Checks passed.", "success")
 			m.Deps.clearRollbackContext()
 			return m, nil
 		}
 		m.Deps.LastCheckResult = &msg
-		m.Deps.Dialog.ConfirmingRollback = true
-		m.Deps.Dialog.RollbackChoiceYes = true
+		m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
 		m.setGlobalStatus(fmt.Sprintf("Checks failed: %s", msg.Command), "error")
 		return m, nil
 
