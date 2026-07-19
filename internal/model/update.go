@@ -82,7 +82,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updateConfirmationOpen := m.Deps.Dialog.Kind == DialogUpdate
 		m.Deps.Dependencies = msg
 		m.Deps.Loaded = true
-		m.Deps.Checking = false
+		m.Deps.Phase = OpIdle
 		m.updateDependencyTable()
 		if updateConfirmationOpen {
 			m.resetDialog()
@@ -94,7 +94,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependencyBackupsMsg:
-		m.Deps.LoadingBackups = false
+		m.Deps.Phase = OpIdle
 		m.Deps.Backups = msg
 		if len(msg) == 0 {
 			m.setTabStatus("No dependency backups found.", "warning")
@@ -109,7 +109,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependenciesUpdatedMsg:
-		m.Deps.Updating = false
+		m.Deps.Phase = OpIdle
 		m.Deps.Dependencies = msg.Dependencies
 		m.Deps.Snapshot = msg.Snapshot
 		m.Deps.LastCheckResult = nil
@@ -119,7 +119,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependencyCheckResultMsg:
-		m.Deps.RunningChecks = false
+		m.Deps.Phase = OpIdle
 		m.resetDialog()
 		if msg.OK {
 			m.setGlobalStatus("Checks passed.", "success")
@@ -132,7 +132,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependenciesRolledBackMsg:
-		m.Deps.RollingBack = false
+		m.Deps.Phase = OpIdle
 		m.Deps.Dependencies = msg.Dependencies
 		m.Deps.clearRollbackContext()
 		m.updateDependencyTable()
@@ -140,7 +140,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependenciesRestoredMsg:
-		m.Deps.RestoringBackup = false
+		m.Deps.Phase = OpIdle
 		m.Deps.Dependencies = msg.Dependencies
 		m.Deps.clearRollbackContext()
 		m.updateDependencyTable()
@@ -148,24 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependencyErrMsg:
-		if m.Deps.Updating {
-			m.Deps.Updating = false
-		}
-		if m.Deps.Checking {
-			m.Deps.Checking = false
-		}
-		if m.Deps.RunningChecks {
-			m.Deps.RunningChecks = false
-		}
-		if m.Deps.RollingBack {
-			m.Deps.RollingBack = false
-		}
-		if m.Deps.LoadingBackups {
-			m.Deps.LoadingBackups = false
-		}
-		if m.Deps.RestoringBackup {
-			m.Deps.RestoringBackup = false
-		}
+		m.Deps.Reset()
 		if msg.Err != nil {
 			m.setGlobalStatus(msg.Err.Error(), "error")
 			return m, nil

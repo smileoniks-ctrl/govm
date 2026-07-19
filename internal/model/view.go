@@ -115,18 +115,12 @@ func renderMinimumViewport(width, height int) string {
 func (m Model) composeStatus() (string, string) {
 	status := m.Message
 	statusType := m.MessageType
-	if m.Loading || m.Deps.Checking || m.Deps.Updating || m.Deps.RunningChecks || m.Deps.RollingBack || m.Deps.LoadingBackups || m.Deps.RestoringBackup {
+	if m.Loading || m.Deps.operationInProgress() {
 		statusType = "info"
 		if m.InstallingVersion != "" {
 			status = fmt.Sprintf("%s Downloading Go %s", m.Spinner.View(), m.InstallingVersion)
-		} else if m.Deps.RollingBack {
-			status = fmt.Sprintf("%s Rolling back dependencies", m.Spinner.View())
-		} else if m.Deps.RestoringBackup {
-			status = fmt.Sprintf("%s Restoring dependency backup", m.Spinner.View())
-		} else if m.Deps.RunningChecks {
-			status = fmt.Sprintf("%s Running checks", m.Spinner.View())
-		} else if m.Deps.LoadingBackups {
-			status = fmt.Sprintf("%s Loading dependency backups", m.Spinner.View())
+		} else if text := m.Deps.SpinnerText(); text != "" {
+			status = fmt.Sprintf("%s %s", m.Spinner.View(), text)
 		} else if status == "" {
 			status = fmt.Sprintf("%s Loading", m.Spinner.View())
 		}

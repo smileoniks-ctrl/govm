@@ -86,7 +86,7 @@ func (m Model) applyUpdateChoice() (tea.Model, tea.Cmd) {
 	entries := m.Deps.UpdateEntries
 	m.resetDialog()
 	m.Deps.UpdateEntries = nil
-	m.Deps.Updating = true
+	m.Deps.Phase = OpUpdating
 	m.setGlobalStatus("Updating dependencies...", "info")
 	return m, utils.UpdateModuleDependencies(m.Deps.ModuleDir, entries, m.Settings.Values.DepsBackupLimit)
 }
@@ -100,7 +100,7 @@ func (m Model) applyChecksChoice() (tea.Model, tea.Cmd) {
 	}
 
 	m.resetDialog()
-	m.Deps.RunningChecks = true
+	m.Deps.Phase = OpRunningChecks
 	m.setGlobalStatus("Running checks...", "info")
 	return m, utils.RunModuleDependencyChecks(m.Deps.ModuleDir)
 }
@@ -118,7 +118,7 @@ func (m Model) applyRollbackChoice() (tea.Model, tea.Cmd) {
 
 	snap := m.Deps.Snapshot
 	m.resetDialog()
-	m.Deps.RollingBack = true
+	m.Deps.Phase = OpRollingBack
 	m.setGlobalStatus("Rolling back dependencies...", "info")
 	return m, utils.RollbackModuleDependencies(m.Deps.ModuleDir, snap)
 }
@@ -144,7 +144,7 @@ func (m Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
 
 	backup := m.Deps.Backups[m.Deps.Dialog.Cursor]
 	m.resetDialog()
-	m.Deps.RestoringBackup = true
+	m.Deps.Phase = OpRestoringBackup
 	m.setGlobalStatus("Restoring dependency backup...", "info")
 	return m, utils.RestoreDependencyBackup(m.Deps.ModuleDir, backup.Name, m.Settings.Values.DepsBackupLimit)
 }

@@ -53,7 +53,7 @@ func TestRestoreBackupDialogEnterTriggersRestoreCmd(t *testing.T) {
 	if got.Deps.Dialog.Active() {
 		t.Fatal("expected restore dialog to close")
 	}
-	if !got.Deps.RestoringBackup {
+	if got.Deps.Phase != OpRestoringBackup {
 		t.Fatal("expected RestoringBackup to be true")
 	}
 	if cmd == nil {
@@ -141,7 +141,7 @@ func TestConfirmOnNoClosesDialogWithoutUpdate(t *testing.T) {
 	if m.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to close after confirm on No")
 	}
-	if m.Deps.Updating {
+	if m.Deps.Phase == OpUpdating {
 		t.Fatal("expected UpdatingDependencies to be false after choosing No")
 	}
 }
@@ -166,7 +166,7 @@ func TestConfirmOnYesTriggersUpdateCmd(t *testing.T) {
 	if m.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to close after confirm on Yes")
 	}
-	if !m.Deps.Updating {
+	if m.Deps.Phase != OpUpdating {
 		t.Fatal("expected UpdatingDependencies to be true after choosing Yes")
 	}
 	if len(m.Deps.UpdateEntries) != 0 {
@@ -192,7 +192,7 @@ func TestRollbackCmdTriggeredByRollbackYes(t *testing.T) {
 	if got.Deps.Dialog.Active() {
 		t.Fatal("expected rollback dialog to close")
 	}
-	if !got.Deps.RollingBack {
+	if got.Deps.Phase != OpRollingBack {
 		t.Fatal("expected RollingBackDependencies to be true")
 	}
 	if cmd == nil {
@@ -214,7 +214,7 @@ func TestKeepCmdClearsRollbackDialog(t *testing.T) {
 	if got.Deps.Dialog.Active() {
 		t.Fatal("expected rollback dialog to close when keeping updates")
 	}
-	if got.Deps.RollingBack {
+	if got.Deps.Phase == OpRollingBack {
 		t.Fatal("expected RollingBackDependencies to remain false")
 	}
 	if got.MessageType != "warning" {
@@ -232,7 +232,7 @@ func TestEscOnChecksDialogSkipsChecks(t *testing.T) {
 	if got.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to close on esc")
 	}
-	if got.Deps.RunningChecks {
+	if got.Deps.Phase == OpRunningChecks {
 		t.Fatal("expected RunningDependencyChecks to remain false")
 	}
 }
@@ -247,7 +247,7 @@ func TestEscOnRollbackDialogKeepsUpdates(t *testing.T) {
 	if got.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to close on esc")
 	}
-	if got.Deps.RollingBack {
+	if got.Deps.Phase == OpRollingBack {
 		t.Fatal("expected RollingBackDependencies to remain false")
 	}
 }

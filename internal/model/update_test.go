@@ -122,7 +122,7 @@ func TestDependencyBackupsMsgOpensRestoreDialog(t *testing.T) {
 	})
 	got := updated.(Model)
 
-	if got.Deps.LoadingBackups {
+	if got.Deps.Phase == OpLoadingBackups {
 		t.Fatal("expected LoadingBackups to be false after backups load")
 	}
 	if got.Deps.Dialog.Kind != DialogRestore {
@@ -146,7 +146,7 @@ func TestDependenciesUpdatedMsgUpdatesState(t *testing.T) {
 	updated, _ := m.Update(msg)
 	got := updated.(Model)
 
-	if got.Deps.Updating {
+	if got.Deps.Phase == OpUpdating {
 		t.Fatal("expected UpdatingDependencies to be false after update complete")
 	}
 	if len(got.Deps.Dependencies) != 1 {
@@ -174,7 +174,7 @@ func TestDependenciesUpdatedMsgStoresSnapshotAndOpensChecksDialog(t *testing.T) 
 	updated, _ := m.Update(msg)
 	got := updated.(Model)
 
-	if got.Deps.Updating {
+	if got.Deps.Phase == OpUpdating {
 		t.Fatal("expected UpdatingDependencies to be false")
 	}
 	if got.Deps.Snapshot == nil {
@@ -202,7 +202,7 @@ func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
 	if got.Deps.Dialog.Active() {
 		t.Fatal("expected checks dialog to close after success")
 	}
-	if got.Deps.RunningChecks {
+	if got.Deps.Phase == OpRunningChecks {
 		t.Fatal("expected RunningDependencyChecks to be false")
 	}
 	if got.MessageType != "success" {
@@ -219,7 +219,7 @@ func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
 func TestDependencyCheckResultFailOpensRollbackDialog(t *testing.T) {
 	m := newTestModel(t)
 	m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
-	m.Deps.RunningChecks = true
+	m.Deps.Phase = OpRunningChecks
 
 	msg := utils.DependencyCheckResultMsg{
 		OK:      false,
@@ -249,7 +249,7 @@ func TestDependencyCheckResultFailOpensRollbackDialog(t *testing.T) {
 
 func TestDependenciesRolledBackMsgUpdatesState(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.RollingBack = true
+	m.Deps.Phase = OpRollingBack
 	m.Deps.Snapshot = &utils.DependencySnapshot{}
 
 	msg := utils.DependenciesRolledBackMsg{
@@ -264,7 +264,7 @@ func TestDependenciesRolledBackMsgUpdatesState(t *testing.T) {
 	updated, _ := m.Update(msg)
 	got := updated.(Model)
 
-	if got.Deps.RollingBack {
+	if got.Deps.Phase == OpRollingBack {
 		t.Fatal("expected RollingBackDependencies to be false")
 	}
 	if len(got.Deps.Dependencies) != 1 {
@@ -277,12 +277,12 @@ func TestDependenciesRolledBackMsgUpdatesState(t *testing.T) {
 
 func TestDependencyErrDuringRollbackClearsState(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.RollingBack = true
+	m.Deps.Phase = OpRollingBack
 
 	updated, _ := m.Update(utils.DependencyErrMsg{Err: errors.New("boom")})
 	got := updated.(Model)
 
-	if got.Deps.RollingBack {
+	if got.Deps.Phase == OpRollingBack {
 		t.Fatal("expected RollingBackDependencies to be false after err")
 	}
 	if got.MessageType != "error" {

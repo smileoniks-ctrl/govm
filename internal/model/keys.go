@@ -77,7 +77,7 @@ func (m Model) handleTabKey() (tea.Model, tea.Cmd) {
 	m.CurrentTab = (m.CurrentTab + 1) % tabCount
 	// Lazy-load deps on first visit.
 	if m.CurrentTab == DepsTab && !m.Deps.Loaded {
-		m.Deps.Checking = true
+		m.Deps.Phase = OpChecking
 		return m, utils.ListModuleDependencies(m.Deps.ModuleDir)
 	}
 	if m.CurrentTab == SettingsTab {
@@ -120,7 +120,7 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 		m.setTabStatus("You need to install this version first. Press 'i' to install.", "error")
 		return m, nil
 	}
-	if m.CurrentTab == DepsTab && m.Deps.Loaded && !m.Deps.Updating {
+	if m.CurrentTab == DepsTab && m.Deps.Loaded {
 		entries := utils.DirectDependencyUpdateEntries(m.Deps.Dependencies)
 		if len(entries) == 0 {
 			m.setTabStatus("No direct dependency updates available.", "warning")
@@ -136,7 +136,7 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 
 func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab == DepsTab {
-		m.Deps.Checking = true
+		m.Deps.Phase = OpChecking
 		m.setGlobalStatus("Checking for dependency updates...", "info")
 		return m, utils.CheckModuleDependencyUpdates(m.Deps.ModuleDir)
 	}
@@ -146,10 +146,10 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleBackupsKey() (tea.Model, tea.Cmd) {
-	if m.CurrentTab != DepsTab || m.Deps.LoadingBackups || m.Deps.RestoringBackup {
+	if m.CurrentTab != DepsTab {
 		return m, nil
 	}
-	m.Deps.LoadingBackups = true
+	m.Deps.Phase = OpLoadingBackups
 	m.setGlobalStatus("Loading dependency backups...", "info")
 	return m, utils.ListDependencyBackupsCmd(m.Deps.ModuleDir)
 }

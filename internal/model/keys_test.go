@@ -119,7 +119,7 @@ func TestRefreshOnDepsTabTriggersCheckCmd(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r'})
 	m = updated.(Model)
 
-	if !m.Deps.Checking {
+	if m.Deps.Phase != OpChecking {
 		t.Fatal("expected CheckingDependencies to be true after pressing r on deps tab")
 	}
 
@@ -139,7 +139,7 @@ func TestPressBOnDepsTabTriggersBackupListCmd(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'b'})
 	m = updated.(Model)
 
-	if !m.Deps.LoadingBackups {
+	if m.Deps.Phase != OpLoadingBackups {
 		t.Fatal("expected LoadingBackups to be true after pressing b on deps tab")
 	}
 	if cmd == nil {

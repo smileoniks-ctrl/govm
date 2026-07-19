@@ -9,59 +9,33 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
-func TestDepsOperationKeysIgnoreInputWhileOperationInProgress(t *testing.T) {
-	operations := []struct {
-		name string
-		set  func(*DepsState)
-	}{
-		{
-			name: "checking",
-			set: func(deps *DepsState) {
-				deps.Checking = true
-			},
-		},
-		{
-			name: "updating",
-			set: func(deps *DepsState) {
-				deps.Updating = true
-			},
-		},
-		{
-			name: "running checks",
-			set: func(deps *DepsState) {
-				deps.RunningChecks = true
-			},
-		},
-		{
-			name: "rolling back",
-			set: func(deps *DepsState) {
-				deps.RollingBack = true
-			},
-		},
-		{
-			name: "loading backups",
-			set: func(deps *DepsState) {
-				deps.LoadingBackups = true
-			},
-		},
-		{
-			name: "restoring backup",
-			set: func(deps *DepsState) {
-				deps.RestoringBackup = true
-			},
-		},
+// activeDepsPhases lists every DepsOperation value that represents an
+// in-flight operation. OpIdle is intentionally excluded. Tests that
+// need to exercise "any in-flight phase" range over this slice
+// instead of poking individual booleans.
+func activeDepsPhases() []DepsOperation {
+	return []DepsOperation{
+		OpChecking,
+		OpUpdating,
+		OpRunningChecks,
+		OpRollingBack,
+		OpLoadingBackups,
+		OpRestoringBackup,
 	}
+}
+
+func TestDepsOperationKeysIgnoreInputWhileOperationInProgress(t *testing.T) {
 	keys := []string{"u", "r", "b"}
 
-	for _, operation := range operations {
+	for _, phase := range activeDepsPhases() {
 		for _, key := range keys {
-			t.Run(operation.name+"/"+key, func(t *testing.T) {
+			t.Run(phaseName(phase)+"/"+key, func(t *testing.T) {
 				m := newTestModel(t)
 				m.CurrentTab = DepsTab
 				m.Deps.Loaded = true
 				m.Message = "unchanged"
 				m.MessageType = "info"
-				operation.set(&m.Deps)
+				m.Deps.Phase = phase
 				wantState := dependencyOperationState(m.Deps)
 
 				updated, cmd := m.Update(tea.KeyPressMsg{Code: rune(key[0])})
@@ -81,16 +55,32 @@ func TestDepsOperationKeysIgnoreInputWhileOperationInProgress(t *testing.T) {
 	}
 }
 
+// phaseName returns a lowercase human-readable label for a DepsOperation
+// value, used to name subtests.
+func phaseName(p DepsOperation) string {
+	switch p {
+	case OpChecking:
+		return "checking"
+	case OpUpdating:
+		return "updating"
+	case OpRunningChecks:
+		return "running checks"
+	case OpRollingBack:
+		return "rolling back"
+	case OpLoadingBackups:
+		return "loading backups"
+	case OpRestoringBackup:
+		return "restoring backup"
+	default:
+		return "idle"
+	}
+}
+
 type depsOperationState struct {
 	moduleDir       string
 	dependencies    []utils.ModuleDependency
 	loaded          bool
-	checking        bool
-	updating        bool
-	runningChecks   bool
-	rollingBack     bool
-	loadingBackups  bool
-	restoringBackup bool
+	phase           DepsOperation
 	snapshot        *utils.DependencySnapshot
 	backups         []utils.DependencyBackupInfo
 	lastCheckResult *utils.DependencyCheckResultMsg
@@ -102,12 +92,7 @@ func dependencyOperationState(deps DepsState) depsOperationState {
 		moduleDir:       deps.ModuleDir,
 		dependencies:    deps.Dependencies,
 		loaded:          deps.Loaded,
-		checking:        deps.Checking,
-		updating:        deps.Updating,
-		runningChecks:   deps.RunningChecks,
-		rollingBack:     deps.RollingBack,
-		loadingBackups:  deps.LoadingBackups,
-		restoringBackup: deps.RestoringBackup,
+		phase:           deps.Phase,
 		snapshot:        deps.Snapshot,
 		backups:         deps.Backups,
 		lastCheckResult: deps.LastCheckResult,
@@ -116,97 +101,84 @@ func dependencyOperationState(deps DepsState) depsOperationState {
 }
 
 func TestDependencyErrMsgClearsEveryOperationFlag(t *testing.T) {
-	operations := []struct {
-		name  string
-		set   func(*DepsState)
-		isSet func(DepsState) bool
-	}{
-		{
-			name: "checking",
-			set: func(deps *DepsState) {
-				deps.Checking = true
-			},
-			isSet: func(deps DepsState) bool {
-				return deps.Checking
-			},
-		},
-		{
-			name: "updating",
-			set: func(deps *DepsState) {
-				deps.Updating = true
-			},
-			isSet: func(deps DepsState) bool {
-				return deps.Updating
-			},
-		},
-		{
-			name: "running checks",
-			set: func(deps *DepsState) {
-				deps.RunningChecks = true
-			},
-			isSet: func(deps DepsState) bool {
-				return deps.RunningChecks
-			},
-		},
-		{
-			name: "rolling back",
-			set: func(deps *DepsState) {
-				deps.RollingBack = true
-			},
-			isSet: func(deps DepsState) bool {
-				return deps.RollingBack
-			},
-		},
-		{
-			name: "loading backups",
-			set: func(deps *DepsState) {
-				deps.LoadingBackups = true
-			},
-			isSet: func(deps DepsState) bool {
-				return deps.LoadingBackups
-			},
-		},
-		{
-			name: "restoring backup",
-			set: func(deps *DepsState) {
-				deps.RestoringBackup = true
-			},
-			isSet: func(deps DepsState) bool {
-				return deps.RestoringBackup
-			},
-		},
-	}
-
-	for _, operation := range operations {
-		t.Run(operation.name, func(t *testing.T) {
+	for _, phase := range activeDepsPhases() {
+		t.Run(phaseName(phase), func(t *testing.T) {
 			m := newTestModel(t)
-			operation.set(&m.Deps)
+			m.Deps.Phase = phase
 
 			updated, _ := m.Update(utils.DependencyErrMsg{Err: errors.New("operation failed")})
 			got := updated.(Model)
 
-			if operation.isSet(got.Deps) {
-				t.Fatal("expected operation flag to be cleared")
+			if got.Deps.Phase != OpIdle {
+				t.Fatalf("expected phase to reset to OpIdle, got %v", got.Deps.Phase)
 			}
 		})
 	}
+}
 
-	t.Run("all operation flags", func(t *testing.T) {
-		m := newTestModel(t)
-		m.Deps.Checking = true
-		m.Deps.Updating = true
-		m.Deps.RunningChecks = true
-		m.Deps.RollingBack = true
-		m.Deps.LoadingBackups = true
-		m.Deps.RestoringBackup = true
+// TestDepsPhaseTransitions locks in the canonical phase-reset matrix:
+// each completion message maps its corresponding in-flight phase back
+// to OpIdle. This is the artefact that materialises the "tests check
+// transitions, not field mutations" leverage claimed by the refactor.
+func TestDepsPhaseTransitions(t *testing.T) {
+	tests := []struct {
+		name      string
+		fromPhase DepsOperation
+		msg       tea.Msg
+	}{
+		{
+			name:      "checking + DependenciesMsg -> idle",
+			fromPhase: OpChecking,
+			msg:       utils.DependenciesMsg{},
+		},
+		{
+			name:      "updating + DependenciesUpdatedMsg -> idle",
+			fromPhase: OpUpdating,
+			msg:       utils.DependenciesUpdatedMsg{},
+		},
+		{
+			name:      "running checks + DependencyCheckResultMsg (ok) -> idle",
+			fromPhase: OpRunningChecks,
+			msg:       utils.DependencyCheckResultMsg{OK: true},
+		},
+		{
+			name:      "running checks + DependencyCheckResultMsg (failed) -> idle",
+			fromPhase: OpRunningChecks,
+			msg:       utils.DependencyCheckResultMsg{OK: false, Command: "go build", Output: "fail"},
+		},
+		{
+			name:      "rolling back + DependenciesRolledBackMsg -> idle",
+			fromPhase: OpRollingBack,
+			msg:       utils.DependenciesRolledBackMsg{},
+		},
+		{
+			name:      "loading backups + DependencyBackupsMsg -> idle",
+			fromPhase: OpLoadingBackups,
+			msg:       utils.DependencyBackupsMsg{},
+		},
+		{
+			name:      "restoring backup + DependenciesRestoredMsg -> idle",
+			fromPhase: OpRestoringBackup,
+			msg:       utils.DependenciesRestoredMsg{},
+		},
+		{
+			name:      "any phase + DependencyErrMsg -> idle",
+			fromPhase: OpUpdating,
+			msg:       utils.DependencyErrMsg{Err: errors.New("boom")},
+		},
+	}
 
-		updated, _ := m.Update(utils.DependencyErrMsg{Err: errors.New("operation failed")})
-		got := updated.(Model)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.Deps.Phase = tt.fromPhase
 
-		for _, operation := range operations {
-			if operation.isSet(got.Deps) {
-				t.Fatalf("expected %s flag to be cleared", operation.name)
+			updated, _ := m.Update(tt.msg)
+			got := updated.(Model)
+
+			if got.Deps.Phase != OpIdle {
+				t.Fatalf("expected phase = OpIdle after transition, got %v", got.Deps.Phase)
 			}
-		}
-	})
+		})
+	}
 }
