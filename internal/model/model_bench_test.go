@@ -42,7 +42,7 @@ func benchModel(b *testing.B) Model {
 		versions = append(versions, v)
 		items = append(items, styles.Item{
 			Name:            v.Version,
-			DescriptionText: "go" + v.Version + " " + v.Filename,
+			DescriptionText: v.DisplayDescription(),
 			Installed:       v.Installed,
 			Active:          v.Active,
 		})

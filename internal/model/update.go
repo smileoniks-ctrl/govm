@@ -68,7 +68,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i, v := range m.Versions {
 			items[i] = styles.Item{
 				Name:            v.Version,
-				DescriptionText: "go" + v.Version + " " + v.Filename,
+				DescriptionText: v.DisplayDescription(),
 				Installed:       v.Installed,
 				Active:          v.Active,
 			}

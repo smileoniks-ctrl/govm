@@ -33,6 +33,13 @@ type GoVersion struct {
 	Stable    bool
 }
 
+// DisplayDescription returns the human-readable description shown for
+// this version in the Available Versions list. Centralising the format
+// here keeps the TUI list, benchmarks and test fixtures in sync.
+func (v GoVersion) DisplayDescription() string {
+	return "go" + v.Version + " " + v.Filename
+}
+
 // CompareGoVersions compares two Go version strings segment by segment.
 // Segments are parsed as integers; non-numeric segments are treated as 0.
 // A shorter version is considered lesser when it is a prefix of the
