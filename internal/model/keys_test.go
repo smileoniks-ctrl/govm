@@ -87,7 +87,7 @@ func TestInstalledTabArrowKeysMoveTableCursor(t *testing.T) {
 		{Version: "1.24.4", Installed: true, Path: "/p/1.24.4"},
 		{Version: "1.25.0", Installed: true, Path: "/p/1.25.0"},
 	}
-	m.updateInstalledTable()
+	m.rebuildVersionViews()
 	m.InstalledTable.Focus()
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})

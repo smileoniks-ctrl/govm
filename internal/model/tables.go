@@ -1,18 +1,35 @@
 package model
 
 import (
+	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/table"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
-func (m *Model) updateInstalledTable() {
+// rebuildVersionViews is the single owner of the two derived views of
+// m.Versions: the Available Versions list (m.List) and the Installed
+// Versions table (m.InstalledTable). Every msg-handler that mutates
+// m.Versions must call this afterwards so that the list, the table and
+// the source slice never diverge. A nil/empty m.Versions yields an
+// empty list and an empty table.
+func (m *Model) rebuildVersionViews() {
+	items := make([]list.Item, len(m.Versions))
 	installed := 0
-	for _, v := range m.Versions {
+	for i, v := range m.Versions {
+		items[i] = styles.Item{
+			Name:            v.Version,
+			DescriptionText: v.DisplayDescription(),
+			Installed:       v.Installed,
+			Active:          v.Active,
+		}
 		if v.Installed {
 			installed++
 		}
 	}
+	m.List.SetItems(items)
+
 	rows := make([]table.Row, 0, installed)
 	for _, v := range m.Versions {
 		if !v.Installed {

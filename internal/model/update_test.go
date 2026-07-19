@@ -289,3 +289,60 @@ func TestDependencyErrDuringRollbackClearsState(t *testing.T) {
 		t.Fatalf("expected error status, got %q", got.MessageType)
 	}
 }
+
+// newVersionCacheTestModel builds a Model with a multi-version catalog
+// (installed, uninstalled, active) so that Download/Switch/Delete
+// handlers have a non-trivial starting state to mutate. The list and
+// table are populated via rebuildVersionViews so the model starts in a
+// consistent state.
+func newVersionCacheTestModel(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t)
+	m.Versions = []utils.GoVersion{
+		{Version: "1.24.4", Filename: "go1.24.4.darwin-arm64.tar.gz", Installed: true, Active: true, Path: "/p/1.24.4"},
+		{Version: "1.25.0", Filename: "go1.25.0.darwin-arm64.tar.gz", Installed: false},
+		{Version: "1.26.0", Filename: "go1.26.0.darwin-arm64.tar.gz", Installed: true, Active: false, Path: "/p/1.26.0"},
+	}
+	m.rebuildVersionViews()
+	return m
+}
+
+// TestVersionHandlersKeepCachesConsistent dispatches each of the four
+// version-mutating msgs through Update and asserts the postcondition
+// that the Available Versions list and the Installed Versions table
+// remain exact projections of m.Versions afterwards.
+func TestVersionHandlersKeepCachesConsistent(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{
+			name: "VersionsMsg replaces catalog",
+			msg: utils.VersionsMsg{
+				{Version: "1.25.0", Filename: "go1.25.0.linux-amd64.tar.gz", Installed: true, Active: true, Path: "/p/1.25"},
+				{Version: "1.27.0", Filename: "go1.27.0.linux-amd64.tar.gz"},
+			},
+		},
+		{
+			name: "DownloadCompleteMsg marks installed",
+			msg:  utils.DownloadCompleteMsg{Version: "1.25.0", Path: "/new/1.25"},
+		},
+		{
+			name: "SwitchCompletedMsg changes active",
+			msg:  utils.SwitchCompletedMsg{Version: "1.26.0", ShimInPath: true},
+		},
+		{
+			name: "DeleteCompleteMsg marks uninstalled",
+			msg:  utils.DeleteCompleteMsg{Version: "1.24.4"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newVersionCacheTestModel(t)
+			updated, _ := m.Update(tt.msg)
+			got := updated.(Model)
+			assertVersionViewsConsistent(t, got)
+		})
+	}
+}

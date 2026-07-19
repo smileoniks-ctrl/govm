@@ -155,7 +155,7 @@ func TestUpdateInstalledTable_SkipsUninstalled(t *testing.T) {
 		{Version: "1.21.0", Installed: false},
 		{Version: "1.22.0", Installed: true, Path: "/p/1.22"},
 	}
-	m.updateInstalledTable()
+	m.rebuildVersionViews()
 	rows := m.InstalledTable.Rows()
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 installed rows, got %d", len(rows))

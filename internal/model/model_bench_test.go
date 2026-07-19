@@ -5,12 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/config"
-	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -27,7 +25,6 @@ var (
 func benchModel(b *testing.B) Model {
 	b.Helper()
 
-	items := make([]list.Item, 0, 30)
 	versions := make([]utils.GoVersion, 0, 30)
 	for i := 0; i < 30; i++ {
 		v := utils.GoVersion{
@@ -40,12 +37,6 @@ func benchModel(b *testing.B) Model {
 			v.Path = "/Users/example/.govm/versions/go" + v.Version
 		}
 		versions = append(versions, v)
-		items = append(items, styles.Item{
-			Name:            v.Version,
-			DescriptionText: v.DisplayDescription(),
-			Installed:       v.Installed,
-			Active:          v.Active,
-		})
 	}
 
 	depItems := make([]utils.ModuleDependency, 0, 10)
@@ -58,9 +49,9 @@ func benchModel(b *testing.B) Model {
 	}
 
 	m := New("", "", config.DefaultSettings(), "")
-	m.List.SetItems(items)
-	m.List.SetSize(80, 24)
 	m.Versions = versions
+	m.rebuildVersionViews()
+	m.List.SetSize(80, 24)
 	m.Deps.Dependencies = depItems
 	m.Deps.Loaded = true
 	m.Loading = false

@@ -3,7 +3,6 @@ package model
 import (
 	"fmt"
 
-	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
@@ -64,18 +63,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case utils.VersionsMsg:
 		m.Versions = msg
-		items := make([]list.Item, len(m.Versions))
-		for i, v := range m.Versions {
-			items[i] = styles.Item{
-				Name:            v.Version,
-				DescriptionText: v.DisplayDescription(),
-				Installed:       v.Installed,
-				Active:          v.Active,
-			}
-		}
-		m.List.SetItems(items)
 		m.Loading = false
-		m.updateInstalledTable()
+		m.rebuildVersionViews()
 		return m, nil
 
 	case utils.DependenciesMsg:
@@ -171,16 +160,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
-		items := m.List.Items()
-		for i, it := range items {
-			if it.(styles.Item).Name == msg.Version {
-				updatedItem := it.(styles.Item)
-				updatedItem.Installed = true
-				items[i] = updatedItem
-			}
-		}
-		m.List.SetItems(items)
-		m.updateInstalledTable()
+		m.rebuildVersionViews()
 		m.setGlobalStatus(fmt.Sprintf("Successfully installed Go %s", msg.Version), "success")
 		return m, nil
 
@@ -189,14 +169,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i := range m.Versions {
 			m.Versions[i].Active = (m.Versions[i].Version == msg.Version)
 		}
-		items := m.List.Items()
-		for i, it := range items {
-			updatedItem := it.(styles.Item)
-			updatedItem.Active = (updatedItem.Name == msg.Version)
-			items[i] = updatedItem
-		}
-		m.List.SetItems(items)
-		m.updateInstalledTable()
+		m.rebuildVersionViews()
 		if msg.ShimInPath {
 			m.setGlobalStatus(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", msg.Version), "success")
 		} else {
@@ -214,16 +187,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
-		items := m.List.Items()
-		for i, it := range items {
-			if it.(styles.Item).Name == msg.Version {
-				updatedItem := it.(styles.Item)
-				updatedItem.Installed = false
-				items[i] = updatedItem
-			}
-		}
-		m.List.SetItems(items)
-		m.updateInstalledTable()
+		m.rebuildVersionViews()
 		m.setGlobalStatus(fmt.Sprintf("Successfully deleted Go %s", msg.Version), "success")
 		return m, nil
 	}
