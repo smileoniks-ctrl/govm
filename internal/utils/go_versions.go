@@ -183,33 +183,67 @@ func GetShimPathInstructions() string {
 	return "Add to your shell config: export PATH=\"$HOME/.govm/shim:$PATH\""
 }
 
-func FetchGoVersions() tea.Msg {
-	// I randomly put 10 second here
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-	resp, err := client.Get("https://go.dev/dl/?mode=json&include=all")
+// Doer is the minimal HTTP contract FetchGoVersions needs. It is
+// satisfied by *http.Client and by httptest-backed fakes.
+type Doer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
+// goDevFile mirrors the per-file entry in go.dev's /dl/?mode=json
+// payload. The Size field is intentionally omitted: govm never
+// uses it.
+type goDevFile struct {
+	Filename string `json:"filename"`
+	OS       string `json:"os"`
+	Arch     string `json:"arch"`
+}
+
+// goDevRelease mirrors a release entry in go.dev's /dl/?mode=json
+// payload. Version is normalised at the fetch boundary: the "go"
+// prefix sent by go.dev is stripped in fetchGoDevReleases, so
+// downstream code works with bare version strings ("1.22.0",
+// not "go1.22.0").
+type goDevRelease struct {
+	Version string      `json:"version"`
+	Stable  bool        `json:"stable"`
+	Files   []goDevFile `json:"files"`
+}
+
+// fetchGoDevReleases downloads and decodes the go.dev release
+// catalog. The caller owns the client (and its timeout). The
+// returned releases carry versions with the leading "go" prefix
+// already stripped.
+func fetchGoDevReleases(client Doer, url string) ([]goDevRelease, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return ErrMsg(fmt.Errorf("failed to connect to go.dev: %v", err))
+		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return ErrMsg(err)
+		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
 	}
-	var releases []struct {
-		Version string `json:"version"`
-		Stable  bool   `json:"stable"`
-		Files   []struct {
-			Filename string `json:"filename"`
-			OS       string `json:"os"`
-			Arch     string `json:"arch"`
-			Size     int    `json:"size"`
-		} `json:"files"`
+	var releases []goDevRelease
+	if err := json.Unmarshal(body, &releases); err != nil {
+		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
 	}
-	err = json.Unmarshal(body, &releases)
+	for i := range releases {
+		releases[i].Version = strings.TrimPrefix(releases[i].Version, "go")
+	}
+	return releases, nil
+}
+
+func FetchGoVersions() tea.Msg {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	releases, err := fetchGoDevReleases(client, "https://go.dev/dl/?mode=json&include=all")
 	if err != nil {
-		return ErrMsg(fmt.Errorf("failed to parse API response: %v", err))
+		return ErrMsg(err)
 	}
 	currentOS := runtime.GOOS
 	arch := runtime.GOARCH
@@ -243,22 +277,21 @@ func FetchGoVersions() tea.Msg {
 	}
 	var versions []GoVersion
 	for _, release := range releases {
-		version := strings.TrimPrefix(release.Version, "go")
 		for _, file := range release.Files {
 			if file.OS == currentOS && file.Arch == arch {
 				v := GoVersion{
-					Version:   version,
+					Version:   release.Version,
 					Filename:  file.Filename,
 					URL:       "https://go.dev/dl/" + file.Filename,
 					Installed: false,
 					Active:    false,
 					Stable:    release.Stable,
 				}
-				if path, ok := installedVersions[version]; ok {
+				if path, ok := installedVersions[release.Version]; ok {
 					v.Installed = true
 					v.Path = path
 				}
-				if activeVersion == version {
+				if activeVersion == release.Version {
 					v.Active = true
 				}
 				versions = append(versions, v)
