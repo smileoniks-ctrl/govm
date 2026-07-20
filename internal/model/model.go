@@ -33,17 +33,22 @@ type Model struct {
 	Message           string
 	MessageType       string // "success", "error", "warning", or "info"
 	MessageScope      statusScope
+	// Status owns the status triplet (text, kind, scope) as the
+	// StatusLine value-type module. The legacy Message/MessageType/
+	// MessageScope fields above remain until the follow-up commit
+	// migrates every call site and removes them.
+	Status StatusLine
 	// ShimPathWarning is the pre-rendered PATH warning captured before
 	// launching the TUI, so View does not resolve PATH on every render.
-	ShimPathWarning string
-	InstalledTable  table.Model
+	ShimPathWarning  string
+	InstalledTable   table.Model
 	ConfirmingDelete bool
-	DeleteVersion   string
-	Width           int
-	Height          int
-	TermWidth       int
-	TermHeight      int
-	Layout          styles.LayoutMode
+	DeleteVersion    string
+	Width            int
+	Height           int
+	TermWidth        int
+	TermHeight       int
+	Layout           styles.LayoutMode
 
 	// theme is the immutable rendering snapshot used by View and every
 	// renderer. main.go builds it once from settings at startup and
