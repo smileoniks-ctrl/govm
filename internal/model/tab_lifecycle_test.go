@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
 func TestTabSwitchClearsTabLocalStatus(t *testing.T) {
@@ -37,6 +38,32 @@ func TestTabSwitchPreservesGlobalStatus(t *testing.T) {
 	}
 	if got.Status.Kind() != "success" {
 		t.Fatalf("message type = %q, want %q", got.Status.Kind(), "success")
+	}
+}
+
+// TestTabSwitchClearsSwitchedToGoStatus regression-tests the UX rule
+// that the "Switched to Go X" success message is scoped to the tab it
+// was produced on: once the user moves to another tab the message must
+// disappear. The SwitchCompletedMsg handler previously used
+// Status.SetGlobal, so the message survived tab switches and felt like
+// a stale warning stuck on screen.
+func TestTabSwitchClearsSwitchedToGoStatus(t *testing.T) {
+	m := newTestModel(t)
+	// Simulate the switch completing with the shim already on PATH,
+	// which is the branch that produces "Switched to Go X! Run ...".
+	updated, _ := m.Update(utils.SwitchCompletedMsg{Version: "1.26.5", ShimInPath: true})
+	m = updated.(Model)
+
+	if got, want := m.Status.Text(), "Switched to Go 1.26.5! Run 'go version' to verify."; got != want {
+		t.Fatalf("status after switch = %q, want %q", got, want)
+	}
+
+	// Switching tabs must tear down the tab-scoped success message.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: '\t'})
+	got := updated.(Model)
+
+	if got.Status.Text() != "" || got.Status.Kind() != "" {
+		t.Fatalf("status after tab switch = (%q, %q), want empty", got.Status.Text(), got.Status.Kind())
 	}
 }
 

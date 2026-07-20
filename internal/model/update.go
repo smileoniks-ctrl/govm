@@ -165,9 +165,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuildVersionViews()
 		if msg.ShimInPath {
-			m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", msg.Version), "success")
+			// Tab-scoped on purpose: the user has seen the confirmation
+			// on the tab they triggered the switch from, and the message
+			// should be torn down when they move away. Global scope would
+			// leave it stuck on screen across every tab.
+			m.Status.SetTab(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", msg.Version), "success")
 		} else {
-			m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s!\n\n%s",
+			m.Status.SetTab(fmt.Sprintf("Switched to Go %s!\n\n%s",
 				msg.Version, utils.GetShimPathInstructions()), "success")
 		}
 		return m, nil
