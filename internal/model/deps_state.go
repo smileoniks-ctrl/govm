@@ -60,11 +60,17 @@ func (s DepsState) operationInProgress() bool {
 
 // SpinnerText returns the noun phrase to render next to the spinner while
 // a phase is in-flight, or "" if the caller should fall back to its own
-// status text. The phases that return "" (OpChecking, OpUpdating) rely on
-// status text being set imperatively at the start of the operation
-// (e.g. setGlobalStatus("Updating dependencies...", "info")).
+// status text. Every active phase returns a phrase so composeStatus can
+// uniformly prefix the spinner frame; no phase relies on an imperative
+// setGlobalStatus call to surface its progress text. This keeps the
+// status scope consistent (a refresh no longer leaks a global-scope
+// "Checking for dependency updates..." that survives tab switches).
 func (s DepsState) SpinnerText() string {
 	switch s.Phase {
+	case OpChecking:
+		return "Checking for dependency updates"
+	case OpUpdating:
+		return "Updating dependencies"
 	case OpRollingBack:
 		return "Rolling back dependencies"
 	case OpRestoringBackup:

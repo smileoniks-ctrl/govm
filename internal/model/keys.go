@@ -120,6 +120,25 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 		m.setTabStatus("You need to install this version first. Press 'i' to install.", "error")
 		return m, nil
 	}
+	if m.CurrentTab == InstalledTab {
+		row := m.InstalledTable.SelectedRow()
+		if len(row) == 0 {
+			return m, nil
+		}
+		for _, v := range m.Versions {
+			if v.Version != row[0] || !v.Installed {
+				continue
+			}
+			if v.Active {
+				m.setTabStatus(fmt.Sprintf("Go %s is already active.", v.Version), "info")
+				return m, nil
+			}
+			m.Loading = true
+			m.setGlobalStatus(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
+			return m, utils.SwitchVersion(v)
+		}
+		return m, nil
+	}
 	if m.CurrentTab == DepsTab && m.Deps.Loaded {
 		entries := utils.DirectDependencyUpdateEntries(m.Deps.Dependencies)
 		if len(entries) == 0 {
@@ -137,7 +156,12 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab == DepsTab {
 		m.Deps.Phase = OpChecking
-		m.setGlobalStatus("Checking for dependency updates...", "info")
+		// Progress text comes from DepsState.SpinnerText() while the
+		// phase is in-flight, so we only need to clear any stale status
+		// here. Using clearStatus (rather than setGlobalStatus) keeps
+		// the scope tab-local, which lets the DependenciesMsg handler
+		// tear it down cleanly when the check finishes.
+		m.clearStatus()
 		return m, utils.CheckModuleDependencyUpdates(m.Deps.ModuleDir)
 	}
 	m.Loading = true
