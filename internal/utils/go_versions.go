@@ -239,6 +239,47 @@ func fetchGoDevReleases(client Doer, url string) ([]goDevRelease, error) {
 	return releases, nil
 }
 
+// buildVersionCatalog builds the user-facing version list by joining
+// the go.dev release catalog with the local view of installed and
+// active versions. For each release, the first file matching the
+// current OS/Arch wins (consistent with the original behaviour). The
+// returned slice is sorted highest-version-first by the caller.
+//
+// The function is pure: no I/O, no clocks, no global state. That
+// makes the merge logic (release selection, installed/active flags,
+// URL construction) independently testable.
+func buildVersionCatalog(
+	releases []goDevRelease,
+	currentOS, arch string,
+	installed map[string]string,
+	activeVersion string,
+) []GoVersion {
+	var versions []GoVersion
+	for _, release := range releases {
+		for _, file := range release.Files {
+			if file.OS != currentOS || file.Arch != arch {
+				continue
+			}
+			v := GoVersion{
+				Version:  release.Version,
+				Filename: file.Filename,
+				URL:      "https://go.dev/dl/" + file.Filename,
+				Stable:   release.Stable,
+			}
+			if path, ok := installed[release.Version]; ok {
+				v.Installed = true
+				v.Path = path
+			}
+			if activeVersion == release.Version {
+				v.Active = true
+			}
+			versions = append(versions, v)
+			break
+		}
+	}
+	return versions
+}
+
 func FetchGoVersions() tea.Msg {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -278,30 +319,7 @@ func FetchGoVersions() tea.Msg {
 	if err != nil {
 		return ErrMsg(err)
 	}
-	var versions []GoVersion
-	for _, release := range releases {
-		for _, file := range release.Files {
-			if file.OS == currentOS && file.Arch == arch {
-				v := GoVersion{
-					Version:   release.Version,
-					Filename:  file.Filename,
-					URL:       "https://go.dev/dl/" + file.Filename,
-					Installed: false,
-					Active:    false,
-					Stable:    release.Stable,
-				}
-				if path, ok := installedVersions[release.Version]; ok {
-					v.Installed = true
-					v.Path = path
-				}
-				if activeVersion == release.Version {
-					v.Active = true
-				}
-				versions = append(versions, v)
-				break
-			}
-		}
-	}
+	versions := buildVersionCatalog(releases, currentOS, arch, installedVersions, activeVersion)
 	sortGoVersionRecordsDesc(versions)
 	return VersionsMsg(versions)
 }
