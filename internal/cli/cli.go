@@ -5,7 +5,6 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -146,7 +145,8 @@ func findMatchingVersion(version string) (utils.GoVersion, error) {
 
 // findInstalledVersion mirrors findMatchingVersion but reads the
 // installed govm versions directly from disk so the CLI works
-// without contacting go.dev.
+// without contacting go.dev. It shares the same disk view as the
+// TUI via utils.ScanInstalledVersions (W-fix for candidate 9).
 func findInstalledVersion(version string) (utils.GoVersion, error) {
 	resolver := paths.New()
 	goVersionsDir, err := resolver.VersionsDir()
@@ -154,41 +154,24 @@ func findInstalledVersion(version string) (utils.GoVersion, error) {
 		return utils.GoVersion{}, fmt.Errorf("failed to get home directory: %v", err)
 	}
 
-	query := utils.NormalizeGoVersionQuery(version)
-	entries, err := os.ReadDir(goVersionsDir)
+	installed, err := utils.ScanInstalledVersions(goVersionsDir)
 	if err != nil {
 		return utils.GoVersion{}, fmt.Errorf("failed to read versions directory: %v", err)
 	}
 
-	var versions []string
-	versionToPath := make(map[string]string)
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "go") {
-			continue
-		}
-		versionStr := strings.TrimPrefix(entry.Name(), "go")
-		if versionStr == "" {
-			continue
-		}
-		path := filepath.Join(goVersionsDir, entry.Name())
-		if !paths.IsDirectChild(goVersionsDir, path) {
-			continue
-		}
-		versions = append(versions, versionStr)
-		versionToPath[versionStr] = path
+	query := utils.NormalizeGoVersionQuery(version)
+	versions := make([]string, 0, len(installed))
+	for v := range installed {
+		versions = append(versions, v)
 	}
 
 	matched, ok := utils.FindLatestGoVersion(versions, query)
 	if !ok {
 		return utils.GoVersion{}, fmt.Errorf("no installed version matching '%s' found", version)
 	}
-	path := versionToPath[matched]
-	if !paths.IsDirectChild(goVersionsDir, path) {
-		return utils.GoVersion{}, fmt.Errorf("no installed version matching '%s' found", version)
-	}
 	return utils.GoVersion{
 		Version:   matched,
-		Path:      path,
+		Path:      installed[matched],
 		Installed: true,
 	}, nil
 }

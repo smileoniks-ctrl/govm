@@ -263,17 +263,9 @@ func FetchGoVersions() tea.Msg {
 	} else {
 		activeVersion = GetCurrentGoVersion()
 	}
-	installedVersions := map[string]string{}
-	entries, _ := os.ReadDir(goVersionsDir)
-	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), "go") {
-			versionPath := filepath.Join(goVersionsDir, entry.Name())
-			version := strings.TrimPrefix(entry.Name(), "go")
-			goBin := filepath.Join(versionPath, "bin", "go")
-			if _, err := os.Stat(goBin); err == nil {
-				installedVersions[version] = versionPath
-			}
-		}
+	installedVersions, err := ScanInstalledVersions(goVersionsDir)
+	if err != nil {
+		return ErrMsg(err)
 	}
 	var versions []GoVersion
 	for _, release := range releases {
@@ -301,6 +293,47 @@ func FetchGoVersions() tea.Msg {
 	}
 	sortGoVersionRecordsDesc(versions)
 	return VersionsMsg(versions)
+}
+
+// ScanInstalledVersions walks the govm versions directory and returns
+// the versions that are usable. An entry must:
+//   - be a directory whose name starts with "go" followed by a
+//     non-empty version segment,
+//   - be a direct child of goVersionsDir (guards against path
+//     traversal via symlinked entries),
+//   - contain a bin/go binary (the entry point govm activates).
+//
+// The returned map is keyed by the bare version string (no "go"
+// prefix) and valued by the absolute path to the version directory.
+//
+// ScanInstalledVersions is exported so the CLI shares the same disk
+// view as the TUI (W-fix for candidate 9): previously cli.go had a
+// parallel copy of this logic.
+func ScanInstalledVersions(goVersionsDir string) (map[string]string, error) {
+	entries, err := os.ReadDir(goVersionsDir)
+	if err != nil {
+		return nil, fmt.Errorf("scan installed versions: %w", err)
+	}
+	installed := make(map[string]string)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "go") {
+			continue
+		}
+		versionStr := strings.TrimPrefix(entry.Name(), "go")
+		if versionStr == "" {
+			continue
+		}
+		path := filepath.Join(goVersionsDir, entry.Name())
+		if !paths.IsDirectChild(goVersionsDir, path) {
+			continue
+		}
+		goBin := filepath.Join(path, "bin", "go")
+		if _, err := os.Stat(goBin); err != nil {
+			continue
+		}
+		installed[versionStr] = path
+	}
+	return installed, nil
 }
 
 func GetCurrentGoVersion() string {
