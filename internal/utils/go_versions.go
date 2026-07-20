@@ -281,24 +281,25 @@ func buildVersionCatalog(
 }
 
 func FetchGoVersions() tea.Msg {
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
+	client := &http.Client{Timeout: 10 * time.Second}
 	releases, err := fetchGoDevReleases(client, "https://go.dev/dl/?mode=json&include=all")
 	if err != nil {
 		return ErrMsg(err)
 	}
-	currentOS := runtime.GOOS
-	arch := runtime.GOARCH
+
 	resolver := paths.New()
 	goVersionsDir, err := resolver.VersionsDir()
 	if err != nil {
 		return ErrMsg(err)
 	}
-	err = os.MkdirAll(goVersionsDir, 0755)
+	if err := ensureVersionsDir(goVersionsDir); err != nil {
+		return ErrMsg(err)
+	}
+	installed, err := ScanInstalledVersions(goVersionsDir)
 	if err != nil {
 		return ErrMsg(err)
 	}
+
 	activeVersionFile, err := resolver.ActiveVersionFile()
 	if err != nil {
 		return ErrMsg(err)
@@ -315,13 +316,22 @@ func FetchGoVersions() tea.Msg {
 		// function.
 		activeVersion = GetCurrentGoVersion()
 	}
-	installedVersions, err := ScanInstalledVersions(goVersionsDir)
-	if err != nil {
-		return ErrMsg(err)
-	}
-	versions := buildVersionCatalog(releases, currentOS, arch, installedVersions, activeVersion)
+
+	versions := buildVersionCatalog(releases, runtime.GOOS, runtime.GOARCH, installed, activeVersion)
 	sortGoVersionRecordsDesc(versions)
 	return VersionsMsg(versions)
+}
+
+// ensureVersionsDir guarantees that the govm versions directory
+// exists. ScanInstalledVersions treats a missing directory as an
+// error rather than as an empty result, so callers must create the
+// directory first. Extracted from FetchGoVersions so the write
+// side-effect is named rather than buried in the read path.
+func ensureVersionsDir(goVersionsDir string) error {
+	if err := os.MkdirAll(goVersionsDir, 0755); err != nil {
+		return fmt.Errorf("ensure govm versions dir: %w", err)
+	}
+	return nil
 }
 
 // ScanInstalledVersions walks the govm versions directory and returns
