@@ -7,8 +7,10 @@ package utils
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -256,11 +258,20 @@ func FetchGoVersions() tea.Msg {
 	if err != nil {
 		return ErrMsg(err)
 	}
-	activeVersion := ""
 	activeVersionFile, err := resolver.ActiveVersionFile()
-	if versionBytes, err := os.ReadFile(activeVersionFile); err == nil {
-		activeVersion = string(versionBytes)
-	} else {
+	if err != nil {
+		return ErrMsg(err)
+	}
+	activeVersion, err := readActiveVersion(activeVersionFile)
+	if err != nil {
+		return ErrMsg(err)
+	}
+	if activeVersion == "" {
+		// Fresh install or no active version recorded yet: fall back
+		// to whatever go is on PATH so the catalog can still mark the
+		// active toolchain. The exec-fallback stays in the orchestrator
+		// (decision ii) so readActiveVersion remains a pure disk
+		// function.
 		activeVersion = GetCurrentGoVersion()
 	}
 	installedVersions, err := ScanInstalledVersions(goVersionsDir)
@@ -334,6 +345,28 @@ func ScanInstalledVersions(goVersionsDir string) (map[string]string, error) {
 		installed[versionStr] = path
 	}
 	return installed, nil
+}
+
+// readActiveVersion reads the govm active-version file. It returns:
+//   - ("", nil) when the file does not exist (fresh install). The
+//     orchestrator decides what to do, typically falling back to the
+//     go binary found on PATH.
+//   - ("", err) on any other read failure (e.g. permission denied).
+//     This surfaces latent bug (I): previously the outer err from
+//     Resolver.ActiveVersionFile was shadowed and swallowed, masking
+//     permission errors as "no active version" and silently falling
+//     back to a possibly-unrelated system go.
+//   - (version, nil) on success. The version string is the raw file
+//     contents; no normalisation is applied.
+func readActiveVersion(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read active version file: %w", err)
+	}
+	return string(data), nil
 }
 
 func GetCurrentGoVersion() string {
