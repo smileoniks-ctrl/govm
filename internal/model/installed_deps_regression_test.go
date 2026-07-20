@@ -99,3 +99,38 @@ func TestDepsTab_CheckPhaseShowsSpinner(t *testing.T) {
 		t.Fatalf("expected status to mention 'Checking', got %q", plain)
 	}
 }
+
+// TestDepsTab_BackupsPhaseStartsEmpty regression-tests a bug where
+// pressing `b` on the Deps tab leaked a global-scope "Loading
+// dependency backups..." status across tab switches. handleBackupsKey
+// used Status.SetGlobal (global scope) but the load is in-flight and
+// its progress text already comes from DepsState.SpinnerText(); the
+// global scope meant the message survived tab switches in the window
+// between handleBackupsKey and DependencyBackupsMsg. The fix mirrors
+// handleRefreshKey: Status.Clear() keeps the scope tab-local.
+func TestDepsTab_BackupsPhaseStartsEmpty(t *testing.T) {
+	m := newTestModel(t)
+	// Switch to DepsTab (also lazy-loads).
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
+	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
+	updated, _ = updated.Update(utils.DependenciesMsg{})
+	m = updated.(Model)
+
+	// Press 'b' to start loading backups.
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'b'})
+	m = updated.(Model)
+	if m.Deps.Phase != OpLoadingBackups {
+		t.Fatalf("phase = %v, want OpLoadingBackups", m.Deps.Phase)
+	}
+
+	// While the load is in-flight, the status must be empty: progress
+	// text is rendered by composeStatus via DepsState.SpinnerText(), so
+	// a non-empty Status.Text() here means a second writer leaked a
+	// global-scope message that survives tab switches.
+	if got := m.Status.Text(); got != "" {
+		t.Fatalf("expected status to be empty during OpLoadingBackups (spinner renders progress), got %q", got)
+	}
+	if m.Status.Scope() != statusScopeTab {
+		t.Fatalf("expected status scope to be tab-local, got %v", m.Status.Scope())
+	}
+}

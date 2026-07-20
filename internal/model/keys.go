@@ -174,7 +174,12 @@ func (m Model) handleBackupsKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.Deps.Phase = OpLoadingBackups
-	m.Status.SetGlobal("Loading dependency backups...", "info")
+	// Progress text comes from DepsState.SpinnerText() while the
+	// phase is in-flight, so we only need to clear any stale status
+	// here. Using Status.Clear (rather than Status.SetGlobal) keeps
+	// the scope tab-local, which lets the DependencyBackupsMsg
+	// handler tear it down cleanly when the load finishes.
+	m.Status.Clear()
 	return m, utils.ListDependencyBackupsCmd(m.Deps.ModuleDir)
 }
 
