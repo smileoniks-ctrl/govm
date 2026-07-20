@@ -98,11 +98,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependenciesUpdatedMsg:
-		m.Deps.Phase = OpIdle
-		m.Deps.Dependencies = msg.Dependencies
+		m.setUpdatedDependencies(msg.Dependencies)
 		m.Deps.Snapshot = msg.Snapshot
 		m.Deps.LastCheckResult = nil
-		m.updateDependencyTable()
 		m.Status.SetGlobal(fmt.Sprintf("Updated %d direct %s. Run checks?", msg.Updated, utils.Pluralize(msg.Updated, "dependency", "dependencies")), "success")
 		m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 		return m, nil
@@ -121,18 +119,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case utils.DependenciesRolledBackMsg:
-		m.Deps.Phase = OpIdle
-		m.Deps.Dependencies = msg.Dependencies
+		m.setUpdatedDependencies(msg.Dependencies)
 		m.Deps.clearRollbackContext()
-		m.updateDependencyTable()
 		m.Status.SetGlobal("Rolled back to pre-update state.", "success")
 		return m, nil
 
 	case utils.DependenciesRestoredMsg:
-		m.Deps.Phase = OpIdle
-		m.Deps.Dependencies = msg.Dependencies
+		m.setUpdatedDependencies(msg.Dependencies)
 		m.Deps.clearRollbackContext()
-		m.updateDependencyTable()
 		m.Status.SetGlobal(fmt.Sprintf("Restored dependencies from %s.", msg.BackupName), "success")
 		return m, nil
 

@@ -13,6 +13,20 @@ func (m *Model) resetDialog() {
 	m.Deps.Dialog = ConfirmDialog{}
 }
 
+// setUpdatedDependencies applies the shared bookkeeping spine common
+// to every deps-result handler (DependenciesUpdatedMsg,
+// DependenciesRolledBackMsg, DependenciesRestoredMsg): reset the
+// operation phase, store the freshly delivered dependency list, and
+// rebuild the dependency table. Per-msg divergent tails (snapshot
+// retention, dialog open, rollback-context teardown) stay inline in
+// the handlers. Full unification of the workflow is deferred to the
+// proposed Dep Update Cycle module.
+func (m *Model) setUpdatedDependencies(deps []utils.ModuleDependency) {
+	m.Deps.Phase = OpIdle
+	m.Deps.Dependencies = deps
+	m.updateDependencyTable()
+}
+
 // handleDialogKey is the single entry point for key presses while a
 // dependency confirmation dialog is open. Pure key handling (choice
 // toggle, list navigation for restore) lives in ConfirmDialog.Handle;
