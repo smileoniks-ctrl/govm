@@ -19,6 +19,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "tab":
 		return m.handleTabKey()
+	case "shift+tab":
+		return m.handleShiftTabKey()
 	}
 	if m.CurrentTab == SettingsTab {
 		return m.handleSettingsKey(msg)
@@ -72,9 +74,16 @@ func (m Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 	return m, nil
 }
 
-func (m Model) handleTabKey() (tea.Model, tea.Cmd) {
+// switchTab moves focus to the target tab and runs every side-effect
+// that must fire on arrival regardless of direction: it tears down the
+// previous tab's context (tab-scoped status + pending delete
+// confirmation), lazy-loads the Deps tab on first visit, and asks the
+// renderer to clear the screen when entering the Settings tab. Tab
+// (forward) and Shift+Tab (reverse) both route through here so both
+// directions share the same invariants.
+func (m Model) switchTab(target int) (tea.Model, tea.Cmd) {
 	m.clearTabContext()
-	m.CurrentTab = (m.CurrentTab + 1) % tabCount
+	m.CurrentTab = target
 	// Lazy-load deps on first visit.
 	if m.CurrentTab == DepsTab && !m.Deps.Loaded {
 		m.Deps.Phase = OpChecking
@@ -84,6 +93,17 @@ func (m Model) handleTabKey() (tea.Model, tea.Cmd) {
 		return m, tea.ClearScreen
 	}
 	return m, nil
+}
+
+func (m Model) handleTabKey() (tea.Model, tea.Cmd) {
+	return m.switchTab((m.CurrentTab + 1) % tabCount)
+}
+
+// handleShiftTabKey is the reverse-direction mirror of handleTabKey:
+// it moves focus to the previous tab in cycle order, wrapping from
+// Available back to Settings.
+func (m Model) handleShiftTabKey() (tea.Model, tea.Cmd) {
+	return m.switchTab((m.CurrentTab - 1 + tabCount) % tabCount)
 }
 
 func (m Model) handleInstallKey() (tea.Model, tea.Cmd) {

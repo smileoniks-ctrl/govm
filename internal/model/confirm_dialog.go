@@ -78,7 +78,7 @@ func (d ConfirmDialog) Handle(msg tea.KeyPressMsg) (ConfirmDialog, DialogAction)
 	}
 
 	switch msg.String() {
-	case "left", "right", "tab", "h", "l":
+	case "left", "right", "tab", "shift+tab", "h", "l":
 		d.ChoiceYes = !d.ChoiceYes
 		return d, DialogNoop
 	case "enter":

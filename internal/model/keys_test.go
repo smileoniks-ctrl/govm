@@ -58,6 +58,108 @@ func TestHandleTabKeyClearsScreenWhenSwitchingToSettings(t *testing.T) {
 	}
 }
 
+// shiftTab constructs a KeyPressMsg for Shift+Tab, mirroring the wire
+// format produced by bubbletea v2 (KeyTab code + ModShift modifier).
+func shiftTab() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
+}
+
+func TestShiftTabSwitchesInReverseCycle(t *testing.T) {
+	m := newTestModel(t)
+
+	if m.CurrentTab != AvailableTab {
+		t.Fatalf("expected initial tab %d, got %d", AvailableTab, m.CurrentTab)
+	}
+
+	// Available -> Settings (wraps backwards).
+	updated, _ := m.Update(shiftTab())
+	m = updated.(Model)
+	if m.CurrentTab != SettingsTab {
+		t.Fatalf("expected settings tab after first reverse switch, got %d", m.CurrentTab)
+	}
+
+	// Settings -> Deps.
+	updated, _ = m.Update(shiftTab())
+	m = updated.(Model)
+	if m.CurrentTab != DepsTab {
+		t.Fatalf("expected deps tab after second reverse switch, got %d", m.CurrentTab)
+	}
+
+	// Deps -> Installed.
+	updated, _ = m.Update(shiftTab())
+	m = updated.(Model)
+	if m.CurrentTab != InstalledTab {
+		t.Fatalf("expected installed tab after third reverse switch, got %d", m.CurrentTab)
+	}
+
+	// Installed -> Available.
+	updated, _ = m.Update(shiftTab())
+	m = updated.(Model)
+	if m.CurrentTab != AvailableTab {
+		t.Fatalf("expected available tab after fourth reverse switch, got %d", m.CurrentTab)
+	}
+}
+
+func TestHandleShiftTabKeyClearsScreenWhenSwitchingToSettings(t *testing.T) {
+	m := newTestModel(t)
+	// On Available tab, reverse navigation wraps to Settings.
+	m.CurrentTab = AvailableTab
+
+	updated, cmd := m.handleShiftTabKey()
+	if got := updated.(Model).CurrentTab; got != SettingsTab {
+		t.Fatalf("current tab = %d, want %d", got, SettingsTab)
+	}
+	if cmd == nil {
+		t.Fatal("expected clear screen command when switching to settings")
+	}
+	if got, want := reflect.TypeOf(cmd()), reflect.TypeOf(tea.ClearScreen()); got != want {
+		t.Fatalf("command message type = %v, want %v", got, want)
+	}
+}
+
+// TestShiftTabCancelsPendingDelete mirrors the forward-Tab contract:
+// switching tabs tears down the pending delete-confirmation context,
+// not just for Tab but for the reverse direction too.
+func TestShiftTabCancelsPendingDelete(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = InstalledTab
+	m.ConfirmingDelete = true
+	m.DeleteVersion = "1.24.4"
+
+	updated, _ := m.handleShiftTabKey()
+	m = updated.(Model)
+
+	if m.ConfirmingDelete {
+		t.Fatal("expected pending delete confirmation to be cancelled on reverse tab switch")
+	}
+	if m.DeleteVersion != "" {
+		t.Fatalf("expected delete version cleared, got %q", m.DeleteVersion)
+	}
+	if got, want := m.CurrentTab, AvailableTab; got != want {
+		t.Fatalf("current tab = %d, want %d (reverse of Installed)", got, want)
+	}
+}
+
+// TestConfirmDialogShiftTabTogglesChoice mirrors Tab inside the Deps
+// confirm dialog: Shift+Tab flips the Yes/No selection rather than
+// escaping the dialog, matching desktop conventions for 2-button dialogs.
+func TestConfirmDialogShiftTabTogglesChoice(t *testing.T) {
+	d := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
+
+	got, action := d.Handle(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if action != DialogNoop {
+		t.Fatalf("expected DialogNoop, got %v", action)
+	}
+	if got.ChoiceYes {
+		t.Fatal("expected Shift+Tab to flip ChoiceYes from true to false")
+	}
+
+	got, _ = got.Handle(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if !got.ChoiceYes {
+		t.Fatal("expected second Shift+Tab to flip ChoiceYes back to true")
+	}
+}
+
 func TestAvailableTabArrowKeysMoveListSelection(t *testing.T) {
 	m := newTestModel(t)
 	m.List.SetItems([]list.Item{

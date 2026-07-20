@@ -93,7 +93,7 @@ Launch the interactive TUI by running govm without arguments:
 govm
 ```
 
-The TUI has four tabs that you cycle through with `Tab`:
+The TUI has four tabs that you cycle through with `Tab` (forward) and `Shift+Tab` (backward):
 
 - **Available** - all Go versions available for download from go.dev
 - **Installed** - Go versions installed locally on your system
@@ -114,7 +114,8 @@ The TUI header shows the GoVM version so you always know which build is running.
 
 | Key | Action |
 |---|---|
-| `Tab` | Cycle between Available, Installed, Deps, and Settings tabs |
+| `Tab` | Cycle forward between Available, Installed, Deps, and Settings tabs |
+| `Shift+Tab` | Cycle backward to the previous tab (wraps from Available to Settings) |
 | `i` | Install the selected version (Available tab) |
 | `u` | Switch to the selected version (Available tab) or update direct dependencies (Deps tab) |
 | `d` | Delete the selected installed version with confirmation (Available/Installed tabs) |
@@ -131,7 +132,7 @@ Confirmation dialogs (for dependency updates, post-update checks, and rollback) 
 
 | Key | Action |
 |---|---|
-| `←/→`, `Tab`, `h/l` | Switch the highlighted choice |
+| `←/→`, `Tab`/`Shift+Tab`, `h/l` | Switch the highlighted choice |
 | `enter` | Confirm the highlighted choice |
 | `y` | Accept |
 | `n` / `esc` | Cancel or skip (context dependent) |
@@ -271,7 +272,7 @@ The **Settings** tab lets you customise GoVM's behaviour. Settings are saved aut
 | `↑/↓`, `k/j` | Move the cursor between settings |
 | `enter`, `space` | Toggle the highlighted setting; on the Deps backups row it opens a numeric input dialog |
 | `←/→`, `h/l` | Toggle the highlighted setting; on the Deps backups row they bump the limit by 1 (wrapping at the bounds) |
-| `tab` | Switch to the next tab |
+| `tab` / `shift+tab` | Switch to the next / previous tab |
 
 #### Editing the backup limit
 
