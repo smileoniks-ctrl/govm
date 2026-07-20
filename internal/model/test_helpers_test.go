@@ -17,12 +17,25 @@ func stripANSI(s string) string {
 	return ansiPattern.ReplaceAllString(s, "")
 }
 
+// testTheme returns the canonical theme used by model tests. It is a
+// pure value (no global state), so tests can run in parallel and can
+// pass the same theme to both Model.New and ConfirmDialog.Render.
+func testTheme() styles.Theme {
+	return styles.NewTheme(config.ThemeCurrent)
+}
+
 // assertVersionViewsConsistent verifies the postcondition that
 // rebuildVersionViews is responsible for: the Available Versions list
 // and the Installed Versions table must be exact projections of
 // m.Versions. Used after msg-dispatch in update tests to catch any
 // handler that mutates m.Versions without keeping the derived views in
 // sync.
+//
+// Item no longer carries Installed/Active directly (those were only
+// ever consumed by Title()); instead we assert that RenderedTitle is
+// the string RenderItemTitle would produce for the source version, so
+// a regression that re-introduces live theme reads inside Title() is
+// caught here as well as in styles_test.go.
 func assertVersionViewsConsistent(t *testing.T, m Model) {
 	t.Helper()
 
@@ -46,11 +59,8 @@ func assertVersionViewsConsistent(t *testing.T, m Model) {
 		if it.DescriptionText != v.DisplayDescription() {
 			t.Errorf("list item %d DescriptionText = %q, want %q", i, it.DescriptionText, v.DisplayDescription())
 		}
-		if it.Installed != v.Installed {
-			t.Errorf("list item %d Installed = %v, want %v", i, it.Installed, v.Installed)
-		}
-		if it.Active != v.Active {
-			t.Errorf("list item %d Active = %v, want %v", i, it.Active, v.Active)
+		if wantTitle := styles.RenderItemTitle(m.theme, v.Version, v.Installed, v.Active); it.RenderedTitle != wantTitle {
+			t.Errorf("list item %d RenderedTitle = %q, want %q", i, it.RenderedTitle, wantTitle)
 		}
 	}
 
@@ -98,6 +108,7 @@ func newTestModel(t *testing.T) Model {
 		filepath.Join(home, ".config", "govm", "settings.json"),
 		config.DefaultSettings(),
 		"",
+		testTheme(),
 	)
 	m.Versions = []utils.GoVersion{{
 		Version:   "1.24.4",

@@ -5,33 +5,35 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
 
-func renderDepsBackupLimitDialog(settings SettingsState, viewport viewportSize) string {
+func renderDepsBackupLimitDialog(t styles.Theme, settings SettingsState, viewport viewportSize) string {
 	errMessage := settings.DepsBackupLimitInputErr
 	if errMessage == "" && settings.DepsBackupLimitInput.Err != nil {
 		errMessage = settings.DepsBackupLimitInput.Err.Error()
 	}
 
 	lines := []string{
-		dialogTitleStyle.Render("Set dependency backup limit"),
+		t.DialogTitleStyle.Render("Set dependency backup limit"),
 		"",
-		dialogBodyStyle.Render(fmt.Sprintf(
+		t.DialogBodyStyle.Render(fmt.Sprintf(
 			"Enter a whole number from %d to %d.",
 			config.MinDepsBackupLimit,
 			config.MaxDepsBackupLimit,
 		)),
-		dialogBodyStyle.Render(settings.DepsBackupLimitInput.View()),
+		t.DialogBodyStyle.Render(settings.DepsBackupLimitInput.View()),
 	}
 	if errMessage != "" {
-		lines = append(lines, dialogWarningStyle.Render(errMessage))
+		lines = append(lines, t.DialogWarningStyle.Render(errMessage))
 	}
 	lines = append(lines,
 		"",
-		dialogMutedStyle.Render("enter: save  esc: cancel"),
+		t.DialogMutedStyle.Render("enter: save  esc: cancel"),
 	)
 
 	return renderDialog(
+		t,
 		lipgloss.JoinVertical(lipgloss.Left, lines...),
 		errMessage != "",
 		viewport,

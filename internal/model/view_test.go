@@ -156,7 +156,7 @@ func TestMaxInt(t *testing.T) {
 }
 
 func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
-	got := renderHelp(0, true, ConfirmDialog{}, 80)
+	got := renderHelp(testTheme(), 0, true, ConfirmDialog{}, 80)
 	if !strings.Contains(stripANSI(got), "confirm") {
 		t.Fatalf("expected confirm hint, got: %s", got)
 	}
@@ -177,7 +177,7 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stripANSI(renderHelp(DepsTab, false, ConfirmDialog{Kind: DialogRestore, ChoiceYes: tt.restoreChoiceYes}, 80))
+			got := stripANSI(renderHelp(testTheme(), DepsTab, false, ConfirmDialog{Kind: DialogRestore, ChoiceYes: tt.restoreChoiceYes}, 80))
 			if !strings.Contains(got, tt.want) {
 				t.Fatalf("expected help to contain %q, got %q", tt.want, got)
 			}
@@ -186,14 +186,14 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 }
 
 func TestRenderHelp_DepsTruncatesToWidth(t *testing.T) {
-	got := renderHelp(2, false, ConfirmDialog{}, 20)
+	got := renderHelp(testTheme(), 2, false, ConfirmDialog{}, 20)
 	if got == "" {
 		t.Fatal("expected non-empty help for deps")
 	}
 }
 
 func TestRenderStatus_EmptyMessage(t *testing.T) {
-	if renderStatus("info", "", 80) != "" {
+	if renderStatus(testTheme(), "info", "", 80) != "" {
 		t.Fatal("expected empty result for empty message")
 	}
 }
@@ -201,7 +201,7 @@ func TestRenderStatus_EmptyMessage(t *testing.T) {
 func TestRenderStatus_AllTypes(t *testing.T) {
 	types := []string{"success", "error", "warning", "info", "unknown"}
 	for _, ty := range types {
-		got := renderStatus(ty, "msg", 80)
+		got := renderStatus(testTheme(), ty, "msg", 80)
 		if !strings.Contains(stripANSI(got), "msg") {
 			t.Fatalf("status type %q should include message, got: %s", ty, got)
 		}

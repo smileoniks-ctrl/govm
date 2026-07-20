@@ -134,7 +134,7 @@ func launchTUI() {
 		path, s, _, err := config.LoadWithMigration()
 		return path, s, err
 	})
-	model.ApplyTheme(styles.ThemeName(settings.Theme))
+	theme := styles.NewTheme(config.ThemeName(settings.Theme))
 
 	if _, err := os.UserHomeDir(); err != nil {
 		fmt.Println("Error getting home directory:", err)
@@ -151,7 +151,7 @@ func launchTUI() {
 		os.Exit(1)
 	}
 
-	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning)
+	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning, theme)
 	p := tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)

@@ -14,15 +14,20 @@ import (
 // m.Versions must call this afterwards so that the list, the table and
 // the source slice never diverge. A nil/empty m.Versions yields an
 // empty list and an empty table.
+//
+// Item titles are pre-rendered here through styles.RenderItemTitle so
+// the per-frame list.View hot path performs only field reads instead
+// of N lipgloss.Style.Render calls. The theme used is m.theme, which
+// applyRuntimeTheme keeps in sync with the user's current theme.
 func (m *Model) rebuildVersionViews() {
+	t := m.theme
 	items := make([]list.Item, len(m.Versions))
 	installed := 0
 	for i, v := range m.Versions {
 		items[i] = styles.Item{
 			Name:            v.Version,
 			DescriptionText: v.DisplayDescription(),
-			Installed:       v.Installed,
-			Active:          v.Active,
+			RenderedTitle:   styles.RenderItemTitle(t, v.Version, v.Installed, v.Active),
 		}
 		if v.Installed {
 			installed++

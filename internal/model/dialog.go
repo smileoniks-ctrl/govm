@@ -3,62 +3,9 @@ package model
 import (
 	"strings"
 
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
-
-// Static styles for modal dialogs. They are recomputed only when the user
-// changes the active theme.
-var (
-	dialogTitleStyle    lipgloss.Style
-	dialogWarningStyle  lipgloss.Style
-	dialogBodyStyle     lipgloss.Style
-	dialogMutedStyle    lipgloss.Style
-	dialogActiveStyle   lipgloss.Style
-	dialogInactiveStyle lipgloss.Style
-	dialogBoxStyle      lipgloss.Style
-	dialogErrorBoxStyle lipgloss.Style
-)
-
-func init() {
-	rebuildDialogStyles()
-}
-
-func rebuildDialogStyles() {
-	dialogTitleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(styles.Warning).
-		Padding(0, 1)
-
-	dialogWarningStyle = styles.StatusWarningStyle
-	dialogBodyStyle = lipgloss.NewStyle().Padding(0, 1)
-	dialogMutedStyle = lipgloss.NewStyle().
-		Foreground(styles.Muted).
-		Padding(0, 1)
-
-	dialogActiveStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(styles.Primary).
-		Bold(true).
-		Padding(0, 2)
-
-	dialogInactiveStyle = lipgloss.NewStyle().
-		Foreground(styles.Muted).
-		Padding(0, 2)
-
-	dialogBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Warning).
-		Padding(1, 2).
-		Width(64)
-
-	dialogErrorBoxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(styles.Error).
-		Padding(1, 2).
-		Width(64)
-}
 
 const maxDependencyListLines = 6
 
@@ -75,7 +22,11 @@ func dialogWidth(viewport viewportSize) int {
 	return min(64, width)
 }
 
-func renderDialog(content string, errorStyle bool, viewport viewportSize) string {
+// renderDialog wraps content in the themed dialog border box. It takes
+// the theme as a parameter rather than reading package-level style
+// state; the previous init()/rebuildDialogStyles machinery is gone
+// along with the style vars it maintained.
+func renderDialog(t styles.Theme, content string, errorStyle bool, viewport viewportSize) string {
 	width := dialogWidth(viewport)
 	contentWidth := max(1, width-6)
 	lines := strings.Split(content, "\n")
@@ -83,9 +34,9 @@ func renderDialog(content string, errorStyle bool, viewport viewportSize) string
 		lines[i] = ansi.Cut(line, 0, contentWidth)
 	}
 
-	style := dialogBoxStyle
+	style := t.DialogBoxStyle
 	if errorStyle {
-		style = dialogErrorBoxStyle
+		style = t.DialogErrorBoxStyle
 	}
 	return style.Width(width).Render(strings.Join(lines, "\n"))
 }

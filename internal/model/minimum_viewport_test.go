@@ -32,8 +32,8 @@ func TestMinimumViewportShowsWarningWithinTerminalBounds(t *testing.T) {
 			if !view.AltScreen {
 				t.Fatal("AltScreen = false, want true")
 			}
-			if view.BackgroundColor != styles.MinimumViewportBackground {
-				t.Fatalf("BackgroundColor = %v, want %v", view.BackgroundColor, styles.MinimumViewportBackground)
+			if view.BackgroundColor != testTheme().MinimumViewportBackground {
+				t.Fatalf("BackgroundColor = %v, want %v", view.BackgroundColor, testTheme().MinimumViewportBackground)
 			}
 			wants := []string{
 				"Minimum terminal size is 64x20.",
@@ -89,8 +89,8 @@ func TestMinimumViewportUpdateZeroUsesSafeView(t *testing.T) {
 	if !view.AltScreen {
 		t.Fatal("AltScreen = false, want true")
 	}
-	if view.BackgroundColor != styles.MinimumViewportBackground {
-		t.Fatalf("BackgroundColor = %v, want %v", view.BackgroundColor, styles.MinimumViewportBackground)
+	if view.BackgroundColor != testTheme().MinimumViewportBackground {
+		t.Fatalf("BackgroundColor = %v, want %v", view.BackgroundColor, testTheme().MinimumViewportBackground)
 	}
 	assertViewportBounds(t, view, 1, 1)
 }
@@ -106,7 +106,7 @@ func TestMinimumViewportRendererNormalizesExtremeDimensions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			content := renderMinimumViewport(tt.width, tt.height)
+			content := renderMinimumViewport(testTheme(), tt.width, tt.height)
 			lines := strings.Split(content, "\n")
 
 			if len(lines) != 1 {

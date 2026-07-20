@@ -13,7 +13,8 @@ import (
 )
 
 func (m Model) View() tea.View {
-	appStyle := styles.AppStyleFor(m.Layout)
+	t := m.theme
+	appStyle := t.AppStyleFor(m.Layout)
 	width := m.viewWidth()
 	height := m.viewHeight()
 	viewport := viewportSize{Width: width, Height: height}
@@ -25,18 +26,18 @@ func (m Model) View() tea.View {
 	}
 	if (m.TermWidth > 0 || m.TermHeight > 0 || (m.Width == 1 && m.Height == 1)) &&
 		(m.TermWidth < styles.MinTermWidth || m.TermHeight < styles.MinTermHeight) {
-		v := tea.NewView(renderMinimumViewport(m.TermWidth, m.TermHeight))
-		v.BackgroundColor = styles.MinimumViewportBackground
+		v := tea.NewView(renderMinimumViewport(t, m.TermWidth, m.TermHeight))
+		v.BackgroundColor = t.MinimumViewportBackground
 		v.AltScreen = true
 		return v
 	}
 
 	components := make([]string, 0, 6)
-	components = append(components, renderHeader(width))
-	components = append(components, renderTabs(m.CurrentTab))
+	components = append(components, renderHeader(t, width))
+	components = append(components, renderTabs(t, m.CurrentTab))
 
 	if m.ShimPathWarning != "" {
-		components = append(components, renderStatus("warning", m.ShimPathWarning, width))
+		components = append(components, renderStatus(t, "warning", m.ShimPathWarning, width))
 	}
 
 	switch m.CurrentTab {
@@ -51,17 +52,18 @@ func (m Model) View() tea.View {
 	}
 
 	if status, statusType := m.composeStatus(); status != "" {
-		components = append(components, renderStatus(statusType, status, width))
+		components = append(components, renderStatus(t, statusType, status, width))
 	}
 
 	help := renderHelp(
+		t,
 		m.CurrentTab,
 		m.ConfirmingDelete,
 		m.Deps.Dialog,
 		width,
 	)
 	if m.Settings.EditingDepsBackupLimit {
-		help = renderKeyHints([][2]string{
+		help = renderKeyHints(t, [][2]string{
 			{"enter", "save"},
 			{"esc", "cancel"},
 		}, width)
@@ -70,9 +72,9 @@ func (m Model) View() tea.View {
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
 
 	if m.Settings.EditingDepsBackupLimit {
-		rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(m.Settings, viewport), viewport)
+		rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(t, m.Settings, viewport), viewport)
 	} else if m.Deps.Dialog.Active() {
-		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(m.Deps, viewport), viewport)
+		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(t, m.Deps, viewport), viewport)
 	}
 
 	v := tea.NewView(rendered)
@@ -80,7 +82,7 @@ func (m Model) View() tea.View {
 	return v
 }
 
-func renderMinimumViewport(width, height int) string {
+func renderMinimumViewport(t styles.Theme, width, height int) string {
 	width = maxInt(1, width)
 	height = maxInt(1, height)
 
@@ -96,9 +98,9 @@ func renderMinimumViewport(width, height int) string {
 	}
 
 	message := lipgloss.NewStyle().
-		Foreground(styles.MinimumViewportText).
+		Foreground(t.MinimumViewportText).
 		Render(strings.Join(lines, "\n"))
-	background := lipgloss.NewStyle().Background(styles.MinimumViewportBackground)
+	background := lipgloss.NewStyle().Background(t.MinimumViewportBackground)
 	return lipgloss.Place(
 		width,
 		height,
@@ -128,51 +130,51 @@ func (m Model) composeStatus() (string, string) {
 	return status, statusType
 }
 
-func renderHeader(width int) string {
-	title := styles.TitleStyle.Render("GoVM")
+func renderHeader(t styles.Theme, width int) string {
+	title := t.TitleStyle.Render("GoVM")
 
-	meta := styles.HeaderMetaStyle.Render(fmt.Sprintf("Go Version Manager %s", utils.GetVersion()))
+	meta := t.HeaderMetaStyle.Render(fmt.Sprintf("Go Version Manager %s", utils.GetVersion()))
 	spacerWidth := maxInt(1, width-lipgloss.Width(title)-lipgloss.Width(meta))
 	return lipgloss.JoinHorizontal(lipgloss.Top, title, strings.Repeat(" ", spacerWidth), meta)
 }
 
-func renderTabs(currentTab int) string {
+func renderTabs(t styles.Theme, currentTab int) string {
 	tabs := []string{
-		renderTab("Available", currentTab == AvailableTab),
-		renderTab("Installed", currentTab == InstalledTab),
-		renderTab("Deps", currentTab == DepsTab),
-		renderTab("Settings", currentTab == SettingsTab),
+		renderTab(t, "Available", currentTab == AvailableTab),
+		renderTab(t, "Installed", currentTab == InstalledTab),
+		renderTab(t, "Deps", currentTab == DepsTab),
+		renderTab(t, "Settings", currentTab == SettingsTab),
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Left, tabs...)
 }
 
-func renderTab(label string, active bool) string {
+func renderTab(t styles.Theme, label string, active bool) string {
 	if active {
-		return styles.ActiveTabStyle.Render("● " + label)
+		return t.ActiveTabStyle.Render("● " + label)
 	}
-	return styles.InactiveTabStyle.Render("○ " + label)
+	return t.InactiveTabStyle.Render("○ " + label)
 }
 
-func renderStatus(messageType, message string, width int) string {
+func renderStatus(t styles.Theme, messageType, message string, width int) string {
 	if message == "" {
 		return ""
 	}
 
 	icon := "•"
-	style := styles.StatusInfoStyle
+	style := t.StatusInfoStyle
 	switch messageType {
 	case "success":
 		icon = "✓"
-		style = styles.StatusSuccessStyle
+		style = t.StatusSuccessStyle
 	case "error":
 		icon = "✕"
-		style = styles.StatusErrorStyle
+		style = t.StatusErrorStyle
 	case "warning":
 		icon = "!"
-		style = styles.StatusWarningStyle
+		style = t.StatusWarningStyle
 	case "info":
 		icon = "•"
-		style = styles.StatusInfoStyle
+		style = t.StatusInfoStyle
 	}
 
 	return style.Width(width).Render(fmt.Sprintf("%s %s", icon, message))
@@ -209,7 +211,7 @@ func themeLabel(name config.ThemeName) string {
 	return "Current"
 }
 
-func renderHelp(currentTab int, confirmingDelete bool, dialog ConfirmDialog, width int) string {
+func renderHelp(t styles.Theme, currentTab int, confirmingDelete bool, dialog ConfirmDialog, width int) string {
 	var hints [][2]string
 
 	switch dialog.Kind {
@@ -220,7 +222,7 @@ func renderHelp(currentTab int, confirmingDelete bool, dialog ConfirmDialog, wid
 			{"esc", "cancel"},
 			{"q", "quit"},
 		}
-		return renderKeyHints(hints, width)
+		return renderKeyHints(t, hints, width)
 	case DialogChecks:
 		hints = [][2]string{
 			{"←/→", "choose"},
@@ -228,14 +230,14 @@ func renderHelp(currentTab int, confirmingDelete bool, dialog ConfirmDialog, wid
 			{"esc", "skip"},
 			{"q", "quit"},
 		}
-		return renderKeyHints(hints, width)
+		return renderKeyHints(t, hints, width)
 	case DialogRollback:
 		hints = [][2]string{
 			{"←/→", "choose"},
 			{"enter", "confirm"},
 			{"q", "quit"},
 		}
-		return renderKeyHints(hints, width)
+		return renderKeyHints(t, hints, width)
 	case DialogRestore:
 		action := "cancel"
 		if dialog.ChoiceYes {
@@ -247,7 +249,7 @@ func renderHelp(currentTab int, confirmingDelete bool, dialog ConfirmDialog, wid
 			{"enter", action},
 			{"esc", "cancel"},
 		}
-		return renderKeyHints(hints, width)
+		return renderKeyHints(t, hints, width)
 	}
 
 	if confirmingDelete {
@@ -289,13 +291,13 @@ func renderHelp(currentTab int, confirmingDelete bool, dialog ConfirmDialog, wid
 		}
 	}
 
-	return renderKeyHints(hints, width)
+	return renderKeyHints(t, hints, width)
 }
 
-func renderKeyHints(hints [][2]string, width int) string {
+func renderKeyHints(t styles.Theme, hints [][2]string, width int) string {
 	parts := make([]string, 0, len(hints))
 	for _, hint := range hints {
-		parts = append(parts, fmt.Sprintf("%s %s", styles.HelpKeyStyle.Render(hint[0]), styles.HelpTextStyle.Render(hint[1])))
+		parts = append(parts, fmt.Sprintf("%s %s", t.HelpKeyStyle.Render(hint[0]), t.HelpTextStyle.Render(hint[1])))
 	}
 
 	helpText := strings.Join(parts, "  ")

@@ -279,13 +279,19 @@ func (m Model) handleDepsBackupLimitInputKey(msg tea.KeyPressMsg) (tea.Model, te
 	}
 }
 
+// applyRuntimeTheme rebuilds m.theme from the user's current settings
+// value and propagates the new theme to every component that caches
+// style values by value (Spinner, InstalledTable, Deps.Table, List
+// delegate). Replaces the previous "mutate package-level globals and
+// hope readers pick them up" model with explicit value propagation.
 func (m *Model) applyRuntimeTheme() {
-	ApplyTheme(styles.ThemeName(m.Settings.Values.Theme))
+	t := styles.NewTheme(config.ThemeName(m.Settings.Values.Theme))
+	m.theme = t
 	m.Settings.ApplyTheme()
-	m.Spinner.Style = styles.SpinnerStyle
-	m.InstalledTable.SetStyles(tableStyles())
-	m.Deps.Table.SetStyles(tableStyles())
-	delegate := listDefaultDelegate()
+	m.Spinner.Style = t.SpinnerStyle
+	m.InstalledTable.SetStyles(tableStyles(t))
+	m.Deps.Table.SetStyles(tableStyles(t))
+	delegate := listDefaultDelegate(t)
 	m.List.SetDelegate(delegate)
 }
 

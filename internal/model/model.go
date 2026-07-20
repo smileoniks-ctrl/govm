@@ -35,15 +35,22 @@ type Model struct {
 	MessageScope      statusScope
 	// ShimPathWarning is the pre-rendered PATH warning captured before
 	// launching the TUI, so View does not resolve PATH on every render.
-	ShimPathWarning  string
-	InstalledTable   table.Model
+	ShimPathWarning string
+	InstalledTable  table.Model
 	ConfirmingDelete bool
-	DeleteVersion    string
-	Width            int
-	Height           int
-	TermWidth        int
-	TermHeight       int
-	Layout           styles.LayoutMode
+	DeleteVersion   string
+	Width           int
+	Height          int
+	TermWidth       int
+	TermHeight      int
+	Layout          styles.LayoutMode
+
+	// theme is the immutable rendering snapshot used by View and every
+	// renderer. main.go builds it once from settings at startup and
+	// applyRuntimeTheme rebuilds it when the user toggles themes in the
+	// Settings tab. It is the only source of styling for the model —
+	// the styles package no longer carries any package-level state.
+	theme styles.Theme
 
 	// Deps groups every field and state machine flag related to the
 	// "Deps" tab. Use the helpers in deps_state.go to keep the
@@ -52,46 +59,43 @@ type Model struct {
 	Settings SettingsState
 }
 
+// Theme returns the Model's current immutable theme snapshot. It is
+// read-only access for tests and helpers that need to render outside
+// of View(); production rendering goes through m.theme directly.
+func (m Model) Theme() styles.Theme { return m.theme }
+
 // New builds the top-level Model for the TUI. It owns the invariant
 // setup that every caller needs: the spinner, the installed-versions
 // and dependencies tables (columns + height + styles), the version
 // list and its delegate, and the Deps/Settings sub-states.
 //
-// Callers (main, tests, benchmarks) receive a Model with the default
-// start state and may override any field afterwards to vary the
-// scenario. Fields intentionally initialised here represent
-// invariants of the TUI layout, not user-tunable knobs.
-func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarning string) Model {
+// The theme parameter is the immutable styles.Theme value built by the
+// caller (main.go at startup, applyRuntimeTheme on toggle, tests
+// directly). Passing it as a parameter replaces the previous implicit
+// "call ApplyTheme before New" contract — it is now impossible to
+// construct a Model without its theme, which removes the fragile
+// init() → ApplyTheme → New ordering that previously broke silently
+// when a new dialog style was added.
+func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarning string, theme styles.Theme) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = styles.SpinnerStyle
+	sp.Style = theme.SpinnerStyle
 
 	installedTable := table.New(
 		table.WithColumns(installedTableColumns(defaultConstructionWidth)),
 		table.WithFocused(true),
 		table.WithHeight(10),
 	)
-	installedTable.SetStyles(table.Styles{
-		Header:   styles.TableHeaderStyle,
-		Selected: styles.TableSelectedStyle,
-		Cell:     styles.TableCellStyle,
-	})
+	installedTable.SetStyles(tableStyles(theme))
 
 	depTable := table.New(
 		table.WithColumns(dependencyTableColumns(defaultConstructionWidth)),
 		table.WithFocused(true),
 		table.WithHeight(15),
 	)
-	depTable.SetStyles(table.Styles{
-		Header:   styles.TableHeaderStyle,
-		Selected: styles.TableSelectedStyle,
-		Cell:     styles.TableCellStyle,
-	})
+	depTable.SetStyles(tableStyles(theme))
 
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = styles.TableSelectedStyle
-	delegate.Styles.SelectedDesc = styles.TableSelectedStyle
-	delegate.Styles.NormalDesc = styles.MutedStyle
+	delegate := listDefaultDelegate(theme)
 
 	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.Title = "Available Versions"
@@ -107,6 +111,7 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 		Loading:         true,
 		InstalledTable:  installedTable,
 		Layout:          styles.LayoutNormal,
+		theme:           theme,
 		Deps:            NewDepsState(moduleDir, depTable),
 		Settings:        NewSettingsState(settingsPath, settings),
 		ShimPathWarning: shimPathWarning,

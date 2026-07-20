@@ -26,14 +26,16 @@ func TestSettingsDepsBackupLimitInputFollowsTheme(t *testing.T) {
 	}
 }
 
+// TestSettingsToggleThemeChangesStateAndMessage replaces the previous
+// version that asserted on global state via styles.CurrentTheme(). With
+// theme now living on Model as a value, the assertion is that m.theme
+// was rebuilt to match the new settings value, with no global state to
+// reset in t.Cleanup.
 func TestSettingsToggleThemeChangesStateAndMessage(t *testing.T) {
-	t.Cleanup(func() {
-		ApplyTheme(styles.ThemeCurrent)
-	})
-	ApplyTheme(styles.ThemeCurrent)
 	m := newTestModel(t)
 	m.CurrentTab = SettingsTab
 	m.Settings.Cursor = 1
+	wantLightPrimary := styles.NewTheme(config.ThemeLight).Primary
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: ' '})
 	m = updated.(Model)
@@ -44,26 +46,29 @@ func TestSettingsToggleThemeChangesStateAndMessage(t *testing.T) {
 	if m.MessageType == "error" || m.Message == "" {
 		t.Fatalf("expected non-error message after theme save, got %q: %s", m.MessageType, m.Message)
 	}
-	if got := styles.CurrentTheme(); got != styles.ThemeLight {
-		t.Fatalf("expected runtime theme light, got %q", got)
+	if got := m.theme.Primary; got != wantLightPrimary {
+		t.Fatalf("expected m.theme to be rebuilt to light; Primary = %v, want %v", got, wantLightPrimary)
 	}
 }
 
-func TestApplyThemeRebuildsDependencyDialogStyles(t *testing.T) {
-	t.Cleanup(func() {
-		ApplyTheme(styles.ThemeCurrent)
-	})
+// TestApplyRuntimeThemeRebuildsDependencyDialogStyles pins the contract
+// that previously broke silently (see docs/review/03-performance.md):
+// after applyRuntimeTheme the active theme must flow into
+// ConfirmDialog.Render. Because Render now takes Theme as a parameter,
+// the test also documents the new propagation path explicitly.
+func TestApplyRuntimeThemeRebuildsDependencyDialogStyles(t *testing.T) {
+	m := newTestModel(t)
 
-	checksDialog := ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
+	m.Settings.Values.Theme = config.ThemeCurrent
+	m.applyRuntimeTheme()
+	currentDialog := ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}.
+		Render(m.theme, DepsState{}, viewportSize{Width: 64, Height: 20})
 
-	ApplyTheme(styles.ThemeCurrent)
-	currentDialog := checksDialog.Render(DepsState{}, viewportSize{Width: 64, Height: 20})
+	m.Settings.Values.Theme = config.ThemeLight
+	m.applyRuntimeTheme()
+	lightDialog := ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}.
+		Render(m.theme, DepsState{}, viewportSize{Width: 64, Height: 20})
 
-	if got := ApplyTheme(styles.ThemeLight); got != styles.ThemeLight {
-		t.Fatalf("expected light theme, got %q", got)
-	}
-
-	lightDialog := checksDialog.Render(DepsState{}, viewportSize{Width: 64, Height: 20})
 	if lightDialog == currentDialog {
 		t.Fatal("expected light theme to change dependency dialog output")
 	}

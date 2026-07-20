@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -48,7 +49,7 @@ func benchModel(b *testing.B) Model {
 		})
 	}
 
-	m := New("", "", config.DefaultSettings(), "")
+	m := New("", "", config.DefaultSettings(), "", styles.NewTheme(config.ThemeCurrent))
 	m.Versions = versions
 	m.rebuildVersionViews()
 	m.List.SetSize(80, 24)
@@ -255,11 +256,12 @@ func BenchmarkRenderDependencyUpdateDialog(b *testing.B) {
 	updateYes := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 	updateNo := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: false}
 	deps := DepsState{UpdateEntries: entries}
+	theme := styles.NewTheme(config.ThemeCurrent)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		benchStringSink = updateYes.Render(deps, viewportSize{Width: 64, Height: 20})
-		benchStringSink = updateNo.Render(deps, viewportSize{Width: 64, Height: 20})
+		benchStringSink = updateYes.Render(theme, deps, viewportSize{Width: 64, Height: 20})
+		benchStringSink = updateNo.Render(theme, deps, viewportSize{Width: 64, Height: 20})
 	}
 }
 
@@ -278,6 +280,7 @@ func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
 	restoreDialog := ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
 	rollbackDeps := DepsState{LastCheckResult: result}
 	restoreDeps := DepsState{Backups: backups}
+	theme := styles.NewTheme(config.ThemeCurrent)
 
 	for _, width := range []int{64, 80} {
 		b.Run(strconv.Itoa(width), func(b *testing.B) {
@@ -285,9 +288,9 @@ func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				viewport := viewportSize{Width: width, Height: 20}
-				benchStringSink = checksDialog.Render(DepsState{}, viewport)
-				benchStringSink = rollbackDialog.Render(rollbackDeps, viewport)
-				benchStringSink = restoreDialog.Render(restoreDeps, viewport)
+				benchStringSink = checksDialog.Render(theme, DepsState{}, viewport)
+				benchStringSink = rollbackDialog.Render(theme, rollbackDeps, viewport)
+				benchStringSink = restoreDialog.Render(theme, restoreDeps, viewport)
 			}
 		})
 	}

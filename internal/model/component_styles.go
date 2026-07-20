@@ -6,18 +6,24 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
 
-func tableStyles() table.Styles {
+// tableStyles returns the table.Styles pair (header/selected/cell) for
+// the given theme. It is called from Model.New and from
+// applyRuntimeTheme when the theme changes.
+func tableStyles(t styles.Theme) table.Styles {
 	return table.Styles{
-		Header:   styles.TableHeaderStyle,
-		Selected: styles.TableSelectedStyle,
-		Cell:     styles.TableCellStyle,
+		Header:   t.TableHeaderStyle,
+		Selected: t.TableSelectedStyle,
+		Cell:     t.TableCellStyle,
 	}
 }
 
-func listDefaultDelegate() list.DefaultDelegate {
+// listDefaultDelegate returns the bubbles/list delegate configured for
+// the given theme. As with tableStyles, callers are Model.New and
+// applyRuntimeTheme.
+func listDefaultDelegate(t styles.Theme) list.DefaultDelegate {
 	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = styles.TableSelectedStyle
-	delegate.Styles.SelectedDesc = styles.TableSelectedStyle
-	delegate.Styles.NormalDesc = styles.MutedStyle
+	delegate.Styles.SelectedTitle = t.TableSelectedStyle
+	delegate.Styles.SelectedDesc = t.TableSelectedStyle
+	delegate.Styles.NormalDesc = t.MutedStyle
 	return delegate
 }

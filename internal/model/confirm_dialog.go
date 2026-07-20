@@ -93,21 +93,23 @@ func (d ConfirmDialog) Handle(msg tea.KeyPressMsg) (ConfirmDialog, DialogAction)
 }
 
 // Render composes the dialog's body (kind-specific), the shared Yes/No
-// buttons, and the outer renderDialog wrapper. Callers only need to
-// overlay the returned string onto the active view.
-func (d ConfirmDialog) Render(deps DepsState, viewport viewportSize) string {
-	lines := d.bodyLines(deps)
+// buttons, and the outer renderDialog wrapper. The theme is taken as a
+// parameter so ConfirmDialog has no hidden dependency on package-level
+// style state. Callers only need to overlay the returned string onto
+// the active view.
+func (d ConfirmDialog) Render(t styles.Theme, deps DepsState, viewport viewportSize) string {
+	lines := d.bodyLines(t, deps)
 	lines = append(lines, "")
-	lines = append(lines, d.renderButtons())
-	return renderDialog(lipgloss.JoinVertical(lipgloss.Left, lines...), d.errorStyle(), viewport)
+	lines = append(lines, d.renderButtons(t))
+	return renderDialog(t, lipgloss.JoinVertical(lipgloss.Left, lines...), d.errorStyle(), viewport)
 }
 
-func (d ConfirmDialog) renderButtons() string {
-	yesBtn, noBtn := dialogInactiveStyle, dialogInactiveStyle
+func (d ConfirmDialog) renderButtons(t styles.Theme) string {
+	yesBtn, noBtn := t.DialogInactiveStyle, t.DialogInactiveStyle
 	if d.ChoiceYes {
-		yesBtn = dialogActiveStyle
+		yesBtn = t.DialogActiveStyle
 	} else {
-		noBtn = dialogActiveStyle
+		noBtn = t.DialogActiveStyle
 	}
 	yesLabel, noLabel := buttonLabels(d.Kind)
 	return lipgloss.JoinHorizontal(lipgloss.Center,
@@ -132,25 +134,25 @@ func buttonLabels(kind DialogKind) (yes, no string) {
 	}
 }
 
-func (d ConfirmDialog) bodyLines(deps DepsState) []string {
+func (d ConfirmDialog) bodyLines(t styles.Theme, deps DepsState) []string {
 	switch d.Kind {
 	case DialogUpdate:
-		return updateDialogLines(deps.UpdateEntries)
+		return updateDialogLines(t, deps.UpdateEntries)
 	case DialogChecks:
-		return checksDialogLines()
+		return checksDialogLines(t)
 	case DialogRollback:
-		return rollbackDialogLines(deps.LastCheckResult)
+		return rollbackDialogLines(t, deps.LastCheckResult)
 	case DialogRestore:
-		return restoreDialogLines(deps.Backups, d.Cursor)
+		return restoreDialogLines(t, deps.Backups, d.Cursor)
 	}
 	return nil
 }
 
-func updateDialogLines(updatable []utils.DependencyUpdateEntry) []string {
+func updateDialogLines(t styles.Theme, updatable []utils.DependencyUpdateEntry) []string {
 	lines := make([]string, 0, 6+len(updatable))
-	lines = append(lines, dialogTitleStyle.Render(dialogWarningStyle.Render("⚠ Warning")))
+	lines = append(lines, t.DialogTitleStyle.Render(t.DialogWarningStyle.Render("⚠ Warning")))
 	lines = append(lines, "")
-	lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf(
+	lines = append(lines, t.DialogBodyStyle.Render(fmt.Sprintf(
 		"%d direct %s will be updated:",
 		len(updatable),
 		utils.Pluralize(len(updatable), "dependency", "dependencies"),
@@ -163,40 +165,40 @@ func updateDialogLines(updatable []utils.DependencyUpdateEntry) []string {
 		visible = visible[:maxDependencyListLines]
 	}
 	for _, e := range visible {
-		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf(
+		lines = append(lines, t.DialogBodyStyle.Render(fmt.Sprintf(
 			"  %s: %s -> %s", e.Path, e.OldVersion, e.NewVersion,
 		)))
 	}
 	if extra > 0 {
-		lines = append(lines, dialogBodyStyle.Render(
+		lines = append(lines, t.DialogBodyStyle.Render(
 			fmt.Sprintf("  …and %d more", extra),
 		))
 	}
 	lines = append(lines, "")
-	lines = append(lines, dialogBodyStyle.Render("go.mod and go.sum will be modified."))
-	lines = append(lines, dialogBodyStyle.Render("A snapshot is taken before the update so changes can be rolled back."))
+	lines = append(lines, t.DialogBodyStyle.Render("go.mod and go.sum will be modified."))
+	lines = append(lines, t.DialogBodyStyle.Render("A snapshot is taken before the update so changes can be rolled back."))
 	return lines
 }
 
-func checksDialogLines() []string {
+func checksDialogLines(t styles.Theme) []string {
 	return []string{
-		dialogTitleStyle.Render(styles.StatusInfoStyle.Render("✓ Run checks?")),
+		t.DialogTitleStyle.Render(t.StatusInfoStyle.Render("✓ Run checks?")),
 		"",
-		dialogBodyStyle.Render("After the update the following will be executed:"),
-		dialogBodyStyle.Render("  • go test ./..."),
-		dialogBodyStyle.Render("  • go vet ./..."),
+		t.DialogBodyStyle.Render("After the update the following will be executed:"),
+		t.DialogBodyStyle.Render("  • go test ./..."),
+		t.DialogBodyStyle.Render("  • go vet ./..."),
 		"",
-		dialogMutedStyle.Render("If a check fails you will be offered to roll back the dependencies."),
+		t.DialogMutedStyle.Render("If a check fails you will be offered to roll back the dependencies."),
 	}
 }
 
-func rollbackDialogLines(result *utils.DependencyCheckResultMsg) []string {
+func rollbackDialogLines(t styles.Theme, result *utils.DependencyCheckResultMsg) []string {
 	lines := []string{
-		dialogTitleStyle.Render(dialogWarningStyle.Render("⚠ Checks failed")),
+		t.DialogTitleStyle.Render(t.DialogWarningStyle.Render("⚠ Checks failed")),
 		"",
 	}
 	if result != nil {
-		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf("Command: %s", result.Command)))
+		lines = append(lines, t.DialogBodyStyle.Render(fmt.Sprintf("Command: %s", result.Command)))
 		if result.Output != "" {
 			output := strings.Split(result.Output, "\n")
 			visible := output
@@ -204,23 +206,23 @@ func rollbackDialogLines(result *utils.DependencyCheckResultMsg) []string {
 				visible = visible[:maxDependencyListLines]
 			}
 			for _, l := range visible {
-				lines = append(lines, dialogMutedStyle.Render(l))
+				lines = append(lines, t.DialogMutedStyle.Render(l))
 			}
 			if extra := len(output) - len(visible); extra > 0 {
-				lines = append(lines, dialogMutedStyle.Render(fmt.Sprintf("…and %d more", extra)))
+				lines = append(lines, t.DialogMutedStyle.Render(fmt.Sprintf("…and %d more", extra)))
 			}
 		}
 		lines = append(lines, "")
 	}
-	lines = append(lines, dialogBodyStyle.Render("Roll back the dependencies to their pre-update state?"))
+	lines = append(lines, t.DialogBodyStyle.Render("Roll back the dependencies to their pre-update state?"))
 	return lines
 }
 
-func restoreDialogLines(backups []utils.DependencyBackupInfo, cursor int) []string {
+func restoreDialogLines(t styles.Theme, backups []utils.DependencyBackupInfo, cursor int) []string {
 	lines := []string{
-		dialogTitleStyle.Render(dialogWarningStyle.Render("Dependency backups")),
+		t.DialogTitleStyle.Render(t.DialogWarningStyle.Render("Dependency backups")),
 		"",
-		dialogBodyStyle.Render("Choose a saved dependency backup:"),
+		t.DialogBodyStyle.Render("Choose a saved dependency backup:"),
 	}
 	start := 0
 	if cursor >= maxDependencyListLines {
@@ -242,7 +244,7 @@ func restoreDialogLines(backups []utils.DependencyBackupInfo, cursor int) []stri
 		if start+i == cursor {
 			prefix = "> "
 		}
-		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf(
+		lines = append(lines, t.DialogBodyStyle.Render(fmt.Sprintf(
 			"%s%s  %s  %d update(s)",
 			prefix,
 			b.Name,
@@ -251,9 +253,9 @@ func restoreDialogLines(backups []utils.DependencyBackupInfo, cursor int) []stri
 		)))
 	}
 	if len(backups) > end {
-		lines = append(lines, dialogBodyStyle.Render(fmt.Sprintf("  …and %d more", len(backups)-end)))
+		lines = append(lines, t.DialogBodyStyle.Render(fmt.Sprintf("  …and %d more", len(backups)-end)))
 	}
 	lines = append(lines, "")
-	lines = append(lines, dialogMutedStyle.Render("Current go.mod and go.sum will be saved before restore."))
+	lines = append(lines, t.DialogMutedStyle.Render("Current go.mod and go.sum will be saved before restore."))
 	return lines
 }

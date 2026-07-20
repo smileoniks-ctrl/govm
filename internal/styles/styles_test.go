@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 )
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -14,27 +15,56 @@ func plainText(s string) string {
 	return ansiPattern.ReplaceAllString(s, "")
 }
 
-func TestItemTitleRendersStatusBadgesWithoutLegacyParentheses(t *testing.T) {
-	item := Item{
-		Name:      "1.24.4",
-		Installed: true,
-		Active:    true,
+func TestItemTitleReturnsPreRenderedString(t *testing.T) {
+	t.Parallel()
+
+	theme := NewTheme(config.ThemeCurrent)
+	rendered := RenderItemTitle(theme, "1.24.4", true, true)
+	item := Item{Name: "1.24.4", RenderedTitle: rendered}
+
+	if got := item.Title(); got != rendered {
+		t.Fatalf("Title() = %q, want pre-rendered %q", got, rendered)
 	}
 
-	title := plainText(item.Title())
-
+	plain := plainText(item.Title())
 	for _, want := range []string{"1.24.4", "active", "installed"} {
-		if !strings.Contains(title, want) {
-			t.Fatalf("expected title %q to contain %q", title, want)
+		if !strings.Contains(plain, want) {
+			t.Fatalf("expected title %q to contain %q", plain, want)
 		}
 	}
+	if strings.Contains(plain, "(active)") || strings.Contains(plain, "(installed)") {
+		t.Fatalf("expected modern badge text without legacy parentheses, got %q", plain)
+	}
+}
 
-	if strings.Contains(title, "(active)") || strings.Contains(title, "(installed)") {
-		t.Fatalf("expected modern badge text without legacy parentheses, got %q", title)
+// TestItemTitleIgnoresSubsequentThemeMutations is the verification test
+// for the pre-render contract: once an Item is built, Title() must not
+// change if the caller later renders a different theme. The mutation
+// case it guards against is someone re-introducing a live
+// lipgloss.Style.Render call inside Title() that reads current theme
+// state — that would make Title() depend on caller order again.
+func TestItemTitleIgnoresSubsequentThemeMutations(t *testing.T) {
+	t.Parallel()
+
+	buildTheme := NewTheme(config.ThemeCurrent)
+	item := Item{
+		Name:          "1.24.4",
+		RenderedTitle: RenderItemTitle(buildTheme, "1.24.4", true, true),
+	}
+	before := item.Title()
+
+	// A different theme rendered afterwards must not retroactively
+	// affect the previously built item.
+	NewTheme(config.ThemeLight)
+
+	if got := item.Title(); got != before {
+		t.Fatalf("Title() changed after building a different theme: got %q, want %q", got, before)
 	}
 }
 
 func TestItemDescriptionReturnsSecondaryText(t *testing.T) {
+	t.Parallel()
+
 	item := Item{DescriptionText: "go1.24.4.darwin-arm64.tar.gz"}
 
 	if got := item.Description(); got != "go1.24.4.darwin-arm64.tar.gz" {
@@ -42,69 +72,15 @@ func TestItemDescriptionReturnsSecondaryText(t *testing.T) {
 	}
 }
 
-func TestApplyThemeFallsBackToCurrentForUnknownTheme(t *testing.T) {
-	t.Cleanup(func() {
-		ApplyTheme(ThemeCurrent)
-	})
-
-	if got := ApplyTheme(ThemeName("unknown")); got != ThemeCurrent {
-		t.Fatalf("expected unknown theme to fall back to %q, got %q", ThemeCurrent, got)
-	}
-
-	if got := CurrentTheme(); got != ThemeCurrent {
-		t.Fatalf("expected current theme to be %q, got %q", ThemeCurrent, got)
-	}
-}
-
-func TestApplyThemeCurrentRestoresInstalledBadgeForeground(t *testing.T) {
-	t.Cleanup(func() {
-		ApplyTheme(ThemeCurrent)
-	})
-
-	ApplyTheme(ThemeCurrent)
-
-	if got, want := InstalledBadgeStyle.GetForeground(), lipgloss.Color("#F8FAFC"); got != want {
-		t.Fatalf("expected installed badge foreground to be %q, got %q", want, got)
-	}
-}
-
-func TestApplyThemeLightChangesAndCurrentRestoresRenderedOutput(t *testing.T) {
-	t.Cleanup(func() {
-		ApplyTheme(ThemeCurrent)
-	})
-
-	ApplyTheme(ThemeCurrent)
-	currentOutput := TitleStyle.Render("GoVM")
-
-	if got := ApplyTheme(ThemeLight); got != ThemeLight {
-		t.Fatalf("expected light theme to apply as %q, got %q", ThemeLight, got)
-	}
-
-	lightOutput := TitleStyle.Render("GoVM")
-	if lightOutput == currentOutput {
-		t.Fatalf("expected light theme output to differ from current output")
-	}
-
-	if got := ApplyTheme(ThemeCurrent); got != ThemeCurrent {
-		t.Fatalf("expected current theme to apply as %q, got %q", ThemeCurrent, got)
-	}
-
-	restoredOutput := TitleStyle.Render("GoVM")
-	if restoredOutput != currentOutput {
-		t.Fatalf("expected current theme to restore output %q, got %q", currentOutput, restoredOutput)
-	}
-}
-
 // TestNewThemeBuildsFromPalette verifies that the immutable Theme value
 // produced by NewTheme carries the expected palette colours and that
-// light/current themes actually differ. It is a pure value test: no
-// package-level globals are mutated, so it is safe under t.Parallel and
-// is the pattern all future theme tests should follow.
+// light/current themes actually differ. Pure value test, safe under
+// t.Parallel.
 func TestNewThemeBuildsFromPalette(t *testing.T) {
 	t.Parallel()
 
-	current := NewTheme(ThemeCurrent)
-	light := NewTheme(ThemeLight)
+	current := NewTheme(config.ThemeCurrent)
+	light := NewTheme(config.ThemeLight)
 
 	for _, tc := range []struct {
 		name    string
@@ -142,17 +118,21 @@ func TestNewThemeBuildsFromPalette(t *testing.T) {
 	if got, want := current.MinimumViewportText, lipgloss.Color("#F9FAFB"); got != want {
 		t.Fatalf("MinimumViewportText = %v, want %v", got, want)
 	}
+
+	// InstalledBadgeStyle foreground was the regression that motivated
+	// the original ApplyTheme test; keep the assertion as a value check.
+	if got, want := current.InstalledBadgeStyle.GetForeground(), lipgloss.Color("#F8FAFC"); got != want {
+		t.Fatalf("current InstalledBadgeStyle foreground = %v, want %v", got, want)
+	}
 }
 
-// TestNewThemeFallsBackToCurrentForUnknownTheme is the value-type
-// replacement for TestApplyThemeFallsBackToCurrentForUnknownTheme. It
-// pins NewTheme's silent-fallback contract without touching global
-// state and is therefore safe under t.Parallel.
+// TestNewThemeFallsBackToCurrentForUnknownTheme pins NewTheme's
+// silent-fallback contract without touching global state.
 func TestNewThemeFallsBackToCurrentForUnknownTheme(t *testing.T) {
 	t.Parallel()
 
-	current := NewTheme(ThemeCurrent)
-	unknown := NewTheme(ThemeName("does-not-exist"))
+	current := NewTheme(config.ThemeCurrent)
+	unknown := NewTheme(config.ThemeName("does-not-exist"))
 
 	if unknown.Primary != current.Primary {
 		t.Fatalf("unknown theme Primary = %v, want fallback %v", unknown.Primary, current.Primary)
@@ -169,22 +149,20 @@ func TestNewThemeIsPure(t *testing.T) {
 	t.Parallel()
 
 	done := make(chan Theme, 2)
-	go func() { done <- NewTheme(ThemeCurrent) }()
-	go func() { done <- NewTheme(ThemeLight) }()
+	go func() { done <- NewTheme(config.ThemeCurrent) }()
+	go func() { done <- NewTheme(config.ThemeLight) }()
 
 	first := <-done
 	second := <-done
 
-	// Both results must be byte-identical to the value returned by a
-	// sequential call for the same name, regardless of completion order.
-	baseline := map[ThemeName]Theme{
-		ThemeCurrent: NewTheme(ThemeCurrent),
-		ThemeLight:   NewTheme(ThemeLight),
+	baseline := map[config.ThemeName]Theme{
+		config.ThemeCurrent: NewTheme(config.ThemeCurrent),
+		config.ThemeLight:   NewTheme(config.ThemeLight),
 	}
-	if first.Primary != baseline[ThemeCurrent].Primary && first.Primary != baseline[ThemeLight].Primary {
+	if first.Primary != baseline[config.ThemeCurrent].Primary && first.Primary != baseline[config.ThemeLight].Primary {
 		t.Fatalf("concurrent first Primary %v matched neither baseline", first.Primary)
 	}
-	if second.Primary != baseline[ThemeCurrent].Primary && second.Primary != baseline[ThemeLight].Primary {
+	if second.Primary != baseline[config.ThemeCurrent].Primary && second.Primary != baseline[config.ThemeLight].Primary {
 		t.Fatalf("concurrent second Primary %v matched neither baseline", second.Primary)
 	}
 	if first.Primary == second.Primary {

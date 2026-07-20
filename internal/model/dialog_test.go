@@ -12,7 +12,7 @@ import (
 
 func TestRenderDependencyUpdateDialogContainsWarning(t *testing.T) {
 	dialog := stripANSI(ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.
-		Render(DepsState{}, viewportSize{Width: 64, Height: 20}))
+		Render(testTheme(), DepsState{}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Warning", "will be updated", "Yes", "No"} {
 		if !strings.Contains(dialog, want) {
@@ -27,7 +27,7 @@ func TestRenderDependencyUpdateDialogListsModules(t *testing.T) {
 		{Path: "github.com/example/other", OldVersion: "v2.0.0", NewVersion: "v2.1.0"},
 	}
 	dialog := stripANSI(ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.
-		Render(DepsState{UpdateEntries: entries}, viewportSize{Width: 64, Height: 20}))
+		Render(testTheme(), DepsState{UpdateEntries: entries}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"github.com/example/lib", "v1.0.0", "v1.1.0", "github.com/example/other"} {
 		if !strings.Contains(dialog, want) {
@@ -46,7 +46,7 @@ func TestRenderDependencyUpdateDialogTruncatesLongLists(t *testing.T) {
 		})
 	}
 	dialog := stripANSI(ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.
-		Render(DepsState{UpdateEntries: entries}, viewportSize{Width: 64, Height: 20}))
+		Render(testTheme(), DepsState{UpdateEntries: entries}, viewportSize{Width: 64, Height: 20}))
 
 	if !strings.Contains(dialog, "and") || !strings.Contains(dialog, "more") {
 		t.Fatalf("expected truncation hint in dialog, got:\n%s", dialog)
@@ -64,7 +64,7 @@ func TestRenderDependencyRestoreDialogKeepsCursorVisible(t *testing.T) {
 	}
 
 	dialog := stripANSI(ConfirmDialog{Kind: DialogRestore, ChoiceYes: true, Cursor: 6, MaxCursor: 6}.
-		Render(DepsState{Backups: backups}, viewportSize{Width: 64, Height: 20}))
+		Render(testTheme(), DepsState{Backups: backups}, viewportSize{Width: 64, Height: 20}))
 
 	if !strings.Contains(dialog, "> 2026-07-09_12-00-06.json") {
 		t.Fatalf("expected selected backup to be visible, got:\n%s", dialog)
@@ -73,7 +73,7 @@ func TestRenderDependencyRestoreDialogKeepsCursorVisible(t *testing.T) {
 
 func TestRenderDependencyChecksDialogContainsCommands(t *testing.T) {
 	dialog := stripANSI(ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}.
-		Render(DepsState{}, viewportSize{Width: 64, Height: 20}))
+		Render(testTheme(), DepsState{}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Run checks?", "go test", "go vet", "Yes", "No"} {
 		if !strings.Contains(dialog, want) {
@@ -89,7 +89,7 @@ func TestRenderDependencyRollbackDialogContainsCommand(t *testing.T) {
 		Output:  "FAIL: example_test.go:10: expected 1, got 2",
 	}
 	dialog := stripANSI(ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}.
-		Render(DepsState{LastCheckResult: result}, viewportSize{Width: 64, Height: 20}))
+		Render(testTheme(), DepsState{LastCheckResult: result}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Checks failed", "go test ./...", "FAIL: example_test", "Roll back", "Keep"} {
 		if !strings.Contains(dialog, want) {
@@ -115,6 +115,7 @@ func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
 			name: "update",
 			render: func(width int) string {
 				return ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.Render(
+					testTheme(),
 					DepsState{UpdateEntries: []utils.DependencyUpdateEntry{{
 						Path: longPath, OldVersion: "v1.0.0", NewVersion: "v1.1.0",
 					}}},
@@ -125,13 +126,14 @@ func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
 			name: "checks",
 			render: func(width int) string {
 				return ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}.
-					Render(DepsState{}, viewportSize{Width: width, Height: 20})
+					Render(testTheme(), DepsState{}, viewportSize{Width: width, Height: 20})
 			},
 		},
 		{
 			name: "rollback",
 			render: func(width int) string {
 				return ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}.Render(
+					testTheme(),
 					DepsState{LastCheckResult: &utils.DependencyCheckResultMsg{
 						Command: longPath,
 						Output:  longOutput,
@@ -143,7 +145,7 @@ func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
 			name: "restore",
 			render: func(width int) string {
 				return ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}.
-					Render(DepsState{Backups: backups}, viewportSize{Width: width, Height: 20})
+					Render(testTheme(), DepsState{Backups: backups}, viewportSize{Width: width, Height: 20})
 			},
 		},
 	}

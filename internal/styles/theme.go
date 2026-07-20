@@ -4,15 +4,12 @@ import (
 	"image/color"
 
 	"charm.land/lipgloss/v2"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 )
 
-type ThemeName string
-
-const (
-	ThemeCurrent ThemeName = "current"
-	ThemeLight   ThemeName = "light"
-)
-
+// themePalette is the per-theme input to buildTheme. It carries only
+// palette colours; every lipgloss.Style is derived from these in
+// buildTheme so that there is a single place to add a new theme.
 type themePalette struct {
 	Primary                  color.Color
 	Success                  color.Color
@@ -25,112 +22,34 @@ type themePalette struct {
 	InstalledBadgeForeground color.Color
 }
 
-var (
-	currentTheme = ThemeCurrent
-
-	themeRegistry = map[ThemeName]themePalette{
-		ThemeCurrent: {
-			Primary:                  lipgloss.Color("#7C3AED"),
-			Success:                  lipgloss.Color("#10B981"),
-			Error:                    lipgloss.Color("#EF4444"),
-			Warning:                  lipgloss.Color("#F59E0B"),
-			Info:                     lipgloss.Color("#3B82F6"),
-			Muted:                    lipgloss.Color("#6B7280"),
-			Text:                     lipgloss.Color("#E5E7EB"),
-			OnPrimary:                lipgloss.Color("#FFFFFF"),
-			InstalledBadgeForeground: lipgloss.Color("#F8FAFC"),
-		},
-		ThemeLight: {
-			Primary:                  lipgloss.Color("#6D28D9"),
-			Success:                  lipgloss.Color("#047857"),
-			Error:                    lipgloss.Color("#DC2626"),
-			Warning:                  lipgloss.Color("#B45309"),
-			Info:                     lipgloss.Color("#2563EB"),
-			Muted:                    lipgloss.Color("#4B5563"),
-			Text:                     lipgloss.Color("#111827"),
-			OnPrimary:                lipgloss.Color("#FFFFFF"),
-			InstalledBadgeForeground: lipgloss.Color("#F8FAFC"),
-		},
-	}
-)
-
-func ApplyTheme(name ThemeName) ThemeName {
-	palette, ok := themeRegistry[name]
-	if !ok {
-		name = ThemeCurrent
-		palette = themeRegistry[ThemeCurrent]
-	}
-
-	currentTheme = name
-	rebuildStyles(palette)
-	return currentTheme
-}
-
-func CurrentTheme() ThemeName {
-	return currentTheme
-}
-
-func rebuildStyles(palette themePalette) {
-	Primary = palette.Primary
-	Success = palette.Success
-	Error = palette.Error
-	Warning = palette.Warning
-	Info = palette.Info
-	Muted = palette.Muted
-	Text = palette.Text
-
-	TitleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(Text)
-
-	HeaderMetaStyle = lipgloss.NewStyle().Foreground(Muted)
-
-	ActiveTabStyle = lipgloss.NewStyle().
-		Foreground(palette.OnPrimary).
-		Background(Primary).
-		Bold(true).
-		Padding(0, 1)
-
-	InactiveTabStyle = lipgloss.NewStyle().
-		Foreground(Muted).
-		Padding(0, 1)
-
-	ActiveBadgeStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#052E16")).
-		Background(Success).
-		Bold(true).
-		Padding(0, 1)
-
-	InstalledBadgeStyle = lipgloss.NewStyle().
-		Foreground(palette.InstalledBadgeForeground).
-		Background(Primary).
-		Padding(0, 1)
-
-	ItemVersionStyle = lipgloss.NewStyle().Foreground(Text).Bold(true)
-	MutedStyle = lipgloss.NewStyle().Foreground(Muted)
-
-	StatusSuccessStyle = lipgloss.NewStyle().Foreground(Success).Bold(true)
-	StatusErrorStyle = lipgloss.NewStyle().Foreground(Error).Bold(true)
-	StatusWarningStyle = lipgloss.NewStyle().Foreground(Warning).Bold(true)
-	StatusInfoStyle = lipgloss.NewStyle().Foreground(Info).Bold(true)
-
-	HelpKeyStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
-	HelpTextStyle = lipgloss.NewStyle().Foreground(Muted)
-
-	TableHeaderStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(palette.OnPrimary).
-		Background(Primary).
-		Padding(0, 1)
-
-	TableSelectedStyle = lipgloss.NewStyle().
-		Foreground(palette.OnPrimary).
-		Background(Primary).
-		Bold(true).
-		Padding(0, 1)
-
-	TableCellStyle = lipgloss.NewStyle().Padding(0, 1)
-	SpinnerStyle = lipgloss.NewStyle().Foreground(Primary)
+// themeRegistry is the package-private map of known theme names to
+// palettes. config.ThemeName is the canonical type for theme identity
+// (it is the value persisted in settings.json and validated by
+// config.Normalize), so styles depends on config rather than the
+// reverse.
+var themeRegistry = map[config.ThemeName]themePalette{
+	config.ThemeCurrent: {
+		Primary:                  lipgloss.Color("#7C3AED"),
+		Success:                  lipgloss.Color("#10B981"),
+		Error:                    lipgloss.Color("#EF4444"),
+		Warning:                  lipgloss.Color("#F59E0B"),
+		Info:                     lipgloss.Color("#3B82F6"),
+		Muted:                    lipgloss.Color("#6B7280"),
+		Text:                     lipgloss.Color("#E5E7EB"),
+		OnPrimary:                lipgloss.Color("#FFFFFF"),
+		InstalledBadgeForeground: lipgloss.Color("#F8FAFC"),
+	},
+	config.ThemeLight: {
+		Primary:                  lipgloss.Color("#6D28D9"),
+		Success:                  lipgloss.Color("#047857"),
+		Error:                    lipgloss.Color("#DC2626"),
+		Warning:                  lipgloss.Color("#B45309"),
+		Info:                     lipgloss.Color("#2563EB"),
+		Muted:                    lipgloss.Color("#4B5563"),
+		Text:                     lipgloss.Color("#111827"),
+		OnPrimary:                lipgloss.Color("#FFFFFF"),
+		InstalledBadgeForeground: lipgloss.Color("#F8FAFC"),
+	},
 }
 
 // Theme is an immutable snapshot of every palette color and pre-built
@@ -194,18 +113,13 @@ type Theme struct {
 
 // NewTheme returns an immutable Theme value for the given name. It is a
 // pure function: it does not mutate any package state and is safe to
-// call concurrently. An unknown name silently falls back to ThemeCurrent,
-// matching the previous ApplyTheme behaviour and the validation already
-// performed by config.Normalize.
-//
-// This is the value-type constructor that the main migration commit will
-// route every caller through. While the mutable package-level globals
-// below continue to exist, NewTheme duplicates their construction logic
-// so that the Theme shape is exercised and parallel-testable in isolation.
-func NewTheme(name ThemeName) Theme {
+// call concurrently. An unknown name silently falls back to
+// config.ThemeCurrent, matching the validation already performed by
+// config.Normalize.
+func NewTheme(name config.ThemeName) Theme {
 	palette, ok := themeRegistry[name]
 	if !ok {
-		palette = themeRegistry[ThemeCurrent]
+		palette = themeRegistry[config.ThemeCurrent]
 	}
 	return buildTheme(palette)
 }
@@ -222,9 +136,8 @@ func buildTheme(palette themePalette) Theme {
 		OnPrimary:                palette.OnPrimary,
 		InstalledBadgeForeground: palette.InstalledBadgeForeground,
 
-		// Minimum-viewport colors are not theme-dependent today; they are
-		// inlined here so Theme is the single carrier of every rendered
-		// color and the constants in constants.go can be retired later.
+		// Minimum-viewport colors are not theme-dependent today; they
+		// live on Theme so a single value carries every rendered color.
 		MinimumViewportBackground: lipgloss.Color("#111827"),
 		MinimumViewportText:       lipgloss.Color("#F9FAFB"),
 
