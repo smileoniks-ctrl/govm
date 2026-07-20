@@ -74,8 +74,8 @@ func TestSettingsToggleDepsDisplayUpdatesDependencyRows(t *testing.T) {
 	if rows := m.Deps.Table.Rows(); len(rows) != 2 {
 		t.Fatalf("expected all deps view to show 2 rows, got %d", len(rows))
 	}
-	if m.MessageType == "error" {
-		t.Fatalf("expected non-error message after save, got %q: %s", m.MessageType, m.Message)
+	if m.Status.Kind() == "error" {
+		t.Fatalf("expected non-error message after save, got %q: %s", m.Status.Kind(), m.Status.Text())
 	}
 }
 
@@ -87,10 +87,10 @@ func TestSettingsSaveErrorShowsErrorMessage(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = updated.(Model)
 
-	if m.MessageType != "error" {
-		t.Fatalf("expected error message type, got %q", m.MessageType)
+	if m.Status.Kind() != "error" {
+		t.Fatalf("expected error message type, got %q", m.Status.Kind())
 	}
-	if !strings.Contains(m.Message, "settings") {
-		t.Fatalf("expected settings save error message, got %q", m.Message)
+	if !strings.Contains(m.Status.Text(), "settings") {
+		t.Fatalf("expected settings save error message, got %q", m.Status.Text())
 	}
 }

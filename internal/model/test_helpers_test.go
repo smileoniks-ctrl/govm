@@ -118,8 +118,7 @@ func newTestModel(t *testing.T) Model {
 		Path:      filepath.Join(home, ".govm", "versions", "go1.24.4"),
 	}}
 	m.rebuildVersionViews()
-	m.Message = "Successfully installed Go 1.24.4"
-	m.MessageType = "success"
+	m.Status.SetTab("Successfully installed Go 1.24.4", "success")
 	m.Loading = false
 	m.Layout = styles.LayoutWide
 	return m

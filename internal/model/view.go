@@ -115,8 +115,8 @@ func renderMinimumViewport(t styles.Theme, width, height int) string {
 // composeStatus returns the current status message and type, taking
 // loading/spinner state into account so the caller doesn't have to.
 func (m Model) composeStatus() (string, string) {
-	status := m.Message
-	statusType := m.MessageType
+	status := m.Status.Text()
+	statusType := m.Status.Kind()
 	if m.Loading || m.Deps.operationInProgress() {
 		statusType = "info"
 		if m.InstallingVersion != "" {

@@ -30,13 +30,9 @@ type Model struct {
 	Spinner           spinner.Model
 	CurrentTab        int
 	InstallingVersion string
-	Message           string
-	MessageType       string // "success", "error", "warning", or "info"
-	MessageScope      statusScope
 	// Status owns the status triplet (text, kind, scope) as the
-	// StatusLine value-type module. The legacy Message/MessageType/
-	// MessageScope fields above remain until the follow-up commit
-	// migrates every call site and removes them.
+	// StatusLine value-type module. Reads go through Text/Kind/Scope;
+	// mutations go through SetTab/SetGlobal/Clear/ClearTab.
 	Status StatusLine
 	// ShimPathWarning is the pre-rendered PATH warning captured before
 	// launching the TUI, so View does not resolve PATH on every render.

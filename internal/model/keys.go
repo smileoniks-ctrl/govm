@@ -98,7 +98,7 @@ func (m Model) handleInstallKey() (tea.Model, tea.Cmd) {
 		if v.Version == selected.Name && !v.Installed {
 			m.Loading = true
 			m.InstallingVersion = v.Version
-			m.setGlobalStatus("", "")
+			m.Status.SetGlobal("", "")
 			return m, utils.DownloadAndInstall(v)
 		}
 	}
@@ -112,12 +112,12 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 			for _, v := range m.Versions {
 				if v.Version == selected.Name && v.Installed {
 					m.Loading = true
-					m.setGlobalStatus(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
+					m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
 					return m, utils.SwitchVersion(v)
 				}
 			}
 		}
-		m.setTabStatus("You need to install this version first. Press 'i' to install.", "error")
+		m.Status.SetTab("You need to install this version first. Press 'i' to install.", "error")
 		return m, nil
 	}
 	if m.CurrentTab == InstalledTab {
@@ -130,11 +130,11 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 				continue
 			}
 			if v.Active {
-				m.setTabStatus(fmt.Sprintf("Go %s is already active.", v.Version), "info")
+				m.Status.SetTab(fmt.Sprintf("Go %s is already active.", v.Version), "info")
 				return m, nil
 			}
 			m.Loading = true
-			m.setGlobalStatus(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
+			m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
 			return m, utils.SwitchVersion(v)
 		}
 		return m, nil
@@ -142,12 +142,12 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab == DepsTab && m.Deps.Loaded {
 		entries := utils.DirectDependencyUpdateEntries(m.Deps.Dependencies)
 		if len(entries) == 0 {
-			m.setTabStatus("No direct dependency updates available.", "warning")
+			m.Status.SetTab("No direct dependency updates available.", "warning")
 			return m, nil
 		}
 		m.Deps.UpdateEntries = entries
 		m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
-		m.clearStatus()
+		m.Status.Clear()
 		return m, nil
 	}
 	return m, nil
@@ -158,14 +158,14 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 		m.Deps.Phase = OpChecking
 		// Progress text comes from DepsState.SpinnerText() while the
 		// phase is in-flight, so we only need to clear any stale status
-		// here. Using clearStatus (rather than setGlobalStatus) keeps
+		// here. Using Status.Clear (rather than Status.SetGlobal) keeps
 		// the scope tab-local, which lets the DependenciesMsg handler
 		// tear it down cleanly when the check finishes.
-		m.clearStatus()
+		m.Status.Clear()
 		return m, utils.CheckModuleDependencyUpdates(m.Deps.ModuleDir)
 	}
 	m.Loading = true
-	m.setGlobalStatus("", "")
+	m.Status.SetGlobal("", "")
 	return m, utils.FetchGoVersions
 }
 
@@ -174,7 +174,7 @@ func (m Model) handleBackupsKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.Deps.Phase = OpLoadingBackups
-	m.setGlobalStatus("Loading dependency backups...", "info")
+	m.Status.SetGlobal("Loading dependency backups...", "info")
 	return m, utils.ListDependencyBackupsCmd(m.Deps.ModuleDir)
 }
 
@@ -189,17 +189,17 @@ func (m Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 	for _, v := range m.Versions {
 		if v.Version == selected.Name && v.Installed {
 			if v.Active {
-				m.setTabStatus("Cannot delete active version. Switch to another version first.", "error")
+				m.Status.SetTab("Cannot delete active version. Switch to another version first.", "error")
 				return m, nil
 			}
 			m.ConfirmingDelete = true
 			m.DeleteVersion = v.Version
-			m.setTabStatus(fmt.Sprintf("Are you sure you want to delete Go %s? Press Y to confirm, N to cancel.", v.Version), "warning")
+			m.Status.SetTab(fmt.Sprintf("Are you sure you want to delete Go %s? Press Y to confirm, N to cancel.", v.Version), "warning")
 			return m, nil
 		}
 	}
 	if m.CurrentTab == AvailableTab {
-		m.setTabStatus("This version is not installed.", "error")
+		m.Status.SetTab("This version is not installed.", "error")
 	}
 	return m, nil
 }
@@ -293,7 +293,7 @@ func (m Model) handleDepsBackupLimitInputKey(msg tea.KeyPressMsg) (tea.Model, te
 
 		m.Settings.Values = values
 		m.Settings.CloseDepsBackupLimitInput()
-		m.setTabStatus("Settings saved.", "info")
+		m.Status.SetTab("Settings saved.", "info")
 		return m, nil
 	default:
 		var cmd tea.Cmd
@@ -321,10 +321,10 @@ func (m *Model) applyRuntimeTheme() {
 
 func (m *Model) saveSettings() {
 	if err := config.Save(m.Settings.Path, m.Settings.Values); err != nil {
-		m.setTabStatus(fmt.Sprintf("Failed to save settings: %v", err), "error")
+		m.Status.SetTab(fmt.Sprintf("Failed to save settings: %v", err), "error")
 		return
 	}
-	m.setTabStatus("Settings saved.", "info")
+	m.Status.SetTab("Settings saved.", "info")
 }
 
 func (m Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
@@ -333,7 +333,7 @@ func (m Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
 	}
 	m.ConfirmingDelete = false
 	m.Loading = true
-	m.setGlobalStatus(fmt.Sprintf("Deleting Go %s...", m.DeleteVersion), "info")
+	m.Status.SetGlobal(fmt.Sprintf("Deleting Go %s...", m.DeleteVersion), "info")
 
 	var target utils.GoVersion
 	for _, v := range m.Versions {
@@ -351,7 +351,7 @@ func (m Model) handleDeleteConfirmNo() (tea.Model, tea.Cmd) {
 	}
 	m.ConfirmingDelete = false
 	m.DeleteVersion = ""
-	m.setTabStatus("Delete operation canceled.", "info")
+	m.Status.SetTab("Delete operation canceled.", "info")
 	return m, nil
 }
 

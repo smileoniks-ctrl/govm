@@ -58,7 +58,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case utils.ErrMsg:
 		m.Loading = false
-		m.setGlobalStatus(msg.Error(), "error")
+		m.Status.SetGlobal(msg.Error(), "error")
 		return m, nil
 
 	case utils.VersionsMsg:
@@ -76,9 +76,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if updateConfirmationOpen {
 			m.resetDialog()
 			m.Deps.UpdateEntries = nil
-			m.setTabStatus("Dependency updates changed. Please review them again.", "warning")
+			m.Status.SetTab("Dependency updates changed. Please review them again.", "warning")
 		} else {
-			m.clearTabStatus()
+			m.Status.ClearTab()
 		}
 		return m, nil
 
@@ -86,7 +86,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Deps.Phase = OpIdle
 		m.Deps.Backups = msg
 		if len(msg) == 0 {
-			m.setTabStatus("No dependency backups found.", "warning")
+			m.Status.SetTab("No dependency backups found.", "warning")
 			return m, nil
 		}
 		m.Deps.Dialog = ConfirmDialog{
@@ -94,7 +94,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ChoiceYes: true,
 			MaxCursor: len(msg) - 1,
 		}
-		m.setTabStatus("Select a dependency backup to restore.", "info")
+		m.Status.SetTab("Select a dependency backup to restore.", "info")
 		return m, nil
 
 	case utils.DependenciesUpdatedMsg:
@@ -103,7 +103,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Deps.Snapshot = msg.Snapshot
 		m.Deps.LastCheckResult = nil
 		m.updateDependencyTable()
-		m.setGlobalStatus(fmt.Sprintf("Updated %d direct %s. Run checks?", msg.Updated, utils.Pluralize(msg.Updated, "dependency", "dependencies")), "success")
+		m.Status.SetGlobal(fmt.Sprintf("Updated %d direct %s. Run checks?", msg.Updated, utils.Pluralize(msg.Updated, "dependency", "dependencies")), "success")
 		m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
 		return m, nil
 
@@ -111,13 +111,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Deps.Phase = OpIdle
 		m.resetDialog()
 		if msg.OK {
-			m.setGlobalStatus("Checks passed.", "success")
+			m.Status.SetGlobal("Checks passed.", "success")
 			m.Deps.clearRollbackContext()
 			return m, nil
 		}
 		m.Deps.LastCheckResult = &msg
 		m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
-		m.setGlobalStatus(fmt.Sprintf("Checks failed: %s", msg.Command), "error")
+		m.Status.SetGlobal(fmt.Sprintf("Checks failed: %s", msg.Command), "error")
 		return m, nil
 
 	case utils.DependenciesRolledBackMsg:
@@ -125,7 +125,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Deps.Dependencies = msg.Dependencies
 		m.Deps.clearRollbackContext()
 		m.updateDependencyTable()
-		m.setGlobalStatus("Rolled back to pre-update state.", "success")
+		m.Status.SetGlobal("Rolled back to pre-update state.", "success")
 		return m, nil
 
 	case utils.DependenciesRestoredMsg:
@@ -133,16 +133,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Deps.Dependencies = msg.Dependencies
 		m.Deps.clearRollbackContext()
 		m.updateDependencyTable()
-		m.setGlobalStatus(fmt.Sprintf("Restored dependencies from %s.", msg.BackupName), "success")
+		m.Status.SetGlobal(fmt.Sprintf("Restored dependencies from %s.", msg.BackupName), "success")
 		return m, nil
 
 	case utils.DependencyErrMsg:
 		m.Deps.Reset()
 		if msg.Err != nil {
-			m.setGlobalStatus(msg.Err.Error(), "error")
+			m.Status.SetGlobal(msg.Err.Error(), "error")
 			return m, nil
 		}
-		m.setGlobalStatus("", "error")
+		m.Status.SetGlobal("", "error")
 		return m, nil
 
 	case spinner.TickMsg:
@@ -161,7 +161,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.rebuildVersionViews()
-		m.setGlobalStatus(fmt.Sprintf("Successfully installed Go %s", msg.Version), "success")
+		m.Status.SetGlobal(fmt.Sprintf("Successfully installed Go %s", msg.Version), "success")
 		return m, nil
 
 	case utils.SwitchCompletedMsg:
@@ -171,9 +171,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.rebuildVersionViews()
 		if msg.ShimInPath {
-			m.setGlobalStatus(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", msg.Version), "success")
+			m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", msg.Version), "success")
 		} else {
-			m.setGlobalStatus(fmt.Sprintf("Switched to Go %s!\n\n%s",
+			m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s!\n\n%s",
 				msg.Version, utils.GetShimPathInstructions()), "success")
 		}
 		return m, nil
@@ -188,7 +188,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.rebuildVersionViews()
-		m.setGlobalStatus(fmt.Sprintf("Successfully deleted Go %s", msg.Version), "success")
+		m.Status.SetGlobal(fmt.Sprintf("Successfully deleted Go %s", msg.Version), "success")
 		return m, nil
 	}
 

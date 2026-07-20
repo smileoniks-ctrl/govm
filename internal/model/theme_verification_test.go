@@ -190,4 +190,3 @@ func TestApplyRuntimeThemePropagatesToComponents(t *testing.T) {
 		t.Fatal("List.View is empty after applyRuntimeTheme")
 	}
 }
-

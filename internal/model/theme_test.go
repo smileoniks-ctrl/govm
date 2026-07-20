@@ -43,8 +43,8 @@ func TestSettingsToggleThemeChangesStateAndMessage(t *testing.T) {
 	if m.Settings.Values.Theme != config.ThemeLight {
 		t.Fatalf("expected theme light, got %q", m.Settings.Values.Theme)
 	}
-	if m.MessageType == "error" || m.Message == "" {
-		t.Fatalf("expected non-error message after theme save, got %q: %s", m.MessageType, m.Message)
+	if m.Status.Kind() == "error" || m.Status.Text() == "" {
+		t.Fatalf("expected non-error message after theme save, got %q: %s", m.Status.Kind(), m.Status.Text())
 	}
 	if got := m.theme.Primary; got != wantLightPrimary {
 		t.Fatalf("expected m.theme to be rebuilt to light; Primary = %v, want %v", got, wantLightPrimary)

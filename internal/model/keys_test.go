@@ -194,7 +194,7 @@ func TestPressUOnDepsWithoutUpdatesShowsMessage(t *testing.T) {
 	if m.Deps.Dialog.Active() {
 		t.Fatal("expected dialog to stay closed when no updates available")
 	}
-	if m.MessageType != "warning" {
-		t.Fatalf("expected warning message, got type %q", m.MessageType)
+	if m.Status.Kind() != "warning" {
+		t.Fatalf("expected warning message, got type %q", m.Status.Kind())
 	}
 }

@@ -33,8 +33,7 @@ func TestDepsOperationKeysIgnoreInputWhileOperationInProgress(t *testing.T) {
 				m := newTestModel(t)
 				m.CurrentTab = DepsTab
 				m.Deps.Loaded = true
-				m.Message = "unchanged"
-				m.MessageType = "info"
+				m.Status.SetTab("unchanged", "info")
 				m.Deps.Phase = phase
 				wantState := dependencyOperationState(m.Deps)
 
@@ -44,8 +43,8 @@ func TestDepsOperationKeysIgnoreInputWhileOperationInProgress(t *testing.T) {
 				if cmd != nil {
 					t.Fatal("expected no command while a dependency operation is in progress")
 				}
-				if got.Message != m.Message || got.MessageType != m.MessageType {
-					t.Fatalf("message = (%q, %q), want (%q, %q)", got.Message, got.MessageType, m.Message, m.MessageType)
+				if got.Status.Text() != m.Status.Text() || got.Status.Kind() != m.Status.Kind() {
+					t.Fatalf("message = (%q, %q), want (%q, %q)", got.Status.Text(), got.Status.Kind(), m.Status.Text(), m.Status.Kind())
 				}
 				if !reflect.DeepEqual(dependencyOperationState(got.Deps), wantState) {
 					t.Fatal("expected dependency state to remain unchanged")

@@ -1,5 +1,12 @@
 package model
 
+type statusScope uint8
+
+const (
+	statusScopeTab statusScope = iota
+	statusScopeGlobal
+)
+
 // StatusLine is the value-type module that owns the status triplet:
 // text, kind, and scope. It is the fifth application of the "implicit
 // module in flat fields -> explicit value-type module" pattern in this
@@ -8,9 +15,7 @@ package model
 //
 // The zero value is an empty, tab-scoped, inactive status. Reads go
 // through Text/Kind/Scope; mutations go through SetTab/SetGlobal/
-// Clear/ClearTab. The legacy Model.Message/MessageType/MessageScope
-// fields and their four helpers in status.go are removed once every
-// call site migrates to StatusLine.
+// Clear/ClearTab.
 //
 // Receiver style mirrors DepsState/SettingsState: the value lives as a
 // field on Model, reads use value receivers, mutations use pointer

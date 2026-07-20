@@ -50,9 +50,9 @@ func TestDependenciesMsgInvalidatesStaleUpdateConfirmation(t *testing.T) {
 			"update avail",
 		})
 	}
-	if !strings.Contains(strings.ToLower(got.Message), "review") ||
-		!strings.Contains(strings.ToLower(got.Message), "again") {
-		t.Fatalf("expected status to tell the user to review updates again, got %q", got.Message)
+	if !strings.Contains(strings.ToLower(got.Status.Text()), "review") ||
+		!strings.Contains(strings.ToLower(got.Status.Text()), "again") {
+		t.Fatalf("expected status to tell the user to review updates again, got %q", got.Status.Text())
 	}
 }
 
@@ -152,8 +152,8 @@ func TestDependenciesUpdatedMsgUpdatesState(t *testing.T) {
 	if len(got.Deps.Dependencies) != 1 {
 		t.Fatalf("expected 1 dependency, got %d", len(got.Deps.Dependencies))
 	}
-	if got.MessageType != "success" {
-		t.Fatalf("expected success message, got type %q", got.MessageType)
+	if got.Status.Kind() != "success" {
+		t.Fatalf("expected success message, got type %q", got.Status.Kind())
 	}
 }
 
@@ -186,8 +186,8 @@ func TestDependenciesUpdatedMsgStoresSnapshotAndOpensChecksDialog(t *testing.T) 
 	if !got.Deps.Dialog.ChoiceYes {
 		t.Fatal("expected default choice to be Yes")
 	}
-	if got.MessageType != "success" {
-		t.Fatalf("expected success message, got %q", got.MessageType)
+	if got.Status.Kind() != "success" {
+		t.Fatalf("expected success message, got %q", got.Status.Kind())
 	}
 }
 
@@ -205,8 +205,8 @@ func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
 	if got.Deps.Phase == OpRunningChecks {
 		t.Fatal("expected RunningDependencyChecks to be false")
 	}
-	if got.MessageType != "success" {
-		t.Fatalf("expected success status, got %q", got.MessageType)
+	if got.Status.Kind() != "success" {
+		t.Fatalf("expected success status, got %q", got.Status.Kind())
 	}
 	if got.Deps.Snapshot != nil {
 		t.Fatal("expected Snapshot to be cleared after success")
@@ -239,8 +239,8 @@ func TestDependencyCheckResultFailOpensRollbackDialog(t *testing.T) {
 	if !got.Deps.Dialog.ChoiceYes {
 		t.Fatal("expected default choice to be Yes")
 	}
-	if got.MessageType != "error" {
-		t.Fatalf("expected error status, got %q", got.MessageType)
+	if got.Status.Kind() != "error" {
+		t.Fatalf("expected error status, got %q", got.Status.Kind())
 	}
 	if got.Deps.LastCheckResult == nil || got.Deps.LastCheckResult.Command != "go test ./..." {
 		t.Fatalf("expected LastCheckResult to capture failing command, got %+v", got.Deps.LastCheckResult)
@@ -270,8 +270,8 @@ func TestDependenciesRolledBackMsgUpdatesState(t *testing.T) {
 	if len(got.Deps.Dependencies) != 1 {
 		t.Fatalf("expected 1 dependency, got %d", len(got.Deps.Dependencies))
 	}
-	if got.MessageType != "success" {
-		t.Fatalf("expected success status, got %q", got.MessageType)
+	if got.Status.Kind() != "success" {
+		t.Fatalf("expected success status, got %q", got.Status.Kind())
 	}
 }
 
@@ -285,8 +285,8 @@ func TestDependencyErrDuringRollbackClearsState(t *testing.T) {
 	if got.Deps.Phase == OpRollingBack {
 		t.Fatal("expected RollingBackDependencies to be false after err")
 	}
-	if got.MessageType != "error" {
-		t.Fatalf("expected error status, got %q", got.MessageType)
+	if got.Status.Kind() != "error" {
+		t.Fatalf("expected error status, got %q", got.Status.Kind())
 	}
 }
 

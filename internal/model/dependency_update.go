@@ -57,18 +57,18 @@ func (m Model) applyDialogCancel() (tea.Model, tea.Cmd) {
 	case DialogUpdate:
 		m.resetDialog()
 		m.Deps.UpdateEntries = nil
-		m.setTabStatus("Update canceled.", "info")
+		m.Status.SetTab("Update canceled.", "info")
 		return m, nil
 	case DialogChecks:
 		m.resetDialog()
 		m.Deps.clearRollbackContext()
-		m.setGlobalStatus("Update complete. Checks skipped.", "info")
+		m.Status.SetGlobal("Update complete. Checks skipped.", "info")
 		return m, nil
 	case DialogRollback:
 		return m.keepUpdatedDependencies()
 	case DialogRestore:
 		m.resetDialog()
-		m.setTabStatus("Restore canceled.", "info")
+		m.Status.SetTab("Restore canceled.", "info")
 		return m, nil
 	}
 	m.resetDialog()
@@ -79,7 +79,7 @@ func (m Model) applyUpdateChoice() (tea.Model, tea.Cmd) {
 	if !m.Deps.Dialog.ChoiceYes {
 		m.resetDialog()
 		m.Deps.UpdateEntries = nil
-		m.setTabStatus("Update canceled.", "info")
+		m.Status.SetTab("Update canceled.", "info")
 		return m, nil
 	}
 
@@ -87,7 +87,7 @@ func (m Model) applyUpdateChoice() (tea.Model, tea.Cmd) {
 	m.resetDialog()
 	m.Deps.UpdateEntries = nil
 	m.Deps.Phase = OpUpdating
-	m.setGlobalStatus("Updating dependencies...", "info")
+	m.Status.SetGlobal("Updating dependencies...", "info")
 	return m, utils.UpdateModuleDependencies(m.Deps.ModuleDir, entries, m.Settings.Values.DepsBackupLimit)
 }
 
@@ -95,13 +95,13 @@ func (m Model) applyChecksChoice() (tea.Model, tea.Cmd) {
 	if !m.Deps.Dialog.ChoiceYes {
 		m.resetDialog()
 		m.Deps.clearRollbackContext()
-		m.setGlobalStatus("Update complete. Checks skipped.", "info")
+		m.Status.SetGlobal("Update complete. Checks skipped.", "info")
 		return m, nil
 	}
 
 	m.resetDialog()
 	m.Deps.Phase = OpRunningChecks
-	m.setGlobalStatus("Running checks...", "info")
+	m.Status.SetGlobal("Running checks...", "info")
 	return m, utils.RunModuleDependencyChecks(m.Deps.ModuleDir)
 }
 
@@ -112,39 +112,39 @@ func (m Model) applyRollbackChoice() (tea.Model, tea.Cmd) {
 
 	if m.Deps.Snapshot == nil {
 		m.resetDialog()
-		m.setTabStatus("Rollback unavailable: snapshot is missing.", "error")
+		m.Status.SetTab("Rollback unavailable: snapshot is missing.", "error")
 		return m, nil
 	}
 
 	snap := m.Deps.Snapshot
 	m.resetDialog()
 	m.Deps.Phase = OpRollingBack
-	m.setGlobalStatus("Rolling back dependencies...", "info")
+	m.Status.SetGlobal("Rolling back dependencies...", "info")
 	return m, utils.RollbackModuleDependencies(m.Deps.ModuleDir, snap)
 }
 
 func (m Model) keepUpdatedDependencies() (tea.Model, tea.Cmd) {
 	m.resetDialog()
 	m.Deps.clearRollbackContext()
-	m.setGlobalStatus("Update kept. Failed checks were not rolled back.", "warning")
+	m.Status.SetGlobal("Update kept. Failed checks were not rolled back.", "warning")
 	return m, nil
 }
 
 func (m Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
 	if !m.Deps.Dialog.ChoiceYes {
 		m.resetDialog()
-		m.setTabStatus("Restore canceled.", "info")
+		m.Status.SetTab("Restore canceled.", "info")
 		return m, nil
 	}
 	if len(m.Deps.Backups) == 0 || m.Deps.Dialog.Cursor < 0 || m.Deps.Dialog.Cursor >= len(m.Deps.Backups) {
 		m.resetDialog()
-		m.setTabStatus("Restore unavailable: no backup selected.", "error")
+		m.Status.SetTab("Restore unavailable: no backup selected.", "error")
 		return m, nil
 	}
 
 	backup := m.Deps.Backups[m.Deps.Dialog.Cursor]
 	m.resetDialog()
 	m.Deps.Phase = OpRestoringBackup
-	m.setGlobalStatus("Restoring dependency backup...", "info")
+	m.Status.SetGlobal("Restoring dependency backup...", "info")
 	return m, utils.RestoreDependencyBackup(m.Deps.ModuleDir, backup.Name, m.Settings.Values.DepsBackupLimit)
 }

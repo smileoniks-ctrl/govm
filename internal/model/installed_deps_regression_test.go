@@ -44,8 +44,8 @@ func TestInstalledTab_UKeyTriggersSwitchVersion(t *testing.T) {
 // TestDepsTab_CheckStatusClearsAfterDependenciesMsg regression-tests
 // a bug where "Checking for dependency updates..." leaked across all
 // tabs after pressing `r` on the Deps tab. handleRefreshKey used
-// setGlobalStatus (global scope) but the DependenciesMsg handler
-// called clearTabStatus (tab scope only), so the message was never
+// Status.SetGlobal (global scope) but the DependenciesMsg handler
+// called Status.ClearTab (tab scope only), so the message was never
 // torn down and survived tab switches.
 func TestDepsTab_CheckStatusClearsAfterDependenciesMsg(t *testing.T) {
 	m := newTestModel(t)
@@ -66,8 +66,8 @@ func TestDepsTab_CheckStatusClearsAfterDependenciesMsg(t *testing.T) {
 	updated, _ = m.Update(utils.DependenciesMsg{})
 	m = updated.(Model)
 
-	if m.Message != "" {
-		t.Fatalf("expected status to be cleared after DependenciesMsg, got %q", m.Message)
+	if m.Status.Text() != "" {
+		t.Fatalf("expected status to be cleared after DependenciesMsg, got %q", m.Status.Text())
 	}
 	if m.Deps.Phase != OpIdle {
 		t.Fatalf("phase = %v, want OpIdle after DependenciesMsg", m.Deps.Phase)
@@ -78,8 +78,8 @@ func TestDepsTab_CheckStatusClearsAfterDependenciesMsg(t *testing.T) {
 // Deps tab `r` (check updates) flow showed a static status line with
 // no spinner animation, unlike the Available tab refresh. The root
 // cause was that SpinnerText returned "" for OpChecking/OpUpdating
-// while an imperative setGlobalStatus filled m.Message with a non-
-// empty string; composeStatus therefore fell through its spinner
+// while an imperative Status.SetGlobal filled the status text with a
+// non-empty string; composeStatus therefore fell through its spinner
 // branches and never prefixed Spinner.View().
 func TestDepsTab_CheckPhaseShowsSpinner(t *testing.T) {
 	m := newTestModel(t)

@@ -217,8 +217,8 @@ func TestKeepCmdClearsRollbackDialog(t *testing.T) {
 	if got.Deps.Phase == OpRollingBack {
 		t.Fatal("expected RollingBackDependencies to remain false")
 	}
-	if got.MessageType != "warning" {
-		t.Fatalf("expected warning status, got %q", got.MessageType)
+	if got.Status.Kind() != "warning" {
+		t.Fatalf("expected warning status, got %q", got.Status.Kind())
 	}
 }
 
