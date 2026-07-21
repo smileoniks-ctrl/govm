@@ -32,20 +32,20 @@ type DepsService struct {
 	// available update information.
 	CheckDeps func(moduleDir string) ([]utils.ModuleDependency, error)
 
-	// Update runs go get + go mod tidy and returns the resulting message.
-	Update func(moduleDir string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error)
+	// Update runs go get + go mod tidy.
+	Update func(moduleDir string, entries []utils.DependencyUpdateEntry) (utils.DependencyUpdateResult, error)
 
 	// RunChecks runs go test ./... and go vet ./....
-	RunChecks func(moduleDir string) (utils.DependencyCheckResultMsg, error)
+	RunChecks func(moduleDir string) (utils.DependencyCheckResult, error)
 
 	// Rollback restores the snapshot and runs go mod tidy.
-	Rollback func(moduleDir string, snap *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error)
+	Rollback func(moduleDir string, snap *utils.DependencySnapshot) (utils.DependencyRollbackResult, error)
 
 	// ListBackups returns saved dependency backups for moduleDir.
 	ListBackups func(moduleDir string) ([]utils.DependencyBackupInfo, error)
 
 	// RestoreBackup restores a saved dependency backup by filename.
-	RestoreBackup func(moduleDir, name string) (utils.DependenciesRestoredMsg, error)
+	RestoreBackup func(moduleDir, name string) (utils.DependencyRestoreResult, error)
 }
 
 // NewDepsService builds a service that defaults each operation to the
@@ -67,98 +67,21 @@ func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) *DepsSe
 		Stdout:    stdout,
 		Stdin:     stdin,
 		Confirm:   defaultConfirm(stdin, stdout),
-		ListDeps:  defaultListDeps,
-		CheckDeps: defaultCheckDeps,
-		Update: func(moduleDir string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error) {
-			return defaultUpdate(moduleDir, entries, backupLimit)
+		ListDeps:  utils.ListModuleDependencies,
+		CheckDeps: utils.CheckModuleDependencyUpdates,
+		Update: func(
+			moduleDir string,
+			entries []utils.DependencyUpdateEntry,
+		) (utils.DependencyUpdateResult, error) {
+			return utils.UpdateModuleDependencies(moduleDir, entries, backupLimit)
 		},
-		RunChecks:   defaultRunChecks,
-		Rollback:    defaultRollback,
-		ListBackups: defaultListBackups,
-		RestoreBackup: func(moduleDir, name string) (utils.DependenciesRestoredMsg, error) {
-			return defaultRestoreBackup(moduleDir, name, backupLimit)
+		RunChecks:   utils.RunModuleDependencyChecks,
+		Rollback:    utils.RollbackModuleDependencies,
+		ListBackups: utils.ListDependencyBackups,
+		RestoreBackup: func(moduleDir, name string) (utils.DependencyRestoreResult, error) {
+			return utils.RestoreDependencyBackup(moduleDir, name, backupLimit)
 		},
 	}
-}
-
-func defaultListDeps(moduleDir string) ([]utils.ModuleDependency, error) {
-	msg := utils.ListModuleDependencies(moduleDir)()
-	deps, ok := msg.(utils.DependenciesMsg)
-	if !ok {
-		if errMsg, ok := msg.(utils.DependencyErrMsg); ok {
-			return nil, errMsg.Err
-		}
-		return nil, fmt.Errorf("unexpected list result: %T", msg)
-	}
-	return []utils.ModuleDependency(deps), nil
-}
-
-func defaultCheckDeps(moduleDir string) ([]utils.ModuleDependency, error) {
-	msg := utils.CheckModuleDependencyUpdates(moduleDir)()
-	deps, ok := msg.(utils.DependenciesMsg)
-	if !ok {
-		if errMsg, ok := msg.(utils.DependencyErrMsg); ok {
-			return nil, errMsg.Err
-		}
-		return nil, fmt.Errorf("unexpected check result: %T", msg)
-	}
-	return []utils.ModuleDependency(deps), nil
-}
-
-func defaultUpdate(moduleDir string, entries []utils.DependencyUpdateEntry, backupLimit int) (utils.DependenciesUpdatedMsg, error) {
-	msg := utils.UpdateModuleDependencies(moduleDir, entries, backupLimit)()
-	if updated, ok := msg.(utils.DependenciesUpdatedMsg); ok {
-		return updated, nil
-	}
-	if errMsg, ok := msg.(utils.DependencyErrMsg); ok {
-		return utils.DependenciesUpdatedMsg{}, errMsg.Err
-	}
-	return utils.DependenciesUpdatedMsg{}, fmt.Errorf("unexpected update result: %T", msg)
-}
-
-func defaultRunChecks(moduleDir string) (utils.DependencyCheckResultMsg, error) {
-	msg := utils.RunModuleDependencyChecks(moduleDir)()
-	if res, ok := msg.(utils.DependencyCheckResultMsg); ok {
-		return res, nil
-	}
-	if errMsg, ok := msg.(utils.DependencyErrMsg); ok {
-		return utils.DependencyCheckResultMsg{}, errMsg.Err
-	}
-	return utils.DependencyCheckResultMsg{}, fmt.Errorf("unexpected check result: %T", msg)
-}
-
-func defaultRollback(moduleDir string, snap *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error) {
-	msg := utils.RollbackModuleDependencies(moduleDir, snap)()
-	if rolled, ok := msg.(utils.DependenciesRolledBackMsg); ok {
-		return rolled, nil
-	}
-	if errMsg, ok := msg.(utils.DependencyErrMsg); ok {
-		return utils.DependenciesRolledBackMsg{}, errMsg.Err
-	}
-	return utils.DependenciesRolledBackMsg{}, fmt.Errorf("unexpected rollback result: %T", msg)
-}
-
-func defaultListBackups(moduleDir string) ([]utils.DependencyBackupInfo, error) {
-	msg := utils.ListDependencyBackupsCmd(moduleDir)()
-	backups, ok := msg.(utils.DependencyBackupsMsg)
-	if ok {
-		return []utils.DependencyBackupInfo(backups), nil
-	}
-	if errMsg, ok := msg.(utils.DependencyErrMsg); ok {
-		return nil, errMsg.Err
-	}
-	return nil, fmt.Errorf("unexpected backup list result: %T", msg)
-}
-
-func defaultRestoreBackup(moduleDir, name string, backupLimit int) (utils.DependenciesRestoredMsg, error) {
-	msg := utils.RestoreDependencyBackup(moduleDir, name, backupLimit)()
-	if restored, ok := msg.(utils.DependenciesRestoredMsg); ok {
-		return restored, nil
-	}
-	if errMsg, ok := msg.(utils.DependencyErrMsg); ok {
-		return utils.DependenciesRestoredMsg{}, errMsg.Err
-	}
-	return utils.DependenciesRestoredMsg{}, fmt.Errorf("unexpected restore result: %T", msg)
 }
 
 // defaultConfirm returns a Confirm implementation that prompts on

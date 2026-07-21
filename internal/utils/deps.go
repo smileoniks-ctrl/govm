@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 // ModuleDependency represents a single Go module dependency.
@@ -23,52 +21,28 @@ type ModuleDependency struct {
 	Error      string
 }
 
-// DependenciesMsg carries the list of module dependencies.
-type DependenciesMsg []ModuleDependency
-
-// DependencyErrMsg carries a dependency-related error
-// without affecting the main error state.
-// Note: this is intentionally a plain struct (not an error) so that it
-// does not satisfy the `error` interface and therefore does not collide
-// with `utils.ErrMsg` in type switches.
-type DependencyErrMsg struct {
-	Err error
-}
-
-// DependenciesUpdatedMsg is sent after a successful update of direct
-// dependencies, carrying the refreshed list, the number of modules
-// that were upgraded, and a snapshot of the module files taken before
-// the update so that the user can roll back if checks fail.
-type DependenciesUpdatedMsg struct {
+// DependencyUpdateResult describes a completed direct-dependency update.
+type DependencyUpdateResult struct {
 	Updated      int
 	Dependencies []ModuleDependency
 	Snapshot     *DependencySnapshot
 }
 
-// DependenciesRolledBackMsg is sent after a successful rollback of
-// direct dependencies, carrying the refreshed list and the snapshot
-// that was applied.
-type DependenciesRolledBackMsg struct {
+// DependencyRollbackResult describes a completed dependency rollback.
+type DependencyRollbackResult struct {
 	Snapshot     *DependencySnapshot
 	Dependencies []ModuleDependency
 }
 
-// DependencyBackupsMsg carries the saved dependency backups for the
-// current module.
-type DependencyBackupsMsg []DependencyBackupInfo
-
-// DependenciesRestoredMsg is sent after restoring module files from
-// a saved dependency backup.
-type DependenciesRestoredMsg struct {
+// DependencyRestoreResult describes a completed dependency backup restore.
+type DependencyRestoreResult struct {
 	BackupName    string
 	BackupCreated time.Time
 	Dependencies  []ModuleDependency
 }
 
-// DependencyCheckResultMsg reports the result of the post-update
-// checks. The Output field is trimmed to a few lines so it can fit
-// inside the rollback dialog.
-type DependencyCheckResultMsg struct {
+// DependencyCheckResult reports the result of the post-update checks.
+type DependencyCheckResult struct {
 	OK      bool
 	Command string
 	Output  string
@@ -209,73 +183,60 @@ func Pluralize(n int, singular, plural string) string {
 // `go mod tidy`, and finally re-checks
 // available updates. It takes a snapshot of go.mod and go.sum before
 // running go get so the caller can roll back on check failure.
-func UpdateModuleDependencies(moduleDir string, entries []DependencyUpdateEntry, backupLimit int) tea.Cmd {
+func UpdateModuleDependencies(
+	moduleDir string,
+	entries []DependencyUpdateEntry,
+	backupLimit int,
+) (DependencyUpdateResult, error) {
 	return updateModuleDependencies(moduleDir, entries, backupLimit, defaultDependencyOperation())
 }
 
-func updateModuleDependencies(moduleDir string, entries []DependencyUpdateEntry, backupLimit int, operation dependencyOperation) tea.Cmd {
+func updateModuleDependencies(
+	moduleDir string,
+	entries []DependencyUpdateEntry,
+	backupLimit int,
+	operation dependencyOperation,
+) (DependencyUpdateResult, error) {
 	if len(entries) == 0 {
-		return func() tea.Msg {
-			return DependencyErrMsg{Err: fmt.Errorf("no direct dependency updates available")}
-		}
+		return DependencyUpdateResult{}, fmt.Errorf("no direct dependency updates available")
 	}
 
-	return func() tea.Msg {
-		context, err := operation.resolve(moduleDir)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-		snap, err := SnapshotModuleFiles(context.Root)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-		snap.Updatable = entries
-		if _, err := operation.save(context, snap, DependencyBackupKindPreUpdate, backupLimit); err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-
-		args := []string{"get"}
-		for _, entry := range entries {
-			args = append(args, fmt.Sprintf("%s@%s", entry.Path, entry.NewVersion))
-		}
-
-		if out, err := operation.runCommand(context.Root, args...); err != nil {
-			return DependencyErrMsg{Err: fmt.Errorf("go get failed: %s: %w", strings.TrimSpace(string(out)), err)}
-		}
-
-		if out, err := operation.runCommand(context.Root, "mod", "tidy"); err != nil {
-			return DependencyErrMsg{Err: fmt.Errorf("go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
-		}
-
-		// Refresh dependency list with available updates so the user
-		// can see the new state in the table.
-		fresh := operation.load(context.Root, true)
-		if errMsg, ok := fresh.(DependencyErrMsg); ok {
-			return errMsg
-		}
-		depsMsg, ok := fresh.(DependenciesMsg)
-		if !ok {
-			return DependencyErrMsg{Err: fmt.Errorf("unexpected refresh result: %T", fresh)}
-		}
-
-		return DependenciesUpdatedMsg{
-			Updated:      len(entries),
-			Dependencies: []ModuleDependency(depsMsg),
-			Snapshot:     snap,
-		}
+	context, err := operation.resolve(moduleDir)
+	if err != nil {
+		return DependencyUpdateResult{}, err
 	}
-}
-
-// ListDependencyBackupsCmd lists saved dependency backups for the
-// module containing moduleDir.
-func ListDependencyBackupsCmd(moduleDir string) tea.Cmd {
-	return func() tea.Msg {
-		backups, err := ListDependencyBackups(moduleDir)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-		return DependencyBackupsMsg(backups)
+	snap, err := SnapshotModuleFiles(context.Root)
+	if err != nil {
+		return DependencyUpdateResult{}, err
 	}
+	snap.Updatable = entries
+	if _, err := operation.save(context, snap, DependencyBackupKindPreUpdate, backupLimit); err != nil {
+		return DependencyUpdateResult{}, err
+	}
+
+	args := []string{"get"}
+	for _, entry := range entries {
+		args = append(args, fmt.Sprintf("%s@%s", entry.Path, entry.NewVersion))
+	}
+
+	if out, err := operation.runCommand(context.Root, args...); err != nil {
+		return DependencyUpdateResult{}, fmt.Errorf("go get failed: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	if out, err := operation.runCommand(context.Root, "mod", "tidy"); err != nil {
+		return DependencyUpdateResult{}, fmt.Errorf("go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	dependencies, err := operation.load(context.Root, true)
+	if err != nil {
+		return DependencyUpdateResult{}, err
+	}
+
+	return DependencyUpdateResult{
+		Updated:      len(entries),
+		Dependencies: dependencies,
+		Snapshot:     snap,
+	}, nil
 }
 
 // ListModuleDependencies lists current module dependencies
@@ -283,14 +244,8 @@ func ListDependencyBackupsCmd(moduleDir string) tea.Cmd {
 // treated as a starting directory; the actual module root is
 // resolved via ResolveModuleRoot so the call works from any
 // subfolder of a Go module.
-func ListModuleDependencies(moduleDir string) tea.Cmd {
-	return func() tea.Msg {
-		root, err := ResolveModuleRoot(moduleDir)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-		return loadDependencies(root, false)
-	}
+func ListModuleDependencies(moduleDir string) ([]ModuleDependency, error) {
+	return listModuleDependencies(moduleDir, false, defaultDependencyOperation())
 }
 
 // CheckModuleDependencyUpdates lists module dependencies
@@ -298,55 +253,63 @@ func ListModuleDependencies(moduleDir string) tea.Cmd {
 // treated as a starting directory; the actual module root is
 // resolved via ResolveModuleRoot so the call works from any
 // subfolder of a Go module.
-func CheckModuleDependencyUpdates(moduleDir string) tea.Cmd {
-	return func() tea.Msg {
-		root, err := ResolveModuleRoot(moduleDir)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-		return loadDependencies(root, true)
+func CheckModuleDependencyUpdates(moduleDir string) ([]ModuleDependency, error) {
+	return listModuleDependencies(moduleDir, true, defaultDependencyOperation())
+}
+
+func listModuleDependencies(
+	moduleDir string,
+	checkUpdates bool,
+	operation dependencyOperation,
+) ([]ModuleDependency, error) {
+	root, err := operation.resolveRoot(moduleDir)
+	if err != nil {
+		return nil, err
 	}
+	return operation.load(root, checkUpdates)
 }
 
 // RunModuleDependencyChecks runs `go test ./...` followed by
-// `go vet ./...` in the module that contains moduleDir. On success
-// it returns DependencyCheckResultMsg{OK: true}. On failure it
-// returns DependencyCheckResultMsg{OK: false, Command, Output}
-// where Output is the combined stdout/stderr of the failing
-// command, trimmed to a reasonable number of lines. The provided
-// moduleDir is treated as a starting directory; the actual module
-// root is resolved via ResolveModuleRoot so the call works from
-// any subfolder of a Go module.
-func RunModuleDependencyChecks(moduleDir string) tea.Cmd {
-	return func() tea.Msg {
-		root, err := ResolveModuleRoot(moduleDir)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
+// `go vet ./...` in the module that contains moduleDir.
+func RunModuleDependencyChecks(moduleDir string) (DependencyCheckResult, error) {
+	return runModuleDependencyChecks(moduleDir, defaultDependencyOperation())
+}
 
-		checks := []struct {
-			args    []string
-			command string
-		}{
-			{[]string{"test", "./..."}, "go test ./..."},
-			{[]string{"vet", "./..."}, "go vet ./..."},
-		}
-
-		for _, c := range checks {
-			cmd := exec.Command("go", c.args...)
-			cmd.Dir = root
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				return DependencyCheckResultMsg{
-					OK:      false,
-					Command: c.command,
-					Output:  trimOutput(string(out)),
-				}
-			}
-		}
-
-		return DependencyCheckResultMsg{OK: true}
+func runModuleDependencyChecks(
+	moduleDir string,
+	operation dependencyOperation,
+) (DependencyCheckResult, error) {
+	root, err := operation.resolveRoot(moduleDir)
+	if err != nil {
+		return DependencyCheckResult{}, err
 	}
+
+	checks := []struct {
+		args    []string
+		command string
+	}{
+		{
+			args:    []string{"test", "./..."},
+			command: "go test ./...",
+		},
+		{
+			args:    []string{"vet", "./..."},
+			command: "go vet ./...",
+		},
+	}
+
+	for _, check := range checks {
+		out, err := operation.runCommand(root, check.args...)
+		if err != nil {
+			return DependencyCheckResult{
+				OK:      false,
+				Command: check.command,
+				Output:  trimOutput(string(out)),
+			}, nil
+		}
+	}
+
+	return DependencyCheckResult{OK: true}, nil
 }
 
 type dependencyOperation struct {
@@ -354,7 +317,7 @@ type dependencyOperation struct {
 	resolveRoot    func(string) (string, error)
 	restoreFiles   func(string, *DependencySnapshot) error
 	runCommand     func(string, ...string) ([]byte, error)
-	load           func(string, bool) tea.Msg
+	load           func(string, bool) ([]ModuleDependency, error)
 	saveBackup     func(moduleContext, *DependencySnapshot, string, int) (DependencyBackupInfo, error)
 	loadBackup     func(moduleContext, string) (*DependencyBackup, error)
 }
@@ -413,102 +376,110 @@ func (operation dependencyOperation) restore(moduleDir string, snap *DependencyS
 // moduleDir is treated as a starting directory; the actual module
 // root is resolved via ResolveModuleRoot so the call works from any
 // subfolder of a Go module.
-func RollbackModuleDependencies(moduleDir string, snap *DependencySnapshot) tea.Cmd {
+func RollbackModuleDependencies(
+	moduleDir string,
+	snap *DependencySnapshot,
+) (DependencyRollbackResult, error) {
 	return rollbackModuleDependencies(moduleDir, snap, defaultDependencyOperation())
 }
 
-func rollbackModuleDependencies(moduleDir string, snap *DependencySnapshot, operation dependencyOperation) tea.Cmd {
-	return func() tea.Msg {
-		root, err := operation.resolveRoot(moduleDir)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-
-		if err := operation.restore(root, snap); err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-
-		if out, err := operation.runCommand(root, "mod", "tidy"); err != nil {
-			return DependencyErrMsg{Err: fmt.Errorf("rollback go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)}
-		}
-
-		fresh := operation.load(root, false)
-		if errMsg, ok := fresh.(DependencyErrMsg); ok {
-			return errMsg
-		}
-		depsMsg, ok := fresh.(DependenciesMsg)
-		if !ok {
-			return DependencyErrMsg{Err: fmt.Errorf("unexpected refresh result: %T", fresh)}
-		}
-
-		return DependenciesRolledBackMsg{
-			Snapshot:     snap,
-			Dependencies: []ModuleDependency(depsMsg),
-		}
+func rollbackModuleDependencies(
+	moduleDir string,
+	snap *DependencySnapshot,
+	operation dependencyOperation,
+) (DependencyRollbackResult, error) {
+	root, err := operation.resolveRoot(moduleDir)
+	if err != nil {
+		return DependencyRollbackResult{}, err
 	}
+
+	if err := operation.restore(root, snap); err != nil {
+		return DependencyRollbackResult{}, err
+	}
+
+	if out, err := operation.runCommand(root, "mod", "tidy"); err != nil {
+		return DependencyRollbackResult{}, fmt.Errorf(
+			"rollback go mod tidy failed: %s: %w",
+			strings.TrimSpace(string(out)),
+			err,
+		)
+	}
+
+	dependencies, err := operation.load(root, false)
+	if err != nil {
+		return DependencyRollbackResult{}, err
+	}
+
+	return DependencyRollbackResult{
+		Snapshot:     snap,
+		Dependencies: dependencies,
+	}, nil
 }
 
 // RestoreDependencyBackup restores go.mod and go.sum from a saved
 // dependency backup, saving the current files first as a pre-restore
 // backup so the restore itself can be undone manually.
-func RestoreDependencyBackup(moduleDir, backupName string, backupLimit int) tea.Cmd {
+func RestoreDependencyBackup(
+	moduleDir string,
+	backupName string,
+	backupLimit int,
+) (DependencyRestoreResult, error) {
 	return restoreDependencyBackup(moduleDir, backupName, backupLimit, defaultDependencyOperation())
 }
 
-func restoreDependencyBackup(moduleDir, backupName string, backupLimit int, operation dependencyOperation) tea.Cmd {
-	return func() tea.Msg {
-		context, err := operation.resolve(moduleDir)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-		backup, err := operation.loadBackupResolved(context, backupName)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-		current, err := SnapshotModuleFiles(context.Root)
-		if err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-		if _, err := operation.save(context, current, DependencyBackupKindPreRestore, backupLimit); err != nil {
-			return DependencyErrMsg{Err: err}
-		}
-		if err := operation.restore(context.Root, backup.Snapshot); err != nil {
-			restoreErr := fmt.Errorf("restore backup module files: %w", err)
-			if compensationErr := operation.restore(context.Root, current); compensationErr != nil {
-				return DependencyErrMsg{Err: errors.Join(
-					restoreErr,
-					fmt.Errorf("restore original module files after backup restore failure: %w", compensationErr),
-				)}
-			}
-			return DependencyErrMsg{Err: restoreErr}
-		}
-
-		if out, err := operation.runCommand(context.Root, "mod", "tidy"); err != nil {
-			tidyErr := fmt.Errorf("restore go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)
-			if rollbackErr := operation.restore(context.Root, current); rollbackErr != nil {
-				return DependencyErrMsg{Err: errors.Join(
-					tidyErr,
-					fmt.Errorf("restore original module files after tidy failure: %w", rollbackErr),
-				)}
-			}
-			return DependencyErrMsg{Err: tidyErr}
-		}
-
-		fresh := operation.load(context.Root, false)
-		if errMsg, ok := fresh.(DependencyErrMsg); ok {
-			return errMsg
-		}
-		depsMsg, ok := fresh.(DependenciesMsg)
-		if !ok {
-			return DependencyErrMsg{Err: fmt.Errorf("unexpected refresh result: %T", fresh)}
-		}
-
-		return DependenciesRestoredMsg{
-			BackupName:    filepath.Base(backupName),
-			BackupCreated: backup.CreatedAt,
-			Dependencies:  []ModuleDependency(depsMsg),
-		}
+func restoreDependencyBackup(
+	moduleDir string,
+	backupName string,
+	backupLimit int,
+	operation dependencyOperation,
+) (DependencyRestoreResult, error) {
+	context, err := operation.resolve(moduleDir)
+	if err != nil {
+		return DependencyRestoreResult{}, err
 	}
+	backup, err := operation.loadBackupResolved(context, backupName)
+	if err != nil {
+		return DependencyRestoreResult{}, err
+	}
+	current, err := SnapshotModuleFiles(context.Root)
+	if err != nil {
+		return DependencyRestoreResult{}, err
+	}
+	if _, err := operation.save(context, current, DependencyBackupKindPreRestore, backupLimit); err != nil {
+		return DependencyRestoreResult{}, err
+	}
+	if err := operation.restore(context.Root, backup.Snapshot); err != nil {
+		restoreErr := fmt.Errorf("restore backup module files: %w", err)
+		if compensationErr := operation.restore(context.Root, current); compensationErr != nil {
+			return DependencyRestoreResult{}, errors.Join(
+				restoreErr,
+				fmt.Errorf("restore original module files after backup restore failure: %w", compensationErr),
+			)
+		}
+		return DependencyRestoreResult{}, restoreErr
+	}
+
+	if out, err := operation.runCommand(context.Root, "mod", "tidy"); err != nil {
+		tidyErr := fmt.Errorf("restore go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)
+		if rollbackErr := operation.restore(context.Root, current); rollbackErr != nil {
+			return DependencyRestoreResult{}, errors.Join(
+				tidyErr,
+				fmt.Errorf("restore original module files after tidy failure: %w", rollbackErr),
+			)
+		}
+		return DependencyRestoreResult{}, tidyErr
+	}
+
+	dependencies, err := operation.load(context.Root, false)
+	if err != nil {
+		return DependencyRestoreResult{}, err
+	}
+
+	return DependencyRestoreResult{
+		BackupName:    filepath.Base(backupName),
+		BackupCreated: backup.CreatedAt,
+		Dependencies:  dependencies,
+	}, nil
 }
 
 const maxCheckOutputLines = 8
@@ -521,7 +492,7 @@ func trimOutput(out string) string {
 	return strings.Join(lines, "\n")
 }
 
-func loadDependencies(moduleDir string, checkUpdates bool) tea.Msg {
+func loadDependencies(moduleDir string, checkUpdates bool) ([]ModuleDependency, error) {
 	args := []string{"list", "-mod=readonly", "-m", "-json"}
 	if checkUpdates {
 		args = append(args, "-u")
@@ -535,13 +506,13 @@ func loadDependencies(moduleDir string, checkUpdates bool) tea.Msg {
 	if err != nil {
 		exitErr, ok := err.(*exec.ExitError)
 		if ok && len(exitErr.Stderr) > 0 {
-			return DependencyErrMsg{Err: fmt.Errorf("go list failed: %s", string(exitErr.Stderr))}
+			return nil, fmt.Errorf("go list failed: %s", string(exitErr.Stderr))
 		}
-		return DependencyErrMsg{Err: fmt.Errorf("go list failed: %w", err)}
+		return nil, fmt.Errorf("go list failed: %w", err)
 	}
 
 	dec := json.NewDecoder(strings.NewReader(string(output)))
-	var deps []ModuleDependency
+	deps := []ModuleDependency{}
 
 	for dec.More() {
 		var raw struct {
@@ -558,7 +529,7 @@ func loadDependencies(moduleDir string, checkUpdates bool) tea.Msg {
 			}
 		}
 		if err := dec.Decode(&raw); err != nil {
-			return DependencyErrMsg{Err: fmt.Errorf("failed to parse go list output: %w", err)}
+			return nil, fmt.Errorf("failed to parse go list output: %w", err)
 		}
 
 		// Skip the main module itself.
@@ -587,5 +558,5 @@ func loadDependencies(moduleDir string, checkUpdates bool) tea.Msg {
 		deps = append(deps, d)
 	}
 
-	return DependenciesMsg(deps)
+	return deps, nil
 }

@@ -9,8 +9,6 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 func TestDependencyBackupStore_SaveUsesInjectedClockWithoutGlobalState(t *testing.T) {
@@ -426,12 +424,17 @@ func TestUpdateModuleDependencies_ResolvesContextOnce(t *testing.T) {
 			}
 			return nil, nil
 		},
-		load: func(string, bool) tea.Msg { return DependenciesMsg{} },
+		load: func(string, bool) ([]ModuleDependency, error) {
+			return []ModuleDependency{}, nil
+		},
 	}
 
-	msg := updateModuleDependencies(".", entries, backupLimit, operation)()
-	if _, ok := msg.(DependenciesUpdatedMsg); !ok {
-		t.Fatalf("update result = %T, want DependenciesUpdatedMsg", msg)
+	result, err := updateModuleDependencies(".", entries, backupLimit, operation)
+	if err != nil {
+		t.Fatalf("updateModuleDependencies: %v", err)
+	}
+	if result.Updated != len(entries) || result.Snapshot == nil {
+		t.Fatalf("update result = %+v, want updated count and snapshot", result)
 	}
 	if resolves != 1 {
 		t.Fatalf("context resolves = %d, want 1", resolves)
@@ -461,12 +464,17 @@ func TestRestoreDependencyBackup_ResolvesContextOnce(t *testing.T) {
 		},
 		restoreFiles: func(string, *DependencySnapshot) error { return nil },
 		runCommand:   func(string, ...string) ([]byte, error) { return nil, nil },
-		load:         func(string, bool) tea.Msg { return DependenciesMsg{} },
+		load: func(string, bool) ([]ModuleDependency, error) {
+			return []ModuleDependency{}, nil
+		},
 	}
 
-	msg := restoreDependencyBackup(".", "saved.json", backupLimit, operation)()
-	if _, ok := msg.(DependenciesRestoredMsg); !ok {
-		t.Fatalf("restore result = %T, want DependenciesRestoredMsg", msg)
+	result, err := restoreDependencyBackup(".", "saved.json", backupLimit, operation)
+	if err != nil {
+		t.Fatalf("restoreDependencyBackup: %v", err)
+	}
+	if result.BackupName != "saved.json" || !result.BackupCreated.Equal(backup.CreatedAt) {
+		t.Fatalf("restore result = %+v, want saved backup metadata", result)
 	}
 	if resolves != 1 {
 		t.Fatalf("context resolves = %d, want 1", resolves)

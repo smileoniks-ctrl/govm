@@ -87,7 +87,7 @@ func (m Model) switchTab(target int) (tea.Model, tea.Cmd) {
 	// Lazy-load deps on first visit.
 	if m.CurrentTab == DepsTab && !m.Deps.Loaded {
 		m.Deps.Phase = OpChecking
-		return m, utils.ListModuleDependencies(m.Deps.ModuleDir)
+		return m, utils.ListModuleDependenciesCmd(m.Deps.ModuleDir)
 	}
 	if m.CurrentTab == SettingsTab {
 		return m, tea.ClearScreen
@@ -182,7 +182,7 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 		// the scope tab-local, which lets the DependenciesMsg handler
 		// tear it down cleanly when the check finishes.
 		m.Status.Clear()
-		return m, utils.CheckModuleDependencyUpdates(m.Deps.ModuleDir)
+		return m, utils.CheckModuleDependencyUpdatesCmd(m.Deps.ModuleDir)
 	}
 	m.Loading = true
 	m.Status.SetGlobal("", "")

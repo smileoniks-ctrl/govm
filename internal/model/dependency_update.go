@@ -47,8 +47,8 @@ func (m Model) handleDialogKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // applyDialogConfirm dispatches the confirm action to the per-kind
 // side-effect runner. Each runner returns the tea.Cmd that actually
-// performs the work (UpdateModuleDependencies, RunModuleDependencyChecks,
-// RollbackModuleDependencies, RestoreDependencyBackup).
+// performs the work (UpdateModuleDependenciesCmd, RunModuleDependencyChecksCmd,
+// RollbackModuleDependenciesCmd, RestoreDependencyBackupCmd).
 func (m Model) applyDialogConfirm() (tea.Model, tea.Cmd) {
 	switch m.Deps.Dialog.Kind {
 	case DialogUpdate:
@@ -102,7 +102,11 @@ func (m Model) applyUpdateChoice() (tea.Model, tea.Cmd) {
 	m.Deps.UpdateEntries = nil
 	m.Deps.Phase = OpUpdating
 	m.Status.SetGlobal("Updating dependencies...", "info")
-	return m, utils.UpdateModuleDependencies(m.Deps.ModuleDir, entries, m.Settings.Values.DepsBackupLimit)
+	return m, utils.UpdateModuleDependenciesCmd(
+		m.Deps.ModuleDir,
+		entries,
+		m.Settings.Values.DepsBackupLimit,
+	)
 }
 
 func (m Model) applyChecksChoice() (tea.Model, tea.Cmd) {
@@ -116,7 +120,7 @@ func (m Model) applyChecksChoice() (tea.Model, tea.Cmd) {
 	m.resetDialog()
 	m.Deps.Phase = OpRunningChecks
 	m.Status.SetGlobal("Running checks...", "info")
-	return m, utils.RunModuleDependencyChecks(m.Deps.ModuleDir)
+	return m, utils.RunModuleDependencyChecksCmd(m.Deps.ModuleDir)
 }
 
 func (m Model) applyRollbackChoice() (tea.Model, tea.Cmd) {
@@ -134,7 +138,7 @@ func (m Model) applyRollbackChoice() (tea.Model, tea.Cmd) {
 	m.resetDialog()
 	m.Deps.Phase = OpRollingBack
 	m.Status.SetGlobal("Rolling back dependencies...", "info")
-	return m, utils.RollbackModuleDependencies(m.Deps.ModuleDir, snap)
+	return m, utils.RollbackModuleDependenciesCmd(m.Deps.ModuleDir, snap)
 }
 
 func (m Model) keepUpdatedDependencies() (tea.Model, tea.Cmd) {
@@ -160,5 +164,9 @@ func (m Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
 	m.resetDialog()
 	m.Deps.Phase = OpRestoringBackup
 	m.Status.SetGlobal("Restoring dependency backup...", "info")
-	return m, utils.RestoreDependencyBackup(m.Deps.ModuleDir, backup.Name, m.Settings.Values.DepsBackupLimit)
+	return m, utils.RestoreDependencyBackupCmd(
+		m.Deps.ModuleDir,
+		backup.Name,
+		m.Settings.Values.DepsBackupLimit,
+	)
 }

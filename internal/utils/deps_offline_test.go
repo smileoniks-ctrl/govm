@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *testing.T) {
@@ -36,7 +34,7 @@ func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *tes
 	}
 
 	var offline bool
-	msg := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
+	restored, err := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
 		runCommand: func(_ string, args ...string) ([]byte, error) {
 			if strings.Join(args, " ") != "mod tidy" {
@@ -44,21 +42,20 @@ func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *tes
 			}
 			return nil, nil
 		},
-		load: func(_ string, checkUpdates bool) tea.Msg {
+		load: func(_ string, checkUpdates bool) ([]ModuleDependency, error) {
 			if checkUpdates {
 				t.Fatal("restore refresh must not check updates online")
 			}
 			offline = true
-			return DependenciesMsg{{Path: "example.com/restored", Version: "v2.0.0"}}
+			return []ModuleDependency{{Path: "example.com/restored", Version: "v2.0.0"}}, nil
 		},
-	})()
+	})
+	if err != nil {
+		t.Fatalf("restoreDependencyBackup: %v", err)
+	}
 
 	if !offline {
 		t.Fatal("expected restore refresh to run offline")
-	}
-	restored, ok := msg.(DependenciesRestoredMsg)
-	if !ok {
-		t.Fatalf("message = %T, want DependenciesRestoredMsg", msg)
 	}
 	if len(restored.Dependencies) != 1 {
 		t.Fatalf("dependencies = %+v, want restored dependency", restored.Dependencies)
@@ -109,7 +106,7 @@ func TestRollbackModuleDependencies_RefreshesOffline(t *testing.T) {
 	}
 
 	var offline bool
-	msg := rollbackModuleDependencies(root, snap, dependencyOperation{
+	_, err = rollbackModuleDependencies(root, snap, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
 		runCommand: func(_ string, args ...string) ([]byte, error) {
 			if strings.Join(args, " ") != "mod tidy" {
@@ -117,20 +114,20 @@ func TestRollbackModuleDependencies_RefreshesOffline(t *testing.T) {
 			}
 			return nil, nil
 		},
-		load: func(_ string, checkUpdates bool) tea.Msg {
+		load: func(_ string, checkUpdates bool) ([]ModuleDependency, error) {
 			if checkUpdates {
 				t.Fatal("rollback refresh must not check updates online")
 			}
 			offline = true
-			return DependenciesMsg{{Path: "example.com/restored", Version: "v1.0.0"}}
+			return []ModuleDependency{{Path: "example.com/restored", Version: "v1.0.0"}}, nil
 		},
-	})()
+	})
+	if err != nil {
+		t.Fatalf("rollbackModuleDependencies: %v", err)
+	}
 
 	if !offline {
 		t.Fatal("expected rollback refresh to run offline")
-	}
-	if _, ok := msg.(DependenciesRolledBackMsg); !ok {
-		t.Fatalf("message = %T, want DependenciesRolledBackMsg", msg)
 	}
 }
 
@@ -158,7 +155,7 @@ func TestRestoreDependencyBackup_TidyFailureHasContext(t *testing.T) {
 		t.Fatalf("save dependency backup: %v", err)
 	}
 
-	msg := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
+	_, err = restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
 		runCommand: func(_ string, args ...string) ([]byte, error) {
 			if strings.Join(args, " ") != "mod tidy" {
@@ -168,12 +165,14 @@ func TestRestoreDependencyBackup_TidyFailureHasContext(t *testing.T) {
 			writeFile(t, root, "go.sum", "partial tidy result\n")
 			return []byte("tidy output"), errors.New("tidy failed")
 		},
-		load: func(string, bool) tea.Msg { t.Fatal("loader must not run after tidy error"); return nil },
-	})()
+		load: func(string, bool) ([]ModuleDependency, error) {
+			t.Fatal("loader must not run after tidy error")
+			return nil, nil
+		},
+	})
 
-	errMsg, ok := msg.(DependencyErrMsg)
-	if !ok || !strings.Contains(errMsg.Err.Error(), "restore go mod tidy failed: tidy output") {
-		t.Fatalf("message = %+v, want contextual restore tidy error", msg)
+	if err == nil || !strings.Contains(err.Error(), "restore go mod tidy failed: tidy output") {
+		t.Fatalf("error = %v, want contextual restore tidy error", err)
 	}
 	gotMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
@@ -231,7 +230,7 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 	}
 
 	restoreCalls := 0
-	msg := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
+	_, err = restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
 		restoreFiles: func(moduleDir string, snap *DependencySnapshot) error {
 			restoreCalls++
@@ -246,12 +245,14 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 			t.Fatal("command must not run after restore error")
 			return nil, nil
 		},
-		load: func(string, bool) tea.Msg { t.Fatal("loader must not run after restore error"); return nil },
-	})()
+		load: func(string, bool) ([]ModuleDependency, error) {
+			t.Fatal("loader must not run after restore error")
+			return nil, nil
+		},
+	})
 
-	errMsg, ok := msg.(DependencyErrMsg)
-	if !ok || !strings.Contains(errMsg.Err.Error(), "restore failed") {
-		t.Fatalf("message = %+v, want restore error", msg)
+	if err == nil || !strings.Contains(err.Error(), "restore failed") {
+		t.Fatalf("error = %v, want restore error", err)
 	}
 	if restoreCalls != 2 {
 		t.Fatalf("restore calls = %d, want 2", restoreCalls)
@@ -294,14 +295,16 @@ func TestRollbackModuleDependencies_TidyFailureHasContext(t *testing.T) {
 		t.Fatalf("SnapshotModuleFiles: %v", err)
 	}
 
-	msg := rollbackModuleDependencies(root, snap, dependencyOperation{
+	_, err = rollbackModuleDependencies(root, snap, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
 		runCommand:  func(string, ...string) ([]byte, error) { return []byte("tidy output"), errors.New("tidy failed") },
-		load:        func(string, bool) tea.Msg { t.Fatal("loader must not run after tidy error"); return nil },
-	})()
+		load: func(string, bool) ([]ModuleDependency, error) {
+			t.Fatal("loader must not run after tidy error")
+			return nil, nil
+		},
+	})
 
-	errMsg, ok := msg.(DependencyErrMsg)
-	if !ok || !strings.Contains(errMsg.Err.Error(), "rollback go mod tidy failed: tidy output") {
-		t.Fatalf("message = %+v, want contextual rollback tidy error", msg)
+	if err == nil || !strings.Contains(err.Error(), "rollback go mod tidy failed: tidy output") {
+		t.Fatalf("error = %v, want contextual rollback tidy error", err)
 	}
 }

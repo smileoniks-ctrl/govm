@@ -546,14 +546,9 @@ func TestRollbackModuleDependenciesTidiesRestoredFiles(t *testing.T) {
 		t.Fatalf("precondition failed: expected stale entry in go.sum, got %q", beforeSum)
 	}
 
-	cmd := RollbackModuleDependencies(dir, snap)
-	if cmd == nil {
-		t.Fatal("expected a non-nil tea.Cmd")
-	}
-	msg := cmd()
-	rolled, ok := msg.(DependenciesRolledBackMsg)
-	if !ok {
-		t.Fatalf("expected DependenciesRolledBackMsg, got %T: %+v", msg, msg)
+	rolled, err := RollbackModuleDependencies(dir, snap)
+	if err != nil {
+		t.Fatalf("RollbackModuleDependencies: %v", err)
 	}
 
 	afterSum, err := os.ReadFile(filepath.Join(dir, "go.sum"))
@@ -568,7 +563,7 @@ func TestRollbackModuleDependenciesTidiesRestoredFiles(t *testing.T) {
 	}
 
 	if rolled.Snapshot == nil {
-		t.Fatal("expected snapshot to be propagated in DependenciesRolledBackMsg")
+		t.Fatal("expected snapshot to be propagated in DependencyRollbackResult")
 	}
 }
 

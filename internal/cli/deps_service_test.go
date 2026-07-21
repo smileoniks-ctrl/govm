@@ -14,11 +14,11 @@ import (
 type fakeOps struct {
 	listFn         func(string) ([]utils.ModuleDependency, error)
 	checkFn        func(string) ([]utils.ModuleDependency, error)
-	updateFn       func(string, []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error)
-	runChecksFn    func(string) (utils.DependencyCheckResultMsg, error)
-	rollbackFn     func(string, *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error)
+	updateFn       func(string, []utils.DependencyUpdateEntry) (utils.DependencyUpdateResult, error)
+	runChecksFn    func(string) (utils.DependencyCheckResult, error)
+	rollbackFn     func(string, *utils.DependencySnapshot) (utils.DependencyRollbackResult, error)
 	listBackupsFn  func(string) ([]utils.DependencyBackupInfo, error)
-	restoreFn      func(string, string) (utils.DependenciesRestoredMsg, error)
+	restoreFn      func(string, string) (utils.DependencyRestoreResult, error)
 	updateCalls    int
 	runChecksCalls int
 	rollbackCalls  int
@@ -64,11 +64,11 @@ func TestRunRestoreUsesProvidedBackupName(t *testing.T) {
 		},
 	)
 	svc.RestoreBackup = ops.RestoreBackup
-	ops.restoreFn = func(dir, name string) (utils.DependenciesRestoredMsg, error) {
+	ops.restoreFn = func(dir, name string) (utils.DependencyRestoreResult, error) {
 		if name != "2026-07-09_12-00-00.json" {
 			t.Fatalf("restore name = %q", name)
 		}
-		return utils.DependenciesRestoredMsg{
+		return utils.DependencyRestoreResult{
 			BackupName:    name,
 			BackupCreated: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
 		}, nil
@@ -94,22 +94,22 @@ func (f *fakeOps) ListDeps(dir string) ([]utils.ModuleDependency, error) {
 func (f *fakeOps) CheckDeps(dir string) ([]utils.ModuleDependency, error) {
 	return f.checkFn(dir)
 }
-func (f *fakeOps) Update(dir string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error) {
+func (f *fakeOps) Update(dir string, entries []utils.DependencyUpdateEntry) (utils.DependencyUpdateResult, error) {
 	f.updateCalls++
 	return f.updateFn(dir, entries)
 }
-func (f *fakeOps) RunChecks(dir string) (utils.DependencyCheckResultMsg, error) {
+func (f *fakeOps) RunChecks(dir string) (utils.DependencyCheckResult, error) {
 	f.runChecksCalls++
 	return f.runChecksFn(dir)
 }
-func (f *fakeOps) Rollback(dir string, snap *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error) {
+func (f *fakeOps) Rollback(dir string, snap *utils.DependencySnapshot) (utils.DependencyRollbackResult, error) {
 	f.rollbackCalls++
 	return f.rollbackFn(dir, snap)
 }
 func (f *fakeOps) ListBackups(dir string) ([]utils.DependencyBackupInfo, error) {
 	return f.listBackupsFn(dir)
 }
-func (f *fakeOps) RestoreBackup(dir, name string) (utils.DependenciesRestoredMsg, error) {
+func (f *fakeOps) RestoreBackup(dir, name string) (utils.DependencyRestoreResult, error) {
 	f.restoreCalls++
 	return f.restoreFn(dir, name)
 }
@@ -133,25 +133,25 @@ func newFakeDeps(checkFn func(string) ([]utils.ModuleDependency, error), confirm
 	ops.listFn = func(dir string) ([]utils.ModuleDependency, error) {
 		return []utils.ModuleDependency{{Path: "x", Version: "v1.0.0"}}, nil
 	}
-	ops.updateFn = func(dir string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error) {
-		return utils.DependenciesUpdatedMsg{
+	ops.updateFn = func(dir string, entries []utils.DependencyUpdateEntry) (utils.DependencyUpdateResult, error) {
+		return utils.DependencyUpdateResult{
 			Updated: 1,
 			Snapshot: &utils.DependencySnapshot{
 				Updatable: []utils.DependencyUpdateEntry{{Path: "x", OldVersion: "v1.0.0", NewVersion: "v1.1.0"}},
 			},
 		}, nil
 	}
-	ops.runChecksFn = func(dir string) (utils.DependencyCheckResultMsg, error) {
-		return utils.DependencyCheckResultMsg{OK: true}, nil
+	ops.runChecksFn = func(dir string) (utils.DependencyCheckResult, error) {
+		return utils.DependencyCheckResult{OK: true}, nil
 	}
-	ops.rollbackFn = func(dir string, snap *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error) {
-		return utils.DependenciesRolledBackMsg{Snapshot: snap}, nil
+	ops.rollbackFn = func(dir string, snap *utils.DependencySnapshot) (utils.DependencyRollbackResult, error) {
+		return utils.DependencyRollbackResult{Snapshot: snap}, nil
 	}
 	ops.listBackupsFn = func(dir string) ([]utils.DependencyBackupInfo, error) {
 		return nil, nil
 	}
-	ops.restoreFn = func(dir, name string) (utils.DependenciesRestoredMsg, error) {
-		return utils.DependenciesRestoredMsg{}, nil
+	ops.restoreFn = func(dir, name string) (utils.DependencyRestoreResult, error) {
+		return utils.DependencyRestoreResult{}, nil
 	}
 	return svc, ops, stdout
 }
@@ -326,8 +326,8 @@ func TestRunUpdateChecksFailAcceptRollback(t *testing.T) {
 		},
 		func(string, bool) (bool, error) { confirmCalls++; return true, nil },
 	)
-	ops.runChecksFn = func(string) (utils.DependencyCheckResultMsg, error) {
-		return utils.DependencyCheckResultMsg{OK: false, Command: "go test ./...", Output: "FAIL: x"}, nil
+	ops.runChecksFn = func(string) (utils.DependencyCheckResult, error) {
+		return utils.DependencyCheckResult{OK: false, Command: "go test ./...", Output: "FAIL: x"}, nil
 	}
 
 	if err := svc.RunUpdate(); err != nil {
@@ -354,8 +354,8 @@ func TestRunUpdateChecksFailDeclineRollback(t *testing.T) {
 		},
 		func(string, bool) (bool, error) { confirmCalls++; return confirmCalls != 3, nil },
 	)
-	ops.runChecksFn = func(string) (utils.DependencyCheckResultMsg, error) {
-		return utils.DependencyCheckResultMsg{OK: false, Command: "go test ./...", Output: "FAIL: x"}, nil
+	ops.runChecksFn = func(string) (utils.DependencyCheckResult, error) {
+		return utils.DependencyCheckResult{OK: false, Command: "go test ./...", Output: "FAIL: x"}, nil
 	}
 
 	if err := svc.RunUpdate(); err != nil {
@@ -398,7 +398,7 @@ func TestRunUpdateUpdateError(t *testing.T) {
 		},
 		func(string, bool) (bool, error) { return true, nil },
 	)
-	ops.updateFn = func(_ string, entries []utils.DependencyUpdateEntry) (utils.DependenciesUpdatedMsg, error) {
+	ops.updateFn = func(_ string, entries []utils.DependencyUpdateEntry) (utils.DependencyUpdateResult, error) {
 		want := []utils.DependencyUpdateEntry{{
 			Path:       "github.com/d/x",
 			OldVersion: "v1.0.0",
@@ -407,7 +407,7 @@ func TestRunUpdateUpdateError(t *testing.T) {
 		if !reflect.DeepEqual(entries, want) {
 			t.Fatalf("update entries = %#v, want %#v", entries, want)
 		}
-		return utils.DependenciesUpdatedMsg{}, errors.New("go get failed")
+		return utils.DependencyUpdateResult{}, errors.New("go get failed")
 	}
 	if err := svc.RunUpdate(); err == nil {
 		t.Fatal("expected error, got nil")
@@ -426,11 +426,11 @@ func TestRunUpdateRollbackError(t *testing.T) {
 		},
 		func(string, bool) (bool, error) { return true, nil },
 	)
-	ops.runChecksFn = func(string) (utils.DependencyCheckResultMsg, error) {
-		return utils.DependencyCheckResultMsg{OK: false, Command: "go test", Output: "boom"}, nil
+	ops.runChecksFn = func(string) (utils.DependencyCheckResult, error) {
+		return utils.DependencyCheckResult{OK: false, Command: "go test", Output: "boom"}, nil
 	}
-	ops.rollbackFn = func(string, *utils.DependencySnapshot) (utils.DependenciesRolledBackMsg, error) {
-		return utils.DependenciesRolledBackMsg{}, errors.New("disk full")
+	ops.rollbackFn = func(string, *utils.DependencySnapshot) (utils.DependencyRollbackResult, error) {
+		return utils.DependencyRollbackResult{}, errors.New("disk full")
 	}
 	if err := svc.RunUpdate(); err == nil {
 		t.Fatal("expected error, got nil")
