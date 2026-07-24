@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
 // DialogKind identifies which Yes/No dependency dialog is currently
@@ -35,20 +35,26 @@ const (
 )
 
 // ConfirmDialog is the single module that owns the active Yes/No
-// dialog for the Deps tab. Four historical dialogs (update, checks,
-// rollback, restore) collapse into one struct parameterised by Kind.
-// Only restore uses the Cursor / MaxCursor pair, which controls
-// navigation over the Backups slice stored on DepsState.
+// dialog for the Deps tab. Four dialogs (update, checks, rollback,
+// restore) collapse into one struct parameterised by Kind. Only
+// restore uses the Cursor / MaxCursor pair, which controls navigation
+// over the Backups slice stored on DepsState. UpdateEntries and
+// CheckResult retain the prompt payload so rendering stays independent
+// from the cycle's defensively copied accessors. Inconclusive selects
+// the distinct rollback copy used when checks could not run.
 //
 // The struct is intentionally small and side-effect free. Key handling
 // that mutates only dialog-internal state (choice toggle, list
 // navigation) lives in Handle; commands and DepsState mutations stay
 // in Model.Update, which interprets the returned DialogAction.
 type ConfirmDialog struct {
-	Kind      DialogKind
-	ChoiceYes bool
-	Cursor    int
-	MaxCursor int
+	Kind          DialogKind
+	ChoiceYes     bool
+	Cursor        int
+	MaxCursor     int
+	Inconclusive  bool
+	UpdateEntries []deps.DependencyUpdateEntry
+	CheckResult   *deps.DependencyCheckResult
 }
 
 // Active reports whether any dialog is currently open. The zero value
@@ -137,25 +143,25 @@ func buttonLabels(kind DialogKind) (yes, no string) {
 func (d ConfirmDialog) bodyLines(t styles.Theme, deps DepsState) []string {
 	switch d.Kind {
 	case DialogUpdate:
-		return updateDialogLines(t, deps.UpdateEntries)
+		return updateDialogLines(t, d.UpdateEntries)
 	case DialogChecks:
 		return checksDialogLines(t)
 	case DialogRollback:
-		return rollbackDialogLines(t, deps.LastCheckResult)
+		return rollbackDialogLines(t, d.CheckResult, d.Inconclusive)
 	case DialogRestore:
 		return restoreDialogLines(t, deps.Backups, d.Cursor)
 	}
 	return nil
 }
 
-func updateDialogLines(t styles.Theme, updatable []utils.DependencyUpdateEntry) []string {
+func updateDialogLines(t styles.Theme, updatable []deps.DependencyUpdateEntry) []string {
 	lines := make([]string, 0, 6+len(updatable))
 	lines = append(lines, t.DialogTitleStyle.Render(t.DialogWarningStyle.Render("⚠ Warning")))
 	lines = append(lines, "")
 	lines = append(lines, t.DialogBodyStyle.Render(fmt.Sprintf(
 		"%d direct %s will be updated:",
 		len(updatable),
-		utils.Pluralize(len(updatable), "dependency", "dependencies"),
+		deps.Pluralize(len(updatable), "dependency", "dependencies"),
 	)))
 
 	visible := updatable
@@ -192,12 +198,16 @@ func checksDialogLines(t styles.Theme) []string {
 	}
 }
 
-func rollbackDialogLines(t styles.Theme, result *utils.DependencyCheckResultMsg) []string {
+func rollbackDialogLines(t styles.Theme, result *deps.DependencyCheckResult, inconclusive bool) []string {
+	title := "⚠ Checks failed"
+	if inconclusive {
+		title = "⚠ Checks inconclusive"
+	}
 	lines := []string{
-		t.DialogTitleStyle.Render(t.DialogWarningStyle.Render("⚠ Checks failed")),
+		t.DialogTitleStyle.Render(t.DialogWarningStyle.Render(title)),
 		"",
 	}
-	if result != nil {
+	if result != nil && result.Command != "" {
 		lines = append(lines, t.DialogBodyStyle.Render(fmt.Sprintf("Command: %s", result.Command)))
 		if result.Output != "" {
 			output := strings.Split(result.Output, "\n")
@@ -218,7 +228,7 @@ func rollbackDialogLines(t styles.Theme, result *utils.DependencyCheckResultMsg)
 	return lines
 }
 
-func restoreDialogLines(t styles.Theme, backups []utils.DependencyBackupInfo, cursor int) []string {
+func restoreDialogLines(t styles.Theme, backups []deps.DependencyBackupInfo, cursor int) []string {
 	lines := []string{
 		t.DialogTitleStyle.Render(t.DialogWarningStyle.Render("Dependency backups")),
 		"",

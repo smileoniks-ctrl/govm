@@ -1,4 +1,4 @@
-package utils
+package deps
 
 import (
 	"encoding/json"
@@ -477,6 +477,24 @@ func TestRestoreModuleFiles_RestoresGoSumAndGoMod(t *testing.T) {
 	}
 }
 
+func TestRestoreModuleFiles_RejectsMissingGoModSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/test\n")
+
+	err := RestoreModuleFiles(dir, &DependencySnapshot{})
+	if err == nil || !strings.Contains(err.Error(), "go.mod snapshot is missing") {
+		t.Fatalf("RestoreModuleFiles error = %v", err)
+	}
+
+	got, readErr := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if readErr != nil {
+		t.Fatalf("read go.mod: %v", readErr)
+	}
+	if string(got) != "module example.com/test\n" {
+		t.Fatalf("go.mod changed to %q", got)
+	}
+}
+
 func TestRestoreModuleFiles_RemovesGoSumWhenOriginallyMissing(t *testing.T) {
 	dir := t.TempDir()
 	originalMod := "module example.com/test\n\ngo 1.26\n"
@@ -502,68 +520,76 @@ func TestRestoreModuleFiles_RemovesGoSumWhenOriginallyMissing(t *testing.T) {
 	}
 }
 
-func TestRollbackModuleDependenciesTidiesRestoredFiles(t *testing.T) {
-	dir := t.TempDir()
-
-	// Snapshot represents a clean state without any require blocks.
-	// go.sum carries stale entries that should not be there after tidy.
+// TestRollbackModuleDependencies_RestoresExactlyWithoutTidy verifies
+// the hardened rollback semantics: go.mod and go.sum are restored
+// verbatim from the snapshot (an exact byte restore) and NO
+// `go mod tidy` runs, so stale go.sum entries are retained. The
+// persistent pre-update backup captured during apply stays on disk.
+func TestRollbackModuleDependencies_RestoresExactlyWithoutTidy(t *testing.T) {
+	root := t.TempDir()
 	originalMod := "module example.com/rollback-tidy\n\ngo 1.20\n"
 	originalSum := strings.Join([]string{
 		"github.com/sahilm/fuzzy v0.1.3 h1:juByESSS32nVD81vr6tHmKmA/8zde7gE+x5CLxrzXPU=",
 		"github.com/sahilm/fuzzy v0.1.3/go.mod h1:au6//VbVSqu6DFrkL2CfjlJ5iURpNCPeE+1GwY3XsT8=",
 		"",
 	}, "\n")
-	writeFile(t, dir, "go.mod", originalMod)
-	writeFile(t, dir, "go.sum", originalSum)
+	writeFile(t, root, "go.mod", originalMod)
+	writeFile(t, root, "go.sum", originalSum)
 
-	snap, err := SnapshotModuleFiles(dir)
+	snap, err := SnapshotModuleFiles(root)
 	if err != nil {
 		t.Fatalf("SnapshotModuleFiles: %v", err)
 	}
 
-	// Simulate go get mutating the files; then restore the snapshot
-	// so we end up with go.sum holding stale entries that tidy
-	// must drop on rollback.
+	// Simulate go get mutating the files.
 	changedMod := "module example.com/rollback-tidy\n\ngo 1.20\n\nrequire github.com/x/y v2.0.0\n"
 	changedSum := "github.com/x/y v2.0.0 h1:def=\n"
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(changedMod), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(changedMod), 0644); err != nil {
 		t.Fatalf("overwrite go.mod: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.sum"), []byte(changedSum), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "go.sum"), []byte(changedSum), 0644); err != nil {
 		t.Fatalf("overwrite go.sum: %v", err)
 	}
-	if err := RestoreModuleFiles(dir, snap); err != nil {
-		t.Fatalf("RestoreModuleFiles: %v", err)
-	}
 
-	// Sanity check: after restoring, the stale sum should still be
-	// present so the test really exercises go mod tidy.
-	beforeSum, err := os.ReadFile(filepath.Join(dir, "go.sum"))
+	tidyCalls := 0
+	rolled, err := rollbackModuleDependencies(root, snap, dependencyOperation{
+		resolveRoot: func(string) (string, error) { return root, nil },
+		// restoreFiles left nil so the real RestoreModuleFiles runs an
+		// exact byte restore.
+		runCommand: func(string, ...string) ([]byte, error) {
+			tidyCalls++
+			return nil, nil
+		},
+		load: func(_ string, checkUpdates bool) ([]ModuleDependency, error) {
+			if checkUpdates {
+				t.Fatal("rollback refresh must not check updates online")
+			}
+			return []ModuleDependency{{Path: "example.com/restored", Version: "v1.0.0"}}, nil
+		},
+	})
 	if err != nil {
-		t.Fatalf("read go.sum before rollback: %v", err)
+		t.Fatalf("rollbackModuleDependencies: %v", err)
 	}
-	if !strings.Contains(string(beforeSum), "github.com/sahilm/fuzzy") {
-		t.Fatalf("precondition failed: expected stale entry in go.sum, got %q", beforeSum)
+	if tidyCalls != 0 {
+		t.Fatalf("rollback must not run go mod tidy, got %d call(s)", tidyCalls)
 	}
-
-	rolled, err := RollbackModuleDependencies(dir, snap)
-	if err != nil {
-		t.Fatalf("RollbackModuleDependencies: %v", err)
-	}
-
-	afterSum, err := os.ReadFile(filepath.Join(dir, "go.sum"))
-	if err != nil {
-		// go mod tidy may delete the file if there are no dependencies;
-		// treat that as success.
-		if !os.IsNotExist(err) {
-			t.Fatalf("read go.sum after rollback: %v", err)
-		}
-	} else if strings.Contains(string(afterSum), "github.com/sahilm/fuzzy") {
-		t.Fatalf("expected go mod tidy to drop stale entries, got %q", afterSum)
-	}
-
 	if rolled.Snapshot == nil {
 		t.Fatal("expected snapshot to be propagated in DependencyRollbackResult")
+	}
+
+	gotMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	if string(gotMod) != originalMod {
+		t.Fatalf("go.mod = %q, want exact restore %q", gotMod, originalMod)
+	}
+	gotSum, err := os.ReadFile(filepath.Join(root, "go.sum"))
+	if err != nil {
+		t.Fatalf("read go.sum: %v", err)
+	}
+	if string(gotSum) != originalSum {
+		t.Fatalf("go.sum = %q, want exact restore (stale entries retained) %q", gotSum, originalSum)
 	}
 }
 
@@ -596,8 +622,7 @@ func TestTrimOutput_ShortOutput(t *testing.T) {
 
 // requireGoToolchain skips the test when the `go` toolchain is not
 // available on PATH. ResolveModuleRoot depends on `go env GOMOD`,
-// so the test cannot run without it. We do not need network access:
-// `go env GOMOD` is a local command.
+// so the test cannot run without it.
 func requireGoToolchain(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
@@ -605,10 +630,9 @@ func requireGoToolchain(t *testing.T) {
 	}
 }
 
-// evalSymlinks is a small helper that evaluates symlinks on a path
-// and fails the test on error. It is used to compare module roots
-// resiliently on systems where t.TempDir() may return a path that
-// traverses a symlink (e.g. /var -> /private/var on macOS).
+// evalSymlinks evaluates symlinks on a path and fails the test on
+// error. Used to compare module roots resiliently on systems where
+// t.TempDir() traverses a symlink (e.g. /var -> /private/var on macOS).
 func evalSymlinks(t *testing.T, path string) string {
 	t.Helper()
 	resolved, err := filepath.EvalSymlinks(path)
@@ -662,10 +686,6 @@ func TestResolveModuleRoot_FromSubfolder(t *testing.T) {
 func TestResolveModuleRoot_NotInModule(t *testing.T) {
 	requireGoToolchain(t)
 
-	// t.TempDir() lives under os.TempDir() (e.g. /tmp or
-	// /var/folders/.../T/...) which is not inside any Go module, so
-	// `go env GOMOD` should report that the directory is not in a
-	// module.
 	dir := t.TempDir()
 
 	_, err := ResolveModuleRoot(dir)
@@ -692,11 +712,6 @@ func TestSnapshotModuleFiles_FindsGoModFromSubfolder(t *testing.T) {
 		t.Fatalf("mkdir subdir: %v", err)
 	}
 
-	// SnapshotModuleFiles requires a real module directory. The fix
-	// for the bug is that callers resolve the module root first via
-	// ResolveModuleRoot and then pass the resolved root into
-	// SnapshotModuleFiles, so a subfolder as the input no longer
-	// hides the go.mod.
 	root, err := ResolveModuleRoot(subdir)
 	if err != nil {
 		t.Fatalf("ResolveModuleRoot: %v", err)

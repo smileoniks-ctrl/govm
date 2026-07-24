@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
+	coredeps "github.com/smileoniks-ctrl/govm/internal/deps"
 )
 
 func TestRenderDependencyUpdateDialogContainsWarning(t *testing.T) {
@@ -22,12 +22,15 @@ func TestRenderDependencyUpdateDialogContainsWarning(t *testing.T) {
 }
 
 func TestRenderDependencyUpdateDialogListsModules(t *testing.T) {
-	entries := []utils.DependencyUpdateEntry{
+	entries := []coredeps.DependencyUpdateEntry{
 		{Path: "github.com/example/lib", OldVersion: "v1.0.0", NewVersion: "v1.1.0"},
 		{Path: "github.com/example/other", OldVersion: "v2.0.0", NewVersion: "v2.1.0"},
 	}
-	dialog := stripANSI(ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.
-		Render(testTheme(), DepsState{UpdateEntries: entries}, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{
+		Kind:          DialogUpdate,
+		ChoiceYes:     true,
+		UpdateEntries: entries,
+	}.Render(testTheme(), DepsState{}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"github.com/example/lib", "v1.0.0", "v1.1.0", "github.com/example/other"} {
 		if !strings.Contains(dialog, want) {
@@ -37,16 +40,19 @@ func TestRenderDependencyUpdateDialogListsModules(t *testing.T) {
 }
 
 func TestRenderDependencyUpdateDialogTruncatesLongLists(t *testing.T) {
-	entries := make([]utils.DependencyUpdateEntry, 0, 12)
+	entries := make([]coredeps.DependencyUpdateEntry, 0, 12)
 	for i := 0; i < 12; i++ {
-		entries = append(entries, utils.DependencyUpdateEntry{
+		entries = append(entries, coredeps.DependencyUpdateEntry{
 			Path:       fmt.Sprintf("github.com/example/dep%d", i),
 			OldVersion: "v1.0.0",
 			NewVersion: "v1.1.0",
 		})
 	}
-	dialog := stripANSI(ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.
-		Render(testTheme(), DepsState{UpdateEntries: entries}, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{
+		Kind:          DialogUpdate,
+		ChoiceYes:     true,
+		UpdateEntries: entries,
+	}.Render(testTheme(), DepsState{}, viewportSize{Width: 64, Height: 20}))
 
 	if !strings.Contains(dialog, "and") || !strings.Contains(dialog, "more") {
 		t.Fatalf("expected truncation hint in dialog, got:\n%s", dialog)
@@ -54,11 +60,11 @@ func TestRenderDependencyUpdateDialogTruncatesLongLists(t *testing.T) {
 }
 
 func TestRenderDependencyRestoreDialogKeepsCursorVisible(t *testing.T) {
-	backups := make([]utils.DependencyBackupInfo, 0, 7)
+	backups := make([]coredeps.DependencyBackupInfo, 0, 7)
 	for i := 0; i < 7; i++ {
-		backups = append(backups, utils.DependencyBackupInfo{
+		backups = append(backups, coredeps.DependencyBackupInfo{
 			Name:    fmt.Sprintf("2026-07-09_12-00-0%d.json", i),
-			Kind:    utils.DependencyBackupKindPreUpdate,
+			Kind:    coredeps.DependencyBackupKindPreUpdate,
 			Updated: i,
 		})
 	}
@@ -83,13 +89,16 @@ func TestRenderDependencyChecksDialogContainsCommands(t *testing.T) {
 }
 
 func TestRenderDependencyRollbackDialogContainsCommand(t *testing.T) {
-	result := &utils.DependencyCheckResultMsg{
+	result := coredeps.DependencyCheckResult{
 		OK:      false,
 		Command: "go test ./...",
 		Output:  "FAIL: example_test.go:10: expected 1, got 2",
 	}
-	dialog := stripANSI(ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}.
-		Render(testTheme(), DepsState{LastCheckResult: result}, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{
+		Kind:        DialogRollback,
+		ChoiceYes:   true,
+		CheckResult: &result,
+	}.Render(testTheme(), DepsState{}, viewportSize{Width: 64, Height: 20}))
 
 	for _, want := range []string{"Checks failed", "go test ./...", "FAIL: example_test", "Roll back", "Keep"} {
 		if !strings.Contains(dialog, want) {
@@ -101,9 +110,9 @@ func TestRenderDependencyRollbackDialogContainsCommand(t *testing.T) {
 func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
 	longPath := "github.com/acme/very-long-module-name-that-must-not-overflow-the-terminal"
 	longOutput := "FAIL: " + strings.Repeat("a", 100)
-	backups := []utils.DependencyBackupInfo{{
+	backups := []coredeps.DependencyBackupInfo{{
 		Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
-		Kind:    utils.DependencyBackupKindPreUpdate,
+		Kind:    coredeps.DependencyBackupKindPreUpdate,
 		Updated: 1,
 	}}
 
@@ -114,11 +123,15 @@ func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
 		{
 			name: "update",
 			render: func(width int) string {
-				return ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.Render(
-					testTheme(),
-					DepsState{UpdateEntries: []utils.DependencyUpdateEntry{{
+				return ConfirmDialog{
+					Kind:      DialogUpdate,
+					ChoiceYes: true,
+					UpdateEntries: []coredeps.DependencyUpdateEntry{{
 						Path: longPath, OldVersion: "v1.0.0", NewVersion: "v1.1.0",
-					}}},
+					}},
+				}.Render(
+					testTheme(),
+					DepsState{},
 					viewportSize{Width: width, Height: 20})
 			},
 		},
@@ -132,12 +145,16 @@ func TestRenderDependencyDialogsRespectViewportWidth(t *testing.T) {
 		{
 			name: "rollback",
 			render: func(width int) string {
-				return ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}.Render(
-					testTheme(),
-					DepsState{LastCheckResult: &utils.DependencyCheckResultMsg{
+				return ConfirmDialog{
+					Kind:      DialogRollback,
+					ChoiceYes: true,
+					CheckResult: &coredeps.DependencyCheckResult{
 						Command: longPath,
 						Output:  longOutput,
-					}},
+					},
+				}.Render(
+					testTheme(),
+					DepsState{},
 					viewportSize{Width: width, Height: 20})
 			},
 		},
@@ -169,10 +186,13 @@ func TestDialogRendersOverDepsView(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
-	updated, _ = updated.Update(utils.DependenciesMsg{
+	updated, _ = updated.Update(DependenciesMsg{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
 	})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: 'u'})
+	updated, _ = updated.Update(coredeps.CheckUpdatesDoneEvent{Dependencies: []coredeps.ModuleDependency{{
+		Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0",
+	}}})
 	m = updated.(Model)
 
 	view := stripANSI(m.View().Content)
@@ -372,12 +392,11 @@ func TestViewShowsRollbackDialog(t *testing.T) {
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
 
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
-	m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
-		OK:      false,
+	result := coredeps.DependencyCheckResult{
 		Command: "go test ./...",
 		Output:  "FAIL: foo_test.go:42",
 	}
+	m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true, CheckResult: &result}
 
 	view := stripANSI(m.View().Content)
 	if !strings.Contains(view, "Checks failed") {

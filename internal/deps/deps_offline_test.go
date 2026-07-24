@@ -1,4 +1,4 @@
-package utils
+package deps
 
 import (
 	"errors"
@@ -8,7 +8,11 @@ import (
 	"testing"
 )
 
-func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *testing.T) {
+// TestRestoreDependencyBackup_RestoresOfflineWithoutTidy verifies the
+// hardened manual-restore semantics: the backup files are restored
+// verbatim (exact byte restore), NO `go mod tidy` runs, the refresh
+// is offline, and a pre-restore backup of the current files is saved.
+func TestRestoreDependencyBackup_RestoresOfflineWithoutTidy(t *testing.T) {
 	setTestHome(t)
 	root := t.TempDir()
 	currentMod := "module example.com/app\n\ngo 1.26\n\nrequire example.com/current v1.0.0\n"
@@ -34,12 +38,11 @@ func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *tes
 	}
 
 	var offline bool
+	tidyCalled := false
 	restored, err := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
-		runCommand: func(_ string, args ...string) ([]byte, error) {
-			if strings.Join(args, " ") != "mod tidy" {
-				t.Fatalf("command = %q, want %q", args, "mod tidy")
-			}
+		runCommand: func(_ string, _ ...string) ([]byte, error) {
+			tidyCalled = true
 			return nil, nil
 		},
 		load: func(_ string, checkUpdates bool) ([]ModuleDependency, error) {
@@ -57,6 +60,9 @@ func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *tes
 	if !offline {
 		t.Fatal("expected restore refresh to run offline")
 	}
+	if tidyCalled {
+		t.Fatal("restore must not run go mod tidy")
+	}
 	if len(restored.Dependencies) != 1 {
 		t.Fatalf("dependencies = %+v, want restored dependency", restored.Dependencies)
 	}
@@ -65,14 +71,14 @@ func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *tes
 		t.Fatalf("read restored go.mod: %v", err)
 	}
 	if string(gotMod) != restoredMod {
-		t.Fatalf("restored go.mod = %q, want %q", gotMod, restoredMod)
+		t.Fatalf("restored go.mod = %q, want exact %q", gotMod, restoredMod)
 	}
 	gotSum, err := os.ReadFile(filepath.Join(root, "go.sum"))
 	if err != nil {
 		t.Fatalf("read restored go.sum: %v", err)
 	}
 	if string(gotSum) != restoredSum {
-		t.Fatalf("restored go.sum = %q, want %q", gotSum, restoredSum)
+		t.Fatalf("restored go.sum = %q, want exact %q", gotSum, restoredSum)
 	}
 	backups, err := ListDependencyBackups(root)
 	if err != nil {
@@ -97,6 +103,9 @@ func TestRestoreDependencyBackup_RefreshesOfflineAndSavesPreRestoreBackup(t *tes
 	}
 }
 
+// TestRollbackModuleDependencies_RefreshesOffline verifies rollback
+// restores verbatim and refreshes offline without running
+// `go mod tidy`.
 func TestRollbackModuleDependencies_RefreshesOffline(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n")
@@ -106,12 +115,11 @@ func TestRollbackModuleDependencies_RefreshesOffline(t *testing.T) {
 	}
 
 	var offline bool
+	tidyCalled := false
 	_, err = rollbackModuleDependencies(root, snap, dependencyOperation{
 		resolveRoot: func(string) (string, error) { return root, nil },
-		runCommand: func(_ string, args ...string) ([]byte, error) {
-			if strings.Join(args, " ") != "mod tidy" {
-				t.Fatalf("command = %q, want %q", args, "mod tidy")
-			}
+		runCommand: func(_ string, _ ...string) ([]byte, error) {
+			tidyCalled = true
 			return nil, nil
 		},
 		load: func(_ string, checkUpdates bool) ([]ModuleDependency, error) {
@@ -129,78 +137,8 @@ func TestRollbackModuleDependencies_RefreshesOffline(t *testing.T) {
 	if !offline {
 		t.Fatal("expected rollback refresh to run offline")
 	}
-}
-
-func TestRestoreDependencyBackup_TidyFailureHasContext(t *testing.T) {
-	setTestHome(t)
-	root := t.TempDir()
-	currentMod := "module example.com/app\n\ngo 1.26\n\nrequire example.com/current v1.0.0\n"
-	currentSum := "example.com/current v1.0.0 h1:current=\n"
-	restoredMod := "module example.com/app\n\ngo 1.26\n\nrequire example.com/restored v2.0.0\n"
-	restoredSum := "example.com/restored v2.0.0 h1:restored=\n"
-	writeFile(t, root, "go.mod", currentMod)
-	writeFile(t, root, "go.sum", currentSum)
-	snap, err := SnapshotModuleFiles(root)
-	if err != nil {
-		t.Fatalf("SnapshotModuleFiles: %v", err)
-	}
-	snap.ModFile.Content = restoredMod
-	snap.SumFile.Content = restoredSum
-	context, err := resolveModuleContext(root)
-	if err != nil {
-		t.Fatalf("resolveModuleContext: %v", err)
-	}
-	info, err := defaultDependencyBackupStore().save(context, snap, DependencyBackupKindPreUpdate)
-	if err != nil {
-		t.Fatalf("save dependency backup: %v", err)
-	}
-
-	_, err = restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
-		resolveRoot: func(string) (string, error) { return root, nil },
-		runCommand: func(_ string, args ...string) ([]byte, error) {
-			if strings.Join(args, " ") != "mod tidy" {
-				t.Fatalf("command = %q, want %q", args, "mod tidy")
-			}
-			writeFile(t, root, "go.mod", "partial tidy result\n")
-			writeFile(t, root, "go.sum", "partial tidy result\n")
-			return []byte("tidy output"), errors.New("tidy failed")
-		},
-		load: func(string, bool) ([]ModuleDependency, error) {
-			t.Fatal("loader must not run after tidy error")
-			return nil, nil
-		},
-	})
-
-	if err == nil || !strings.Contains(err.Error(), "restore go mod tidy failed: tidy output") {
-		t.Fatalf("error = %v, want contextual restore tidy error", err)
-	}
-	gotMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil {
-		t.Fatalf("read restored go.mod: %v", err)
-	}
-	if string(gotMod) != currentMod {
-		t.Fatalf("go.mod after tidy failure = %q, want original bytes %q", gotMod, currentMod)
-	}
-	gotSum, err := os.ReadFile(filepath.Join(root, "go.sum"))
-	if err != nil {
-		t.Fatalf("read restored go.sum: %v", err)
-	}
-	if string(gotSum) != currentSum {
-		t.Fatalf("go.sum after tidy failure = %q, want original bytes %q", gotSum, currentSum)
-	}
-	backups, err := ListDependencyBackups(root)
-	if err != nil {
-		t.Fatalf("ListDependencyBackups: %v", err)
-	}
-	foundPreRestore := false
-	for _, candidate := range backups {
-		if candidate.Kind == DependencyBackupKindPreRestore {
-			foundPreRestore = true
-			break
-		}
-	}
-	if !foundPreRestore {
-		t.Fatal("expected pre-restore backup to remain after tidy failure")
+	if tidyCalled {
+		t.Fatal("rollback must not run go mod tidy")
 	}
 }
 
@@ -284,27 +222,5 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 	}
 	if !foundPreRestore {
 		t.Fatal("expected pre-restore backup to remain after restore failure")
-	}
-}
-
-func TestRollbackModuleDependencies_TidyFailureHasContext(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n")
-	snap, err := SnapshotModuleFiles(root)
-	if err != nil {
-		t.Fatalf("SnapshotModuleFiles: %v", err)
-	}
-
-	_, err = rollbackModuleDependencies(root, snap, dependencyOperation{
-		resolveRoot: func(string) (string, error) { return root, nil },
-		runCommand:  func(string, ...string) ([]byte, error) { return []byte("tidy output"), errors.New("tidy failed") },
-		load: func(string, bool) ([]ModuleDependency, error) {
-			t.Fatal("loader must not run after tidy error")
-			return nil, nil
-		},
-	})
-
-	if err == nil || !strings.Contains(err.Error(), "rollback go mod tidy failed: tidy output") {
-		t.Fatalf("error = %v, want contextual rollback tidy error", err)
 	}
 }

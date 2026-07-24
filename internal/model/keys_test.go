@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	coredeps "github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -214,7 +215,7 @@ func TestRefreshOnDepsTabTriggersCheckCmd(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
-	updated, _ = m.Update(utils.DependenciesMsg{})
+	updated, _ = m.Update(DependenciesMsg{})
 	m = updated.(Model)
 
 	// Press 'r' on deps tab
@@ -235,7 +236,7 @@ func TestPressBOnDepsTabTriggersBackupListCmd(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
-	updated, _ = m.Update(utils.DependenciesMsg{})
+	updated, _ = m.Update(DependenciesMsg{})
 	m = updated.(Model)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'b'})
@@ -258,7 +259,7 @@ func TestPressUOnDepsOpensConfirmDialog(t *testing.T) {
 	m = updated.(Model)
 
 	// Load deps with one direct update.
-	deps := utils.DependenciesMsg{
+	deps := DependenciesMsg{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
 	}
 	updated, _ = m.Update(deps)
@@ -267,9 +268,11 @@ func TestPressUOnDepsOpensConfirmDialog(t *testing.T) {
 	// Press 'u'.
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
+	updated, _ = m.Update(coredeps.CheckUpdatesDoneEvent{Dependencies: []coredeps.ModuleDependency(deps)})
+	m = updated.(Model)
 
 	if m.Deps.Dialog.Kind != DialogUpdate {
-		t.Fatal("expected update dialog to be open after pressing u on deps tab")
+		t.Fatal("expected update dialog after fresh preflight")
 	}
 	if !m.Deps.Dialog.ChoiceYes {
 		t.Fatal("expected default choice to be Yes")
@@ -284,13 +287,15 @@ func TestPressUOnDepsWithoutUpdatesShowsMessage(t *testing.T) {
 	m = updated.(Model)
 
 	// Load deps with no updates.
-	deps := utils.DependenciesMsg{
+	deps := DependenciesMsg{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.0.0"},
 	}
 	updated, _ = m.Update(deps)
 	m = updated.(Model)
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: 'u'})
+	m = updated.(Model)
+	updated, _ = m.Update(coredeps.CheckUpdatesDoneEvent{Dependencies: []coredeps.ModuleDependency(deps)})
 	m = updated.(Model)
 
 	if m.Deps.Dialog.Active() {

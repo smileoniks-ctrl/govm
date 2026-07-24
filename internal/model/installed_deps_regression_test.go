@@ -52,7 +52,7 @@ func TestDepsTab_CheckStatusClearsAfterDependenciesMsg(t *testing.T) {
 	// Switch to DepsTab (also lazy-loads).
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
-	updated, _ = updated.Update(utils.DependenciesMsg{})
+	updated, _ = updated.Update(DependenciesMsg{})
 	m = updated.(Model)
 
 	// Press 'r' to start a check.
@@ -63,7 +63,7 @@ func TestDepsTab_CheckStatusClearsAfterDependenciesMsg(t *testing.T) {
 	}
 
 	// Simulate the check completing.
-	updated, _ = m.Update(utils.DependenciesMsg{})
+	updated, _ = m.Update(DependenciesMsg{})
 	m = updated.(Model)
 
 	if m.Status.Text() != "" {
@@ -85,7 +85,7 @@ func TestDepsTab_CheckPhaseShowsSpinner(t *testing.T) {
 	m := newTestModel(t)
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
-	updated, _ = updated.Update(utils.DependenciesMsg{})
+	updated, _ = updated.Update(DependenciesMsg{})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: 'r'})
 	m = updated.(Model)
 
@@ -113,7 +113,7 @@ func TestDepsTab_BackupsPhaseStartsEmpty(t *testing.T) {
 	// Switch to DepsTab (also lazy-loads).
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
-	updated, _ = updated.Update(utils.DependenciesMsg{})
+	updated, _ = updated.Update(DependenciesMsg{})
 	m = updated.(Model)
 
 	// Press 'b' to start loading backups.

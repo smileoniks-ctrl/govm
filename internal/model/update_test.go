@@ -7,52 +7,81 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
-func TestDependenciesMsgInvalidatesStaleUpdateConfirmation(t *testing.T) {
+func TestUpdateKeyStartsFreshPreflight(t *testing.T) {
 	m := newTestModel(t)
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
-	m.Deps.Dependencies = []utils.ModuleDependency{
+	m.CurrentTab = DepsTab
+	m.Deps.Loaded = true
+	m.Deps.Dependencies = []deps.ModuleDependency{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
 	}
-	m.Deps.UpdateEntries = []utils.DependencyUpdateEntry{
-		{Path: "github.com/example/lib", OldVersion: "v1.0.0", NewVersion: "v1.1.0"},
+	var issued deps.Intent
+	m.Deps.ExecuteIntent = func(intent deps.Intent) tea.Cmd {
+		issued = intent
+		return func() tea.Msg { return nil }
 	}
 
-	incoming := utils.DependenciesMsg{
-		{Path: "github.com/example/lib", Version: "v1.0.1", Latest: "v1.1.0"},
-	}
-	updated, _ := m.Update(incoming)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'u'})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.Kind == DialogUpdate {
-		t.Fatal("expected stale update confirmation to close")
+	if cmd == nil {
+		t.Fatal("expected fresh check command")
 	}
-	if len(got.Deps.UpdateEntries) != 0 {
-		t.Fatalf("expected cached update entries to clear, got %d", len(got.Deps.UpdateEntries))
+	if got.Deps.Cycle.Phase() != deps.PhaseChecking {
+		t.Fatalf("cycle phase = %s, want checking", got.Deps.Cycle.Phase())
 	}
-	if !reflect.DeepEqual(got.Deps.Dependencies, []utils.ModuleDependency(incoming)) {
-		t.Fatalf("dependencies = %+v, want %+v", got.Deps.Dependencies, incoming)
+	if _, ok := issued.(deps.IntentCheckUpdates); !ok {
+		t.Fatalf("issued intent = %T, want IntentCheckUpdates", issued)
 	}
-	rows := got.Deps.Table.Rows()
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 dependency table row, got %d", len(rows))
+	if got.Deps.Dialog.Active() {
+		t.Fatal("update dialog must wait for the fresh preflight result")
 	}
-	if rows[0][0] != incoming[0].Path ||
-		rows[0][1] != incoming[0].Version ||
-		rows[0][2] != incoming[0].Latest ||
-		rows[0][3] != "update avail" {
-		t.Fatalf("dependency table row = %q, want %q", rows[0], []string{
-			incoming[0].Path,
-			incoming[0].Version,
-			incoming[0].Latest,
-			"update avail",
-		})
+}
+
+func TestFreshPreflightResultOpensUpdateDialog(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = DepsTab
+	m.Deps.Loaded = true
+	m.Deps.Cycle = mustCycleEvent(t, deps.NewUpdateCycle(), deps.StartEvent{ModuleDir: "/tmp/module"})
+
+	fresh := []deps.ModuleDependency{
+		{Path: "github.com/example/lib", Version: "v1.0.1", Latest: "v1.2.0"},
 	}
-	if !strings.Contains(strings.ToLower(got.Status.Text()), "review") ||
-		!strings.Contains(strings.ToLower(got.Status.Text()), "again") {
-		t.Fatalf("expected status to tell the user to review updates again, got %q", got.Status.Text())
+	updated, _ := m.Update(deps.CheckUpdatesDoneEvent{Dependencies: fresh})
+	got := updated.(Model)
+
+	if got.Deps.Dialog.Kind != DialogUpdate {
+		t.Fatalf("dialog kind = %v, want DialogUpdate", got.Deps.Dialog.Kind)
+	}
+	entries := got.Deps.Cycle.Entries()
+	if len(entries) != 1 || entries[0].OldVersion != "v1.0.1" || entries[0].NewVersion != "v1.2.0" {
+		t.Fatalf("fresh entries = %+v", entries)
+	}
+	if !reflect.DeepEqual(got.Deps.Cycle.Dependencies(), fresh) {
+		t.Fatalf("dependencies = %+v, want %+v", got.Deps.Cycle.Dependencies(), fresh)
+	}
+	if !got.Deps.Dialog.ChoiceYes {
+		t.Fatal("expected default choice Yes")
+	}
+	if !reflect.DeepEqual(got.Deps.Dialog.UpdateEntries, entries) {
+		t.Fatalf("dialog entries = %+v, want %+v", got.Deps.Dialog.UpdateEntries, entries)
+	}
+}
+
+func TestUnknownCycleIntentReportsError(t *testing.T) {
+	m := newTestModel(t)
+	m.Deps.Cycle = mustCycleEvent(t, deps.NewUpdateCycle(), deps.StartEvent{ModuleDir: "/tmp/module"})
+
+	updated, _ := m.applyCycleIntent(nil)
+	got := updated.(Model)
+	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
+	}
+	if got.Status.Kind() != "error" || !strings.Contains(got.Status.Text(), "Unhandled dependency cycle intent") {
+		t.Fatalf("status = %q (%s)", got.Status.Text(), got.Status.Kind())
 	}
 }
 
@@ -112,11 +141,11 @@ func TestWindowSizeMsgUsesNormalContentWidth(t *testing.T) {
 func TestDependencyBackupsMsgOpensRestoreDialog(t *testing.T) {
 	m := newTestModel(t)
 
-	updated, _ := m.Update(utils.DependencyBackupsMsg{
+	updated, _ := m.Update(DependencyBackupsMsg{
 		{
 			Name:       "2026-07-09_12-00-00.json",
 			ModulePath: "github.com/acme/app",
-			Kind:       utils.DependencyBackupKindPreUpdate,
+			Kind:       deps.DependencyBackupKindPreUpdate,
 			Updated:    1,
 		},
 	})
@@ -133,160 +162,168 @@ func TestDependencyBackupsMsgOpensRestoreDialog(t *testing.T) {
 	}
 }
 
-func TestDependenciesUpdatedMsgUpdatesState(t *testing.T) {
-	m := newTestModel(t)
+func TestApplyResultUpdatesStateAndOpensChecksDialog(t *testing.T) {
+	m := modelAtConfirmApply(t)
+	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmApplyEvent{Yes: true})
+	dependencies := []deps.ModuleDependency{{
+		Path: "github.com/example/lib", Version: "v1.1.0", Latest: "v1.1.0",
+	}}
 
-	msg := utils.DependenciesUpdatedMsg{
-		Updated: 2,
-		Dependencies: []utils.ModuleDependency{
-			{Path: "github.com/example/lib", Version: "v1.1.0", Latest: "v1.1.0"},
+	updated, _ := m.Update(deps.ApplyUpdatesDoneEvent{
+		Snapshot: &deps.DependencySnapshot{
+			ModFile: deps.ModuleFileSnapshot{Exists: true, Content: "old"},
 		},
-	}
-
-	updated, _ := m.Update(msg)
+		Backup:       &deps.DependencyBackupInfo{Name: "backup.json", Path: "/tmp/backup.json"},
+		Dependencies: dependencies,
+	})
 	got := updated.(Model)
 
-	if got.Deps.Phase == OpUpdating {
-		t.Fatal("expected UpdatingDependencies to be false after update complete")
+	if got.Deps.Cycle.Phase() != deps.PhaseConfirmChecks {
+		t.Fatalf("cycle phase = %s, want confirm-checks", got.Deps.Cycle.Phase())
 	}
-	if len(got.Deps.Dependencies) != 1 {
-		t.Fatalf("expected 1 dependency, got %d", len(got.Deps.Dependencies))
+	if got.Deps.Cycle.Snapshot() == nil {
+		t.Fatal("expected cycle snapshot")
 	}
-	if got.Status.Kind() != "success" {
-		t.Fatalf("expected success message, got type %q", got.Status.Kind())
+	if got.Deps.Dialog.Kind != DialogChecks || !got.Deps.Dialog.ChoiceYes {
+		t.Fatalf("dialog = %+v, want checks default Yes", got.Deps.Dialog)
+	}
+	if !reflect.DeepEqual(got.Deps.Dependencies, dependencies) {
+		t.Fatalf("dependencies = %+v, want %+v", got.Deps.Dependencies, dependencies)
 	}
 }
 
-func TestDependenciesUpdatedMsgStoresSnapshotAndOpensChecksDialog(t *testing.T) {
-	m := newTestModel(t)
+func TestChecksPassedCompletesCycle(t *testing.T) {
+	m := modelAtConfirmChecks(t)
+	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmChecksEvent{Yes: true})
+	m.resetDialog()
 
-	msg := utils.DependenciesUpdatedMsg{
-		Updated: 1,
-		Dependencies: []utils.ModuleDependency{
-			{Path: "github.com/example/lib", Version: "v1.1.0", Latest: "v1.1.0"},
-		},
-		Snapshot: &utils.DependencySnapshot{
-			ModFile: utils.ModuleFileSnapshot{Exists: true, Content: "old"},
-			SumFile: utils.ModuleFileSnapshot{Exists: true, Content: "oldsum"},
-		},
-	}
-
-	updated, _ := m.Update(msg)
+	updated, _ := m.Update(deps.ChecksDoneEvent{
+		Result: deps.DependencyCheckResult{OK: true},
+	})
 	got := updated.(Model)
 
-	if got.Deps.Phase == OpUpdating {
-		t.Fatal("expected UpdatingDependencies to be false")
+	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
 	}
-	if got.Deps.Snapshot == nil {
-		t.Fatal("expected LastDependencySnapshot to be set")
-	}
-	if got.Deps.Dialog.Kind != DialogChecks {
-		t.Fatal("expected checks dialog to be open")
-	}
-	if !got.Deps.Dialog.ChoiceYes {
-		t.Fatal("expected default choice to be Yes")
-	}
-	if got.Status.Kind() != "success" {
-		t.Fatalf("expected success message, got %q", got.Status.Kind())
-	}
-}
-
-func TestDependencyCheckResultOKClearsDialog(t *testing.T) {
-	m := newTestModel(t)
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
-	m.Deps.Snapshot = &utils.DependencySnapshot{}
-
-	updated, _ := m.Update(utils.DependencyCheckResultMsg{OK: true})
-	got := updated.(Model)
-
 	if got.Deps.Dialog.Active() {
-		t.Fatal("expected checks dialog to close after success")
-	}
-	if got.Deps.Phase == OpRunningChecks {
-		t.Fatal("expected RunningDependencyChecks to be false")
+		t.Fatal("expected dialog closed")
 	}
 	if got.Status.Kind() != "success" {
-		t.Fatalf("expected success status, got %q", got.Status.Kind())
-	}
-	if got.Deps.Snapshot != nil {
-		t.Fatal("expected Snapshot to be cleared after success")
-	}
-	if got.Deps.LastCheckResult != nil {
-		t.Fatal("expected LastCheckResult to be cleared after success")
+		t.Fatalf("status kind = %q, want success", got.Status.Kind())
 	}
 }
 
-func TestDependencyCheckResultFailOpensRollbackDialog(t *testing.T) {
-	m := newTestModel(t)
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
-	m.Deps.Phase = OpRunningChecks
+func TestChecksFailedOpensRollbackDialog(t *testing.T) {
+	m := modelAtConfirmChecks(t)
+	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmChecksEvent{Yes: true})
 
-	msg := utils.DependencyCheckResultMsg{
-		OK:      false,
-		Command: "go test ./...",
-		Output:  "FAIL",
-	}
-
-	updated, _ := m.Update(msg)
+	updated, _ := m.Update(deps.ChecksDoneEvent{
+		Result: deps.DependencyCheckResult{
+			Command: "go test ./...",
+			Output:  "FAIL",
+		},
+	})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.Kind == DialogChecks {
-		t.Fatal("expected checks dialog to close on failure")
+	if got.Deps.Dialog.Kind != DialogRollback || !got.Deps.Dialog.ChoiceYes {
+		t.Fatalf("dialog = %+v, want rollback default Yes", got.Deps.Dialog)
 	}
-	if got.Deps.Dialog.Kind != DialogRollback {
-		t.Fatal("expected rollback dialog to be open")
+	if got.Deps.Dialog.Inconclusive {
+		t.Fatal("failed command should not be marked inconclusive")
 	}
-	if !got.Deps.Dialog.ChoiceYes {
-		t.Fatal("expected default choice to be Yes")
+	if got.Deps.Dialog.CheckResult == nil || got.Deps.Dialog.CheckResult.Command != "go test ./..." {
+		t.Fatalf("dialog check result = %+v", got.Deps.Dialog.CheckResult)
 	}
-	if got.Status.Kind() != "error" {
-		t.Fatalf("expected error status, got %q", got.Status.Kind())
-	}
-	if got.Deps.LastCheckResult == nil || got.Deps.LastCheckResult.Command != "go test ./..." {
-		t.Fatalf("expected LastCheckResult to capture failing command, got %+v", got.Deps.LastCheckResult)
+	if got.Deps.Cycle.CheckResult() == nil || got.Deps.Cycle.CheckResult().Command != "go test ./..." {
+		t.Fatalf("check result = %+v", got.Deps.Cycle.CheckResult())
 	}
 }
 
-func TestDependenciesRolledBackMsgUpdatesState(t *testing.T) {
-	m := newTestModel(t)
-	m.Deps.Phase = OpRollingBack
-	m.Deps.Snapshot = &utils.DependencySnapshot{}
+func TestChecksInconclusiveOpensDistinctRollbackDialog(t *testing.T) {
+	m := modelAtConfirmChecks(t)
+	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmChecksEvent{Yes: true})
 
-	msg := utils.DependenciesRolledBackMsg{
-		Snapshot: &utils.DependencySnapshot{
-			ModFile: utils.ModuleFileSnapshot{Exists: true, Content: "old"},
-		},
-		Dependencies: []utils.ModuleDependency{
-			{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
-		},
-	}
-
-	updated, _ := m.Update(msg)
+	updated, _ := m.Update(deps.ChecksDoneEvent{Err: errors.New("could not start go test")})
 	got := updated.(Model)
 
-	if got.Deps.Phase == OpRollingBack {
-		t.Fatal("expected RollingBackDependencies to be false")
+	if got.Deps.Dialog.Kind != DialogRollback || !got.Deps.Dialog.Inconclusive {
+		t.Fatalf("dialog = %+v, want inconclusive rollback", got.Deps.Dialog)
 	}
-	if len(got.Deps.Dependencies) != 1 {
-		t.Fatalf("expected 1 dependency, got %d", len(got.Deps.Dependencies))
+	if !strings.Contains(got.Status.Text(), "could not start go test") {
+		t.Fatalf("status = %q", got.Status.Text())
+	}
+}
+
+func TestRollbackResultUpdatesState(t *testing.T) {
+	m := modelAtConfirmRollback(t)
+	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmRollbackEvent{Yes: true})
+	dependencies := []deps.ModuleDependency{{
+		Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0",
+	}}
+
+	updated, _ := m.Update(deps.RollbackDoneEvent{Dependencies: dependencies})
+	got := updated.(Model)
+
+	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
+	}
+	if !reflect.DeepEqual(got.Deps.Dependencies, dependencies) {
+		t.Fatalf("dependencies = %+v, want %+v", got.Deps.Dependencies, dependencies)
 	}
 	if got.Status.Kind() != "success" {
-		t.Fatalf("expected success status, got %q", got.Status.Kind())
+		t.Fatalf("status kind = %q, want success", got.Status.Kind())
 	}
 }
 
-func TestDependencyErrDuringRollbackClearsState(t *testing.T) {
-	m := newTestModel(t)
-	m.Deps.Phase = OpRollingBack
+func TestSuccessfulCompensationReportsRestoredUpdateFailure(t *testing.T) {
+	m := modelAtConfirmApply(t)
+	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmApplyEvent{Yes: true})
+	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ApplyUpdatesDoneEvent{
+		Snapshot: &deps.DependencySnapshot{
+			ModFile: deps.ModuleFileSnapshot{Exists: true, Content: "old"},
+		},
+		Backup: &deps.DependencyBackupInfo{Name: "backup.json", Path: "/tmp/backup.json"},
+		Err:    errors.New("go get failed"),
+	})
 
-	updated, _ := m.Update(utils.DependencyErrMsg{Err: errors.New("boom")})
+	updated, _ := m.Update(deps.CompensateDoneEvent{
+		Dependencies: []deps.ModuleDependency{{Path: "github.com/example/lib", Version: "v1.0.0"}},
+	})
 	got := updated.(Model)
 
-	if got.Deps.Phase == OpRollingBack {
-		t.Fatal("expected RollingBackDependencies to be false after err")
+	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
+	}
+	if !strings.Contains(got.Status.Text(), "go get failed") || !strings.Contains(got.Status.Text(), "reverted") {
+		t.Fatalf("status = %q", got.Status.Text())
+	}
+}
+
+func TestRecoveryRequiredShowsBackupLocation(t *testing.T) {
+	m := modelAtConfirmRollback(t)
+	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmRollbackEvent{Yes: true})
+
+	updated, _ := m.Update(deps.RollbackDoneEvent{Err: errors.New("disk full")})
+	got := updated.(Model)
+
+	if !strings.Contains(got.Status.Text(), "backup.json") ||
+		!strings.Contains(got.Status.Text(), "/tmp/backup.json") {
+		t.Fatalf("status = %q, want backup name and path", got.Status.Text())
+	}
+}
+
+func TestCycleExecutionErrorResetsState(t *testing.T) {
+	m := modelAtConfirmApply(t)
+	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmApplyEvent{Yes: true})
+
+	updated, _ := m.Update(dependencyExecutionErrMsg{Err: errors.New("invalid executor intent")})
+	got := updated.(Model)
+
+	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
 	}
 	if got.Status.Kind() != "error" {
-		t.Fatalf("expected error status, got %q", got.Status.Kind())
+		t.Fatalf("status kind = %q, want error", got.Status.Kind())
 	}
 }
 

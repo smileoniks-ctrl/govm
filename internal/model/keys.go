@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -87,7 +88,7 @@ func (m Model) switchTab(target int) (tea.Model, tea.Cmd) {
 	// Lazy-load deps on first visit.
 	if m.CurrentTab == DepsTab && !m.Deps.Loaded {
 		m.Deps.Phase = OpChecking
-		return m, utils.ListModuleDependenciesCmd(m.Deps.ModuleDir)
+		return m, ListModuleDependenciesCmd(m.Deps.ModuleDir)
 	}
 	if m.CurrentTab == SettingsTab {
 		return m, tea.ClearScreen
@@ -160,17 +161,25 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.CurrentTab == DepsTab && m.Deps.Loaded {
-		entries := utils.DirectDependencyUpdateEntries(m.Deps.Dependencies)
-		if len(entries) == 0 {
-			m.Status.SetTab("No direct dependency updates available.", "warning")
-			return m, nil
-		}
-		m.Deps.UpdateEntries = entries
-		m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
-		m.Status.Clear()
-		return m, nil
+		return m.startUpdateCycle()
 	}
 	return m, nil
+}
+
+// startUpdateCycle begins a fresh dependency update cycle: it creates a
+// new Cycle, feeds StartEvent, and returns the tea.Cmd that runs the
+// initial check-updates intent through the execution seam. The update
+// confirmation dialog only opens after the fresh check completes.
+func (m Model) startUpdateCycle() (tea.Model, tea.Cmd) {
+	m.Deps.Cycle = deps.NewUpdateCycle()
+	next, intent, err := m.Deps.Cycle.Handle(deps.StartEvent{ModuleDir: m.Deps.ModuleDir})
+	if err != nil {
+		m.Status.SetTab("Could not start update.", "error")
+		return m, nil
+	}
+	m.Deps.Cycle = next
+	m.Status.Clear()
+	return m, m.cycleExecuteCmd(intent)
 }
 
 func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
@@ -182,7 +191,7 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 		// the scope tab-local, which lets the DependenciesMsg handler
 		// tear it down cleanly when the check finishes.
 		m.Status.Clear()
-		return m, utils.CheckModuleDependencyUpdatesCmd(m.Deps.ModuleDir)
+		return m, CheckModuleDependencyUpdatesCmd(m.Deps.ModuleDir)
 	}
 	m.Loading = true
 	m.Status.SetGlobal("", "")
@@ -200,7 +209,7 @@ func (m Model) handleBackupsKey() (tea.Model, tea.Cmd) {
 	// the scope tab-local, which lets the DependencyBackupsMsg
 	// handler tear it down cleanly when the load finishes.
 	m.Status.Clear()
-	return m, utils.ListDependencyBackupsCmd(m.Deps.ModuleDir)
+	return m, ListDependencyBackupsCmd(m.Deps.ModuleDir)
 }
 
 func (m Model) handleDeleteKey() (tea.Model, tea.Cmd) {

@@ -1,4 +1,4 @@
-package utils
+package model
 
 import (
 	"errors"
@@ -36,14 +36,17 @@ func TestDependencyCmd_MapsError(t *testing.T) {
 	}
 }
 
-func TestUpdateModuleDependenciesCmd_MapsCoreError(t *testing.T) {
-	msg := UpdateModuleDependenciesCmd("module", nil, 3)()
+func TestDependencyCmd_PreservesBackupMessageType(t *testing.T) {
+	want := DependencyBackupsMsg{{Name: "2026-07-09_12-00-00.json", Updated: 2}}
+	msg := dependencyCmd(func() (DependencyBackupsMsg, error) {
+		return want, nil
+	})()
 
-	errMsg, ok := msg.(DependencyErrMsg)
+	got, ok := msg.(DependencyBackupsMsg)
 	if !ok {
-		t.Fatalf("message = %T, want DependencyErrMsg", msg)
+		t.Fatalf("message = %T, want DependencyBackupsMsg", msg)
 	}
-	if errMsg.Err == nil || errMsg.Err.Error() != "no direct dependency updates available" {
-		t.Fatalf("error = %v, want no-updates error", errMsg.Err)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("message = %#v, want %#v", got, want)
 	}
 }

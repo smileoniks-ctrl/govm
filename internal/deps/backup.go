@@ -1,4 +1,4 @@
-package utils
+package deps
 
 import (
 	"encoding/json"
@@ -12,54 +12,19 @@ import (
 	"time"
 
 	"github.com/smileoniks-ctrl/govm/internal/paths"
-	"golang.org/x/mod/modfile"
 )
 
 const (
-	DependencyBackupKindPreUpdate  = "pre-update"
+	// DependencyBackupKindPreUpdate marks a snapshot captured before
+	// a dependency update is applied.
+	DependencyBackupKindPreUpdate = "pre-update"
+	// DependencyBackupKindPreRestore marks a snapshot of the current
+	// module files captured before a manual backup restore, so the
+	// restore can be undone.
 	DependencyBackupKindPreRestore = "pre-restore"
 	dependencyBackupSchemaVersion  = 1
 	defaultDependencyBackupLimit   = 10
 )
-
-type moduleContext struct {
-	Root string
-	Path string
-}
-
-func resolveModuleContext(moduleDir string) (moduleContext, error) {
-	root, err := ResolveModuleRoot(moduleDir)
-	if err != nil {
-		return moduleContext{}, err
-	}
-	bytes, err := os.ReadFile(filepath.Join(root, "go.mod"))
-	if err != nil {
-		return moduleContext{}, fmt.Errorf("read go.mod: %w", err)
-	}
-	modulePath := modfile.ModulePath(bytes)
-	if modulePath == "" {
-		return moduleContext{}, fmt.Errorf("read go.mod: module path not found")
-	}
-	return moduleContext{Root: root, Path: modulePath}, nil
-}
-
-type dependencyBackupStore struct {
-	now    func() time.Time
-	write  func(*os.File, []byte) (int, error)
-	sync   func(*os.File) error
-	close  func(*os.File) error
-	remove func(string) error
-}
-
-func defaultDependencyBackupStore() dependencyBackupStore {
-	return dependencyBackupStore{
-		now:    time.Now,
-		write:  (*os.File).Write,
-		sync:   (*os.File).Sync,
-		close:  (*os.File).Close,
-		remove: os.Remove,
-	}
-}
 
 // DependencyBackup is the on-disk JSON format for a dependency snapshot.
 type DependencyBackup struct {
@@ -81,6 +46,26 @@ type DependencyBackupInfo struct {
 	Updated    int
 }
 
+type dependencyBackupStore struct {
+	now    func() time.Time
+	write  func(*os.File, []byte) (int, error)
+	sync   func(*os.File) error
+	close  func(*os.File) error
+	remove func(string) error
+}
+
+func defaultDependencyBackupStore() dependencyBackupStore {
+	return dependencyBackupStore{
+		now:    time.Now,
+		write:  (*os.File).Write,
+		sync:   (*os.File).Sync,
+		close:  (*os.File).Close,
+		remove: os.Remove,
+	}
+}
+
+// ListDependencyBackups lists the saved dependency backups for the
+// module that contains moduleDir, newest first.
 func ListDependencyBackups(moduleDir string) ([]DependencyBackupInfo, error) {
 	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
@@ -102,6 +87,24 @@ func listDependencyBackupsResolved(context moduleContext) ([]DependencyBackupInf
 		return nil, fmt.Errorf("read dependency backups: %w", err)
 	}
 	return backups, nil
+}
+
+// SaveDependencyBackup resolves the module context for moduleDir,
+// saves a persistent dependency backup of snap with the given kind,
+// and applies retention pruning up to backupLimit entries. It is the
+// exported entry point for the atomic-save + retention logic used by
+// the dependency update cycle.
+func SaveDependencyBackup(
+	moduleDir string,
+	snap *DependencySnapshot,
+	kind string,
+	backupLimit int,
+) (DependencyBackupInfo, error) {
+	context, err := resolveModuleContext(moduleDir)
+	if err != nil {
+		return DependencyBackupInfo{}, err
+	}
+	return saveDependencyBackupResolvedWithRetention(context, snap, kind, backupLimit)
 }
 
 func loadDependencyBackupInfos(dir, modulePath string) ([]DependencyBackupInfo, error) {

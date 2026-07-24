@@ -1,4 +1,4 @@
-package utils
+package deps
 
 import (
 	"errors"
@@ -175,7 +175,7 @@ func TestRunModuleDependencyChecks_ResolveError(t *testing.T) {
 }
 
 func TestUpdateModuleDependencies_NoEntries(t *testing.T) {
-	_, err := updateModuleDependencies("module", nil, 3, dependencyOperation{})
+	_, err := UpdateModuleDependencies("module", nil, 3)
 	if err == nil || err.Error() != "no direct dependency updates available" {
 		t.Fatalf("error = %v, want no-updates error", err)
 	}
@@ -188,7 +188,7 @@ func TestUpdateModuleDependencies_TidyFailureLeavesUpdatedFiles(t *testing.T) {
 	writeFile(t, root, "go.mod", originalMod)
 
 	commandCalls := 0
-	_, err := updateModuleDependencies(
+	_, _, _, err := applyModuleUpdates(
 		root,
 		[]DependencyUpdateEntry{{
 			Path:       "example.com/dependency",
@@ -249,7 +249,7 @@ func TestDependencyMutationRefreshErrors(t *testing.T) {
 		{
 			name: "update",
 			run: func() error {
-				_, err := updateModuleDependencies(
+				_, _, _, err := applyModuleUpdates(
 					root,
 					[]DependencyUpdateEntry{{
 						Path:       "example.com/dependency",

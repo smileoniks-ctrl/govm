@@ -10,7 +10,7 @@ import (
 func TestDependenciesMsgPopulatesTable(t *testing.T) {
 	m := newTestModel(t)
 
-	deps := utils.DependenciesMsg{
+	deps := DependenciesMsg{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
 		{Path: "github.com/example/indirect", Version: "v0.5.0", Indirect: true},
 		{Path: "github.com/example/current", Version: "v2.0.0", Latest: "v2.0.0"},
@@ -56,7 +56,7 @@ func TestDependencyTableIndirectUpdateStatus(t *testing.T) {
 	m := newTestModel(t)
 	m.Settings.Values.DepsDisplay = config.DepsDisplayAll
 
-	deps := utils.DependenciesMsg{
+	deps := DependenciesMsg{
 		{Path: "indirect-with-update", Version: "v0.5.0", Latest: "v0.6.0", Indirect: true},
 	}
 
@@ -126,7 +126,7 @@ func TestUpdateDependencyTable_StatusPriorities(t *testing.T) {
 	m := newTestModel(t)
 	m.Settings.Values.DepsDisplay = config.DepsDisplayAll
 
-	deps := utils.DependenciesMsg{
+	deps := DependenciesMsg{
 		{Path: "err", Version: "v1.0.0", Latest: "v1.1.0", Error: "boom"},
 		{Path: "dep", Version: "v1.0.0", Latest: "v1.1.0", Deprecated: "use v2"},
 		{Path: "indirect-update", Version: "v1.0.0", Latest: "v1.1.0", Indirect: true},

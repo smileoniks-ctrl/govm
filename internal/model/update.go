@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -67,22 +68,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildVersionViews()
 		return m, nil
 
-	case utils.DependenciesMsg:
-		updateConfirmationOpen := m.Deps.Dialog.Kind == DialogUpdate
+	case DependenciesMsg:
 		m.Deps.Dependencies = msg
 		m.Deps.Loaded = true
 		m.Deps.Phase = OpIdle
 		m.updateDependencyTable()
-		if updateConfirmationOpen {
-			m.resetDialog()
-			m.Deps.UpdateEntries = nil
-			m.Status.SetTab("Dependency updates changed. Please review them again.", "warning")
-		} else {
-			m.Status.ClearTab()
-		}
+		m.Status.ClearTab()
 		return m, nil
 
-	case utils.DependencyBackupsMsg:
+	case DependencyBackupsMsg:
 		m.Deps.Phase = OpIdle
 		m.Deps.Backups = msg
 		if len(msg) == 0 {
@@ -97,40 +91,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Status.SetTab("Select a dependency backup to restore.", "info")
 		return m, nil
 
-	case utils.DependenciesUpdatedMsg:
-		m.setUpdatedDependencies(msg.Dependencies)
-		m.Deps.Snapshot = msg.Snapshot
-		m.Deps.LastCheckResult = nil
-		m.Status.SetGlobal(fmt.Sprintf("Updated %d direct %s. Run checks?", msg.Updated, utils.Pluralize(msg.Updated, "dependency", "dependencies")), "success")
-		m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
-		return m, nil
+	case deps.CheckUpdatesDoneEvent,
+		deps.ApplyUpdatesDoneEvent,
+		deps.CompensateDoneEvent,
+		deps.ChecksDoneEvent,
+		deps.RollbackDoneEvent:
+		return m.handleCycleEvent(msg.(deps.Event))
 
-	case utils.DependencyCheckResultMsg:
-		m.Deps.Phase = OpIdle
-		m.resetDialog()
-		if msg.OK {
-			m.Status.SetGlobal("Checks passed.", "success")
-			m.Deps.clearRollbackContext()
-			return m, nil
-		}
-		m.Deps.LastCheckResult = &msg
-		m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
-		m.Status.SetGlobal(fmt.Sprintf("Checks failed: %s", msg.Command), "error")
-		return m, nil
-
-	case utils.DependenciesRolledBackMsg:
+	case DependenciesRestoredMsg:
 		m.setUpdatedDependencies(msg.Dependencies)
-		m.Deps.clearRollbackContext()
-		m.Status.SetGlobal("Rolled back to pre-update state.", "success")
-		return m, nil
-
-	case utils.DependenciesRestoredMsg:
-		m.setUpdatedDependencies(msg.Dependencies)
-		m.Deps.clearRollbackContext()
 		m.Status.SetGlobal(fmt.Sprintf("Restored dependencies from %s.", msg.BackupName), "success")
 		return m, nil
 
-	case utils.DependencyErrMsg:
+	case dependencyExecutionErrMsg:
+		m.Deps.Cycle = deps.NewUpdateCycle()
+		m.resetDialog()
+		m.Status.SetGlobal(msg.Err.Error(), "error")
+		return m, nil
+
+	case DependencyErrMsg:
 		m.Deps.Reset()
 		if msg.Err != nil {
 			m.Status.SetGlobal(msg.Err.Error(), "error")

@@ -4,123 +4,60 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 )
 
-func TestDependencySnapshotLifecycle(t *testing.T) {
-	snapshot := &utils.DependencySnapshot{}
-	checkResult := &utils.DependencyCheckResultMsg{
-		Command: "go test ./...",
+func TestCycleAdapterKeepsRollbackContextUntilDecision(t *testing.T) {
+	snapshot := &deps.DependencySnapshot{
+		ModFile: deps.ModuleFileSnapshot{Exists: true, Content: "module example.com/app\n"},
+	}
+	backup := &deps.DependencyBackupInfo{Name: "backup.json", Path: "/tmp/backup.json"}
+	dependencies := []deps.ModuleDependency{{
+		Path: "example.com/dependency", Version: "v1.0.0", Latest: "v1.1.0",
+	}}
+
+	m := newTestModel(t)
+	cycle := mustCycleEvent(t, deps.NewUpdateCycle(), deps.StartEvent{ModuleDir: "/tmp/module"})
+	cycle = mustCycleEvent(t, cycle, deps.CheckUpdatesDoneEvent{Dependencies: dependencies})
+	cycle = mustCycleEvent(t, cycle, deps.ConfirmApplyEvent{Yes: true})
+	m.Deps.Cycle = cycle
+
+	updated, _ := m.Update(deps.ApplyUpdatesDoneEvent{
+		Snapshot:     snapshot,
+		Backup:       backup,
+		Dependencies: dependencies,
+	})
+	m = updated.(Model)
+	if m.Deps.Cycle.Snapshot() == nil {
+		t.Fatal("cycle should retain the snapshot while checks are pending")
+	}
+	if m.Deps.Dialog.Kind != DialogChecks {
+		t.Fatalf("dialog kind = %v, want DialogChecks", m.Deps.Dialog.Kind)
 	}
 
-	updatedModel := func(t *testing.T) Model {
-		t.Helper()
-
-		m := newTestModel(t)
-		updated, _ := m.Update(utils.DependenciesUpdatedMsg{
-			Dependencies: []utils.ModuleDependency{{Path: "example.com/dependency"}},
-			Snapshot:     snapshot,
-		})
-		return updated.(Model)
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if m.Deps.Cycle.Phase() != deps.PhaseRunningChecks {
+		t.Fatalf("cycle phase = %s, want running-checks", m.Deps.Cycle.Phase())
 	}
 
-	tests := []struct {
-		name         string
-		apply        func(t *testing.T, m Model) Model
-		wantSnapshot bool
-		wantCheck    bool
-	}{
-		{
-			name: "update creates snapshot",
-			apply: func(t *testing.T, m Model) Model {
-				return updatedModel(t)
-			},
-			wantSnapshot: true,
-		},
-		{
-			name: "failed checks preserve rollback context",
-			apply: func(t *testing.T, m Model) Model {
-				m = updatedModel(t)
-				updated, _ := m.Update(utils.DependencyCheckResultMsg{Command: checkResult.Command})
-				return updated.(Model)
-			},
-			wantSnapshot: true,
-			wantCheck:    true,
-		},
-		{
-			name: "passed checks clear rollback context",
-			apply: func(t *testing.T, m Model) Model {
-				m = updatedModel(t)
-				updated, _ := m.Update(utils.DependencyCheckResultMsg{OK: true, Command: checkResult.Command})
-				return updated.(Model)
-			},
-		},
-		{
-			name: "passed checks without snapshot clear rollback context",
-			apply: func(t *testing.T, m Model) Model {
-				m.Deps.LastCheckResult = checkResult
-				updated, _ := m.Update(utils.DependencyCheckResultMsg{OK: true, Command: checkResult.Command})
-				return updated.(Model)
-			},
-		},
-		{
-			name: "skip checks with no clears rollback context",
-			apply: func(t *testing.T, m Model) Model {
-				m = updatedModel(t)
-				updated, _ := m.Update(tea.KeyPressMsg{Code: 'n'})
-				return updated.(Model)
-			},
-		},
-		{
-			name: "skip checks with false choice clears rollback context",
-			apply: func(t *testing.T, m Model) Model {
-				m = updatedModel(t)
-				m.Deps.Dialog.ChoiceYes = false
-				updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-				return updated.(Model)
-			},
-		},
-		{
-			name: "keep update clears rollback context",
-			apply: func(t *testing.T, m Model) Model {
-				m = updatedModel(t)
-				updated, _ := m.Update(utils.DependencyCheckResultMsg{Command: checkResult.Command})
-				m = updated.(Model)
-				updated, _ = m.Update(tea.KeyPressMsg{Code: 'n'})
-				return updated.(Model)
-			},
-		},
-		{
-			name: "successful rollback clears rollback context",
-			apply: func(t *testing.T, m Model) Model {
-				m = updatedModel(t)
-				updated, _ := m.Update(utils.DependencyCheckResultMsg{Command: checkResult.Command})
-				m = updated.(Model)
-				updated, _ = m.Update(utils.DependenciesRolledBackMsg{Snapshot: snapshot})
-				return updated.(Model)
-			},
-		},
-		{
-			name: "successful restore clears rollback context",
-			apply: func(t *testing.T, m Model) Model {
-				m = updatedModel(t)
-				updated, _ := m.Update(utils.DependencyCheckResultMsg{Command: checkResult.Command})
-				m = updated.(Model)
-				updated, _ = m.Update(utils.DependenciesRestoredMsg{BackupName: "backup"})
-				return updated.(Model)
-			},
-		},
+	updated, _ = m.Update(deps.ChecksDoneEvent{
+		Result: deps.DependencyCheckResult{Command: "go test ./...", Output: "FAIL"},
+	})
+	m = updated.(Model)
+	if m.Deps.Cycle.Snapshot() == nil || m.Deps.Cycle.CheckResult() == nil {
+		t.Fatal("cycle should retain rollback context while rollback is pending")
+	}
+	if m.Deps.Dialog.Kind != DialogRollback {
+		t.Fatalf("dialog kind = %v, want DialogRollback", m.Deps.Dialog.Kind)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.apply(t, newTestModel(t))
-			if (got.Deps.Snapshot != nil) != tt.wantSnapshot {
-				t.Fatalf("Snapshot present = %t, want %t", got.Deps.Snapshot != nil, tt.wantSnapshot)
-			}
-			if (got.Deps.LastCheckResult != nil) != tt.wantCheck {
-				t.Fatalf("LastCheckResult present = %t, want %t", got.Deps.LastCheckResult != nil, tt.wantCheck)
-			}
-		})
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'n'})
+	m = updated.(Model)
+	if m.Deps.Cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle after terminal rendering", m.Deps.Cycle.Phase())
+	}
+	if m.Deps.Cycle.Snapshot() != nil || m.Deps.Cycle.CheckResult() != nil {
+		t.Fatal("terminal adapter state should not retain rollback context")
 	}
 }

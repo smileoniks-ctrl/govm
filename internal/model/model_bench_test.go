@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -40,9 +41,9 @@ func benchModel(b *testing.B) Model {
 		versions = append(versions, v)
 	}
 
-	depItems := make([]utils.ModuleDependency, 0, 10)
+	depItems := make([]deps.ModuleDependency, 0, 10)
 	for i := 0; i < 10; i++ {
-		depItems = append(depItems, utils.ModuleDependency{
+		depItems = append(depItems, deps.ModuleDependency{
 			Path:    "github.com/example/dep" + string(rune('a'+i)),
 			Version: "v1.0.0",
 			Latest:  "v1.1.0",
@@ -248,37 +249,35 @@ func BenchmarkRenderContentCanvas(b *testing.B) {
 }
 
 func BenchmarkRenderDependencyUpdateDialog(b *testing.B) {
-	entries := []utils.DependencyUpdateEntry{
+	entries := []deps.DependencyUpdateEntry{
 		{Path: "github.com/example/dep1", OldVersion: "v1.0.0", NewVersion: "v1.1.0"},
 		{Path: "github.com/example/dep2", OldVersion: "v2.0.0", NewVersion: "v2.1.0"},
 		{Path: "github.com/example/dep3", OldVersion: "v3.0.0", NewVersion: "v3.1.0"},
 	}
-	updateYes := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
-	updateNo := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: false}
-	deps := DepsState{UpdateEntries: entries}
+	updateYes := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true, UpdateEntries: entries}
+	updateNo := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: false, UpdateEntries: entries}
 	theme := styles.NewTheme(config.ThemeCurrent)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		benchStringSink = updateYes.Render(theme, deps, viewportSize{Width: 64, Height: 20})
-		benchStringSink = updateNo.Render(theme, deps, viewportSize{Width: 64, Height: 20})
+		benchStringSink = updateYes.Render(theme, DepsState{}, viewportSize{Width: 64, Height: 20})
+		benchStringSink = updateNo.Render(theme, DepsState{}, viewportSize{Width: 64, Height: 20})
 	}
 }
 
 func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
-	result := &utils.DependencyCheckResultMsg{
+	result := deps.DependencyCheckResult{
 		Command: "go test ./...",
 		Output:  "FAIL: dependency test output that is deliberately longer than the compact dialog content area",
 	}
-	backups := []utils.DependencyBackupInfo{{
+	backups := []deps.DependencyBackupInfo{{
 		Name:    "2026-07-09_12-00-00-a-long-backup-filename.json",
-		Kind:    utils.DependencyBackupKindPreUpdate,
+		Kind:    deps.DependencyBackupKindPreUpdate,
 		Updated: 1,
 	}}
 	checksDialog := ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
-	rollbackDialog := ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
+	rollbackDialog := ConfirmDialog{Kind: DialogRollback, ChoiceYes: true, CheckResult: &result}
 	restoreDialog := ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
-	rollbackDeps := DepsState{LastCheckResult: result}
 	restoreDeps := DepsState{Backups: backups}
 	theme := styles.NewTheme(config.ThemeCurrent)
 
@@ -289,7 +288,7 @@ func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				viewport := viewportSize{Width: width, Height: 20}
 				benchStringSink = checksDialog.Render(theme, DepsState{}, viewport)
-				benchStringSink = rollbackDialog.Render(theme, rollbackDeps, viewport)
+				benchStringSink = rollbackDialog.Render(theme, DepsState{}, viewport)
 				benchStringSink = restoreDialog.Render(theme, restoreDeps, viewport)
 			}
 		})

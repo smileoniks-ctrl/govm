@@ -1,4 +1,4 @@
-package utils
+package deps
 
 import (
 	"encoding/json"
@@ -395,7 +395,7 @@ func assertDependencyBackupDirectoryEmpty(t *testing.T, modulePath string) {
 	}
 }
 
-func TestUpdateModuleDependencies_ResolvesContextOnce(t *testing.T) {
+func TestApplyModuleUpdates_ResolvesContextOnce(t *testing.T) {
 	context := moduleContext{Root: t.TempDir(), Path: "example.com/app"}
 	writeFile(t, context.Root, "go.mod", "module example.com/app\n\ngo 1.26\n")
 	resolves := 0
@@ -429,12 +429,12 @@ func TestUpdateModuleDependencies_ResolvesContextOnce(t *testing.T) {
 		},
 	}
 
-	result, err := updateModuleDependencies(".", entries, backupLimit, operation)
+	snap, _, deps, err := applyModuleUpdates(".", entries, backupLimit, operation)
 	if err != nil {
-		t.Fatalf("updateModuleDependencies: %v", err)
+		t.Fatalf("applyModuleUpdates: %v", err)
 	}
-	if result.Updated != len(entries) || result.Snapshot == nil {
-		t.Fatalf("update result = %+v, want updated count and snapshot", result)
+	if len(deps) != 0 || snap == nil {
+		t.Fatalf("apply result = snap=%v deps=%v, want non-nil snapshot", snap, deps)
 	}
 	if resolves != 1 {
 		t.Fatalf("context resolves = %d, want 1", resolves)

@@ -4,8 +4,8 @@ import (
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/table"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
 // rebuildVersionViews is the single owner of the two derived views of
@@ -64,7 +64,7 @@ func (m *Model) updateDependencyTable() {
 // dependencyStatus returns a short status string for a module dependency
 // describing its update state. Priority order is intentional:
 // error > deprecated > indirect update > update avail > indirect > current.
-func dependencyStatus(d utils.ModuleDependency) string {
+func dependencyStatus(d deps.ModuleDependency) string {
 	switch {
 	case d.Error != "":
 		return "error"

@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
 func TestSettingsDepsBackupLimitShortcutControlsAndSaves(t *testing.T) {
@@ -55,7 +54,7 @@ func TestSettingsDepsBackupLimitShortcutControlsAndSaves(t *testing.T) {
 func TestSettingsToggleDepsDisplayUpdatesDependencyRows(t *testing.T) {
 	m := newTestModel(t)
 	m.CurrentTab = SettingsTab
-	updated, _ := m.Update(utils.DependenciesMsg{
+	updated, _ := m.Update(DependenciesMsg{
 		{Path: "github.com/example/direct", Version: "v1.0.0"},
 		{Path: "github.com/example/indirect", Version: "v1.0.0", Indirect: true},
 	})

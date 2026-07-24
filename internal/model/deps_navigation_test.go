@@ -4,13 +4,13 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
+	coredeps "github.com/smileoniks-ctrl/govm/internal/deps"
 )
 
 func TestDepsTabArrowAndVimKeysMoveTableCursor(t *testing.T) {
 	m := newTestModel(t)
 	m.CurrentTab = DepsTab
-	m.Deps.Dependencies = []utils.ModuleDependency{
+	m.Deps.Dependencies = []coredeps.ModuleDependency{
 		{Path: "example.com/first", Version: "v1.0.0"},
 		{Path: "example.com/second", Version: "v1.0.0"},
 	}
@@ -41,7 +41,7 @@ func TestDepsTabArrowAndVimKeysMoveTableCursor(t *testing.T) {
 func TestDepsTabDownDoesNotMoveTableCursorWhileConfirmingUpdate(t *testing.T) {
 	m := newTestModel(t)
 	m.CurrentTab = DepsTab
-	m.Deps.Dependencies = []utils.ModuleDependency{
+	m.Deps.Dependencies = []coredeps.ModuleDependency{
 		{Path: "example.com/first", Version: "v1.0.0"},
 		{Path: "example.com/second", Version: "v1.0.0"},
 	}
@@ -62,14 +62,16 @@ func TestDepsTabGlobalUOpensUpdateConfirmationForDirectUpdate(t *testing.T) {
 	m := newTestModel(t)
 	m.CurrentTab = DepsTab
 	m.Deps.Loaded = true
-	m.Deps.Dependencies = []utils.ModuleDependency{
+	m.Deps.Dependencies = []coredeps.ModuleDependency{
 		{Path: "example.com/direct", Version: "v1.0.0", Latest: "v1.1.0"},
 	}
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
+	updated, _ = m.Update(coredeps.CheckUpdatesDoneEvent{Dependencies: m.Deps.Dependencies})
+	m = updated.(Model)
 
 	if m.Deps.Dialog.Kind != DialogUpdate {
-		t.Fatal("expected pressing u on Deps tab to open the update confirmation")
+		t.Fatal("expected fresh preflight to open the update confirmation")
 	}
 }

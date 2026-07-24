@@ -3,43 +3,258 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/smileoniks-ctrl/govm/internal/utils"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 )
 
-type fakeOps struct {
-	listFn         func(string) ([]utils.ModuleDependency, error)
-	checkFn        func(string) ([]utils.ModuleDependency, error)
-	updateFn       func(string, []utils.DependencyUpdateEntry) (utils.DependencyUpdateResult, error)
-	runChecksFn    func(string) (utils.DependencyCheckResult, error)
-	rollbackFn     func(string, *utils.DependencySnapshot) (utils.DependencyRollbackResult, error)
-	listBackupsFn  func(string) ([]utils.DependencyBackupInfo, error)
-	restoreFn      func(string, string) (utils.DependencyRestoreResult, error)
-	updateCalls    int
-	runChecksCalls int
-	rollbackCalls  int
-	restoreCalls   int
+// fakeExecutor is the ExecuteIntent seam substitute. Each operational
+// intent is routed to a configurable function field that returns the
+// raw event the cycle should observe; execErr short-circuits every
+// operational intent with an error (used to exercise the executor
+// failure path).
+type fakeExecutor struct {
+	checkUpdates func(deps.IntentCheckUpdates) deps.Event
+	applyUpdates func(deps.IntentApplyUpdates) deps.Event
+	compensate   func(deps.IntentCompensate) deps.Event
+	runChecks    func(deps.IntentRunChecks) deps.Event
+	rollback     func(deps.IntentRollback) deps.Event
+	execErr      error
+
+	checkCalls      int
+	applyCalls      int
+	compensateCalls int
+	checksCalls     int
+	rollbackCalls   int
+	applyEntries    []deps.DependencyUpdateEntry
+}
+
+func (f *fakeExecutor) Execute(intent deps.Intent) (deps.Event, error) {
+	if f.execErr != nil {
+		return nil, f.execErr
+	}
+	switch i := intent.(type) {
+	case deps.IntentCheckUpdates:
+		f.checkCalls++
+		if f.checkUpdates != nil {
+			return f.checkUpdates(i), nil
+		}
+		return deps.CheckUpdatesDoneEvent{}, nil
+	case deps.IntentApplyUpdates:
+		f.applyCalls++
+		f.applyEntries = i.Entries
+		if f.applyUpdates != nil {
+			return f.applyUpdates(i), nil
+		}
+		return deps.ApplyUpdatesDoneEvent{}, nil
+	case deps.IntentCompensate:
+		f.compensateCalls++
+		if f.compensate != nil {
+			return f.compensate(i), nil
+		}
+		return deps.CompensateDoneEvent{}, nil
+	case deps.IntentRunChecks:
+		f.checksCalls++
+		if f.runChecks != nil {
+			return f.runChecks(i), nil
+		}
+		return deps.ChecksDoneEvent{}, nil
+	case deps.IntentRollback:
+		f.rollbackCalls++
+		if f.rollback != nil {
+			return f.rollback(i), nil
+		}
+		return deps.RollbackDoneEvent{}, nil
+	default:
+		return nil, fmt.Errorf("fakeExecutor: unexpected intent %T", intent)
+	}
+}
+
+func updatableDeps() []deps.ModuleDependency {
+	return []deps.ModuleDependency{
+		{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
+	}
+}
+
+func currentDeps() []deps.ModuleDependency {
+	return []deps.ModuleDependency{
+		{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.0.0"},
+	}
+}
+
+func cliSnapshot() *deps.DependencySnapshot {
+	return &deps.DependencySnapshot{
+		ModFile:   deps.ModuleFileSnapshot{Exists: true, Content: "module github.com/d/m\n"},
+		Updatable: []deps.DependencyUpdateEntry{{Path: "github.com/d/x", OldVersion: "v1.0.0", NewVersion: "v1.1.0"}},
+	}
+}
+
+func cliBackup() *deps.DependencyBackupInfo {
+	return &deps.DependencyBackupInfo{
+		Name:       "2026-07-23_12-00-00.json",
+		Path:       "/tmp/govm/2026-07-23_12-00-00.json",
+		ModulePath: "github.com/d/m",
+		Kind:       deps.DependencyBackupKindPreUpdate,
+	}
+}
+
+// newUpdateService wires a DepsService for RunUpdate tests. The
+// fakeExecutor defaults model the happy path (updatable deps,
+// successful apply, passing checks, successful restore); individual
+// tests override the fields they need.
+func newUpdateService(confirm func(string, bool) (bool, error)) (*DepsService, *fakeExecutor, *bytes.Buffer) {
+	stdout := &bytes.Buffer{}
+	fx := &fakeExecutor{
+		checkUpdates: func(deps.IntentCheckUpdates) deps.Event {
+			return deps.CheckUpdatesDoneEvent{Dependencies: updatableDeps()}
+		},
+		applyUpdates: func(deps.IntentApplyUpdates) deps.Event {
+			return deps.ApplyUpdatesDoneEvent{
+				Snapshot:     cliSnapshot(),
+				Backup:       cliBackup(),
+				Dependencies: updatableDeps(),
+			}
+		},
+		runChecks: func(deps.IntentRunChecks) deps.Event {
+			return deps.ChecksDoneEvent{Result: deps.DependencyCheckResult{OK: true}}
+		},
+		compensate: func(deps.IntentCompensate) deps.Event {
+			return deps.CompensateDoneEvent{Dependencies: currentDeps()}
+		},
+		rollback: func(deps.IntentRollback) deps.Event {
+			return deps.RollbackDoneEvent{Dependencies: currentDeps()}
+		},
+	}
+	svc := &DepsService{
+		ModuleDir:     "/tmp/m",
+		Stdout:        stdout,
+		Stdin:         &bytes.Buffer{},
+		Confirm:       confirm,
+		ExecuteIntent: fx.Execute,
+		ListDeps:      func(string) ([]deps.ModuleDependency, error) { return nil, nil },
+		ListBackups:   func(string) ([]deps.DependencyBackupInfo, error) { return nil, nil },
+		RestoreBackup: func(string, string) (deps.DependencyRestoreResult, error) {
+			return deps.DependencyRestoreResult{}, nil
+		},
+	}
+	return svc, fx, stdout
+}
+
+// ---------------------------------------------------------------------------
+// One-shot commands: RunList / RunCheck / RunBackups / RunRestore
+// ---------------------------------------------------------------------------
+
+func TestRunListPrintsDependencies(t *testing.T) {
+	stdout := &bytes.Buffer{}
+	svc := &DepsService{
+		ModuleDir: "/tmp/m",
+		Stdout:    stdout,
+		ListDeps: func(string) ([]deps.ModuleDependency, error) {
+			return []deps.ModuleDependency{
+				{Path: "github.com/d/x", Version: "v1.0.0"},
+				{Path: "github.com/i/y", Version: "v0.5.0", Indirect: true},
+			}, nil
+		},
+	}
+
+	if err := svc.RunList(); err != nil {
+		t.Fatalf("RunList: %v", err)
+	}
+	want := "🔍 Reading module dependencies in /tmp/m...\n\n" +
+		"  github.com/d/x\tv1.0.0\tdirect\n" +
+		"  github.com/i/y\tv0.5.0\tindirect\n" +
+		"\n✅ 1 direct, 1 indirect dependencies.\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("RunList output mismatch\nwant:\n%q\ngot:\n%q", want, got)
+	}
+}
+
+func TestRunCheckShowsUpdates(t *testing.T) {
+	fx := &fakeExecutor{
+		checkUpdates: func(deps.IntentCheckUpdates) deps.Event {
+			return deps.CheckUpdatesDoneEvent{Dependencies: []deps.ModuleDependency{
+				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
+				{Path: "github.com/d/y", Version: "v1.0.0", Latest: "v1.0.0"},
+			}}
+		},
+	}
+	stdout := &bytes.Buffer{}
+	svc := &DepsService{
+		ModuleDir:     "/tmp/m",
+		Stdout:        stdout,
+		ExecuteIntent: fx.Execute,
+	}
+
+	if err := svc.RunCheck(); err != nil {
+		t.Fatalf("RunCheck: %v", err)
+	}
+	want := "🔍 Checking available updates in /tmp/m...\n\n" +
+		"  github.com/d/x\tv1.0.0 → v1.1.0\tupdate available\n" +
+		"  github.com/d/y\tv1.0.0\tcurrent\n" +
+		"\n📦 1 direct update(s) available.\n"
+	if got := stdout.String(); got != want {
+		t.Fatalf("RunCheck output mismatch\nwant:\n%q\ngot:\n%q", want, got)
+	}
+	if fx.checkCalls != 1 {
+		t.Fatalf("expected one check call, got %d", fx.checkCalls)
+	}
+}
+
+func TestRunCheckExecutorEventError(t *testing.T) {
+	fx := &fakeExecutor{
+		checkUpdates: func(deps.IntentCheckUpdates) deps.Event {
+			return deps.CheckUpdatesDoneEvent{Err: errors.New("offline")}
+		},
+	}
+	svc := &DepsService{
+		ModuleDir:     "/tmp/m",
+		Stdout:        &bytes.Buffer{},
+		ExecuteIntent: fx.Execute,
+	}
+	err := svc.RunCheck()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to check dependencies") {
+		t.Fatalf("expected wrapped error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "offline") {
+		t.Fatalf("expected underlying error surfaced, got: %v", err)
+	}
+}
+
+func TestRunCheckExecuteIntentError(t *testing.T) {
+	svc := &DepsService{
+		ModuleDir: "/tmp/m",
+		Stdout:    &bytes.Buffer{},
+		ExecuteIntent: func(deps.Intent) (deps.Event, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	err := svc.RunCheck()
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected boom error, got: %v", err)
+	}
 }
 
 func TestRunBackupsPrintsNewestBackups(t *testing.T) {
-	svc, _, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) { return nil, nil },
-		func(string, bool) (bool, error) { return true, nil },
-	)
-	svc.ListBackups = func(string) ([]utils.DependencyBackupInfo, error) {
-		return []utils.DependencyBackupInfo{
-			{
+	stdout := &bytes.Buffer{}
+	svc := &DepsService{
+		ModuleDir: "/tmp/m",
+		Stdout:    stdout,
+		ListBackups: func(string) ([]deps.DependencyBackupInfo, error) {
+			return []deps.DependencyBackupInfo{{
 				Name:       "2026-07-09_12-00-00.json",
 				CreatedAt:  time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
 				ModulePath: "github.com/acme/app",
-				Kind:       utils.DependencyBackupKindPreUpdate,
+				Kind:       deps.DependencyBackupKindPreUpdate,
 				Updated:    2,
-			},
-		}, nil
+			}}, nil
+		},
 	}
 
 	if err := svc.RunBackups(); err != nil {
@@ -56,22 +271,22 @@ func TestRunBackupsPrintsNewestBackups(t *testing.T) {
 
 func TestRunRestoreUsesProvidedBackupName(t *testing.T) {
 	confirmCalls := 0
-	svc, ops, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) { return nil, nil },
-		func(string, bool) (bool, error) {
+	stdout := &bytes.Buffer{}
+	var gotName string
+	svc := &DepsService{
+		ModuleDir: "/tmp/m",
+		Stdout:    stdout,
+		Confirm: func(string, bool) (bool, error) {
 			confirmCalls++
 			return true, nil
 		},
-	)
-	svc.RestoreBackup = ops.RestoreBackup
-	ops.restoreFn = func(dir, name string) (utils.DependencyRestoreResult, error) {
-		if name != "2026-07-09_12-00-00.json" {
-			t.Fatalf("restore name = %q", name)
-		}
-		return utils.DependencyRestoreResult{
-			BackupName:    name,
-			BackupCreated: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
-		}, nil
+		RestoreBackup: func(_ string, name string) (deps.DependencyRestoreResult, error) {
+			gotName = name
+			return deps.DependencyRestoreResult{
+				BackupName:    name,
+				BackupCreated: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+			}, nil
+		},
 	}
 
 	if err := svc.RunRestore("2026-07-09_12-00-00.json"); err != nil {
@@ -80,147 +295,49 @@ func TestRunRestoreUsesProvidedBackupName(t *testing.T) {
 	if confirmCalls != 1 {
 		t.Fatalf("expected one confirmation, got %d", confirmCalls)
 	}
-	if ops.restoreCalls != 1 {
-		t.Fatalf("expected one restore call, got %d", ops.restoreCalls)
+	if gotName != "2026-07-09_12-00-00.json" {
+		t.Fatalf("restore name = %q", gotName)
 	}
 	if !strings.Contains(stdout.String(), "Restored dependencies") {
 		t.Fatalf("expected restore success, got:\n%s", stdout.String())
 	}
 }
 
-func (f *fakeOps) ListDeps(dir string) ([]utils.ModuleDependency, error) {
-	return f.listFn(dir)
-}
-func (f *fakeOps) CheckDeps(dir string) ([]utils.ModuleDependency, error) {
-	return f.checkFn(dir)
-}
-func (f *fakeOps) Update(dir string, entries []utils.DependencyUpdateEntry) (utils.DependencyUpdateResult, error) {
-	f.updateCalls++
-	return f.updateFn(dir, entries)
-}
-func (f *fakeOps) RunChecks(dir string) (utils.DependencyCheckResult, error) {
-	f.runChecksCalls++
-	return f.runChecksFn(dir)
-}
-func (f *fakeOps) Rollback(dir string, snap *utils.DependencySnapshot) (utils.DependencyRollbackResult, error) {
-	f.rollbackCalls++
-	return f.rollbackFn(dir, snap)
-}
-func (f *fakeOps) ListBackups(dir string) ([]utils.DependencyBackupInfo, error) {
-	return f.listBackupsFn(dir)
-}
-func (f *fakeOps) RestoreBackup(dir, name string) (utils.DependencyRestoreResult, error) {
-	f.restoreCalls++
-	return f.restoreFn(dir, name)
-}
-
-func newFakeDeps(checkFn func(string) ([]utils.ModuleDependency, error), confirm func(string, bool) (bool, error)) (*DepsService, *fakeOps, *bytes.Buffer) {
-	ops := &fakeOps{checkFn: checkFn}
+func TestRunRestoreDeclineCancels(t *testing.T) {
 	stdout := &bytes.Buffer{}
+	restoreCalls := 0
 	svc := &DepsService{
-		ModuleDir:     "/tmp/m",
-		Stdout:        stdout,
-		Stdin:         &bytes.Buffer{},
-		Confirm:       confirm,
-		ListDeps:      ops.ListDeps,
-		CheckDeps:     ops.CheckDeps,
-		Update:        ops.Update,
-		RunChecks:     ops.RunChecks,
-		Rollback:      ops.Rollback,
-		ListBackups:   ops.ListBackups,
-		RestoreBackup: ops.RestoreBackup,
-	}
-	ops.listFn = func(dir string) ([]utils.ModuleDependency, error) {
-		return []utils.ModuleDependency{{Path: "x", Version: "v1.0.0"}}, nil
-	}
-	ops.updateFn = func(dir string, entries []utils.DependencyUpdateEntry) (utils.DependencyUpdateResult, error) {
-		return utils.DependencyUpdateResult{
-			Updated: 1,
-			Snapshot: &utils.DependencySnapshot{
-				Updatable: []utils.DependencyUpdateEntry{{Path: "x", OldVersion: "v1.0.0", NewVersion: "v1.1.0"}},
-			},
-		}, nil
-	}
-	ops.runChecksFn = func(dir string) (utils.DependencyCheckResult, error) {
-		return utils.DependencyCheckResult{OK: true}, nil
-	}
-	ops.rollbackFn = func(dir string, snap *utils.DependencySnapshot) (utils.DependencyRollbackResult, error) {
-		return utils.DependencyRollbackResult{Snapshot: snap}, nil
-	}
-	ops.listBackupsFn = func(dir string) ([]utils.DependencyBackupInfo, error) {
-		return nil, nil
-	}
-	ops.restoreFn = func(dir, name string) (utils.DependencyRestoreResult, error) {
-		return utils.DependencyRestoreResult{}, nil
-	}
-	return svc, ops, stdout
-}
-
-func TestRunListPrintsDependencies(t *testing.T) {
-	svc, _, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) { return nil, nil },
-		func(string, bool) (bool, error) { return true, nil },
-	)
-	svc.ListDeps = func(string) ([]utils.ModuleDependency, error) {
-		return []utils.ModuleDependency{
-			{Path: "github.com/d/x", Version: "v1.0.0"},
-			{Path: "github.com/i/y", Version: "v0.5.0", Indirect: true},
-		}, nil
-	}
-
-	if err := svc.RunList(); err != nil {
-		t.Fatalf("RunList: %v", err)
-	}
-	want := "🔍 Reading module dependencies in /tmp/m...\n\n" +
-		"  github.com/d/x\tv1.0.0\tdirect\n" +
-		"  github.com/i/y\tv0.5.0\tindirect\n" +
-		"\n✅ 1 direct, 1 indirect dependencies.\n"
-	if got := stdout.String(); got != want {
-		t.Fatalf("RunList output mismatch (-want +got):\nwant:\n%q\ngot:\n%q", want, got)
-	}
-}
-
-func TestRunCheckShowsUpdates(t *testing.T) {
-	svc, _, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
-				{Path: "github.com/d/y", Version: "v1.0.0", Latest: "v1.0.0"},
-			}, nil
+		ModuleDir: "/tmp/m",
+		Stdout:    stdout,
+		Confirm:   func(string, bool) (bool, error) { return false, nil },
+		RestoreBackup: func(string, string) (deps.DependencyRestoreResult, error) {
+			restoreCalls++
+			return deps.DependencyRestoreResult{}, nil
 		},
-		func(string, bool) (bool, error) { return true, nil },
-	)
-	svc.CheckDeps = func(string) ([]utils.ModuleDependency, error) {
-		return []utils.ModuleDependency{
-			{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
-			{Path: "github.com/d/y", Version: "v1.0.0", Latest: "v1.0.0"},
-		}, nil
 	}
-
-	if err := svc.RunCheck(); err != nil {
-		t.Fatalf("RunCheck: %v", err)
+	if err := svc.RunRestore("x.json"); err != nil {
+		t.Fatalf("RunRestore: %v", err)
 	}
-	want := "🔍 Checking available updates in /tmp/m...\n\n" +
-		"  github.com/d/x\tv1.0.0 → v1.1.0\tupdate available\n" +
-		"  github.com/d/y\tv1.0.0\tcurrent\n" +
-		"\n📦 1 direct update(s) available.\n"
-	if got := stdout.String(); got != want {
-		t.Fatalf("RunCheck output mismatch (-want +got):\nwant:\n%q\ngot:\n%q", want, got)
+	if restoreCalls != 0 {
+		t.Fatalf("expected restore skipped, got %d", restoreCalls)
+	}
+	if !strings.Contains(stdout.String(), "Restore canceled") {
+		t.Fatalf("expected cancel message, got:\n%s", stdout.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// RunUpdate driver loop
+// ---------------------------------------------------------------------------
 
 func TestRunUpdateNoDirectUpdates(t *testing.T) {
-	svc, ops, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.0.0"},
-			}, nil
-		},
-		func(string, bool) (bool, error) {
-			t.Fatal("Confirm should not be called when no updates")
-			return false, nil
-		},
-	)
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) {
+		t.Fatal("Confirm should not be called when no updates")
+		return false, nil
+	})
+	fx.checkUpdates = func(deps.IntentCheckUpdates) deps.Event {
+		return deps.CheckUpdatesDoneEvent{Dependencies: currentDeps()}
+	}
 
 	if err := svc.RunUpdate(); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
@@ -228,20 +345,17 @@ func TestRunUpdateNoDirectUpdates(t *testing.T) {
 	if !strings.Contains(stdout.String(), "No direct dependency updates available") {
 		t.Fatalf("expected message about no updates, got:\n%s", stdout.String())
 	}
-	if ops.updateCalls != 0 || ops.runChecksCalls != 0 || ops.rollbackCalls != 0 {
-		t.Fatalf("expected no operations, got update=%d checks=%d rollback=%d", ops.updateCalls, ops.runChecksCalls, ops.rollbackCalls)
+	if fx.applyCalls != 0 || fx.checksCalls != 0 || fx.rollbackCalls != 0 {
+		t.Fatalf("expected no operations, got apply=%d checks=%d rollback=%d",
+			fx.applyCalls, fx.checksCalls, fx.rollbackCalls)
 	}
 }
 
 func TestRunUpdateDeclineUpdate(t *testing.T) {
-	svc, ops, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
-			}, nil
-		},
-		nil,
-	)
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) {
+		t.Fatal("Confirm should use defaultConfirm")
+		return false, nil
+	})
 	svc.Stdin = strings.NewReader("n\n")
 	svc.Confirm = defaultConfirm(svc.Stdin, stdout)
 
@@ -253,57 +367,38 @@ func TestRunUpdateDeclineUpdate(t *testing.T) {
 		"  - github.com/d/x  v1.0.0 → v1.1.0\n" +
 		"\nApply these updates? [Y/n]: 🛑 Update canceled.\n"
 	if got := stdout.String(); got != want {
-		t.Fatalf("RunUpdate cancellation output mismatch (-want +got):\nwant:\n%q\ngot:\n%q", want, got)
+		t.Fatalf("RunUpdate cancellation output mismatch\nwant:\n%q\ngot:\n%q", want, got)
 	}
-	if ops.updateCalls != 0 {
-		t.Fatalf("expected Update to be skipped, got %d calls", ops.updateCalls)
+	if fx.applyCalls != 0 {
+		t.Fatalf("expected apply to be skipped, got %d calls", fx.applyCalls)
 	}
 }
 
 func TestRunUpdateAcceptUpdateDeclineChecks(t *testing.T) {
 	confirmCalls := 0
-	svc, ops, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
-			}, nil
-		},
-		func(string, bool) (bool, error) {
-			confirmCalls++
-			return confirmCalls == 1, nil // accept update, decline checks
-		},
-	)
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) {
+		confirmCalls++
+		return confirmCalls == 1, nil // accept apply, decline checks
+	})
 
 	if err := svc.RunUpdate(); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Updated 1 direct dependency") {
-		t.Fatalf("expected success message, got:\n%s", stdout.String())
+	out := stdout.String()
+	if !strings.Contains(out, "Updated 1 direct dependency") {
+		t.Fatalf("expected success message, got:\n%s", out)
 	}
-	if !strings.Contains(stdout.String(), "Checks skipped") {
-		t.Fatalf("expected checks skipped message, got:\n%s", stdout.String())
+	if !strings.Contains(out, "Checks skipped") {
+		t.Fatalf("expected checks skipped message, got:\n%s", out)
 	}
-	if ops.updateCalls != 1 {
-		t.Fatalf("expected Update to be called once, got %d", ops.updateCalls)
-	}
-	if ops.runChecksCalls != 0 {
-		t.Fatalf("expected RunChecks to be skipped, got %d calls", ops.runChecksCalls)
-	}
-	if ops.rollbackCalls != 0 {
-		t.Fatalf("expected Rollback to be skipped, got %d calls", ops.rollbackCalls)
+	if fx.applyCalls != 1 || fx.checksCalls != 0 || fx.rollbackCalls != 0 {
+		t.Fatalf("unexpected calls apply=%d checks=%d rollback=%d",
+			fx.applyCalls, fx.checksCalls, fx.rollbackCalls)
 	}
 }
 
 func TestRunUpdateRunChecksSuccess(t *testing.T) {
-	confirmCalls := 0
-	svc, ops, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
-			}, nil
-		},
-		func(string, bool) (bool, error) { confirmCalls++; return true, nil },
-	)
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) { return true, nil })
 
 	if err := svc.RunUpdate(); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
@@ -311,23 +406,16 @@ func TestRunUpdateRunChecksSuccess(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Checks passed") {
 		t.Fatalf("expected success message, got:\n%s", stdout.String())
 	}
-	if ops.updateCalls != 1 || ops.runChecksCalls != 1 || ops.rollbackCalls != 0 {
-		t.Fatalf("unexpected call counts update=%d checks=%d rollback=%d", ops.updateCalls, ops.runChecksCalls, ops.rollbackCalls)
+	if fx.applyCalls != 1 || fx.checksCalls != 1 || fx.rollbackCalls != 0 {
+		t.Fatalf("unexpected calls apply=%d checks=%d rollback=%d",
+			fx.applyCalls, fx.checksCalls, fx.rollbackCalls)
 	}
 }
 
 func TestRunUpdateChecksFailAcceptRollback(t *testing.T) {
-	confirmCalls := 0
-	svc, ops, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
-			}, nil
-		},
-		func(string, bool) (bool, error) { confirmCalls++; return true, nil },
-	)
-	ops.runChecksFn = func(string) (utils.DependencyCheckResult, error) {
-		return utils.DependencyCheckResult{OK: false, Command: "go test ./...", Output: "FAIL: x"}, nil
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) { return true, nil })
+	fx.runChecks = func(deps.IntentRunChecks) deps.Event {
+		return deps.ChecksDoneEvent{Result: deps.DependencyCheckResult{OK: false, Command: "go test ./...", Output: "FAIL: x"}}
 	}
 
 	if err := svc.RunUpdate(); err != nil {
@@ -339,23 +427,19 @@ func TestRunUpdateChecksFailAcceptRollback(t *testing.T) {
 			t.Fatalf("expected output to contain %q, got:\n%s", want, out)
 		}
 	}
-	if ops.rollbackCalls != 1 {
-		t.Fatalf("expected Rollback to be called once, got %d", ops.rollbackCalls)
+	if fx.rollbackCalls != 1 {
+		t.Fatalf("expected rollback once, got %d", fx.rollbackCalls)
 	}
 }
 
 func TestRunUpdateChecksFailDeclineRollback(t *testing.T) {
 	confirmCalls := 0
-	svc, ops, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
-			}, nil
-		},
-		func(string, bool) (bool, error) { confirmCalls++; return confirmCalls != 3, nil },
-	)
-	ops.runChecksFn = func(string) (utils.DependencyCheckResult, error) {
-		return utils.DependencyCheckResult{OK: false, Command: "go test ./...", Output: "FAIL: x"}, nil
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) {
+		confirmCalls++
+		return confirmCalls != 3, nil // decline the rollback confirm
+	})
+	fx.runChecks = func(deps.IntentRunChecks) deps.Event {
+		return deps.ChecksDoneEvent{Result: deps.DependencyCheckResult{OK: false, Command: "go test ./...", Output: "FAIL: x"}}
 	}
 
 	if err := svc.RunUpdate(); err != nil {
@@ -364,19 +448,20 @@ func TestRunUpdateChecksFailDeclineRollback(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Update kept. Failed checks were not rolled back") {
 		t.Fatalf("expected kept-updates message, got:\n%s", stdout.String())
 	}
-	if ops.rollbackCalls != 0 {
-		t.Fatalf("expected Rollback to be skipped, got %d calls", ops.rollbackCalls)
+	if fx.rollbackCalls != 0 {
+		t.Fatalf("expected rollback skipped, got %d calls", fx.rollbackCalls)
 	}
 }
 
 func TestRunUpdateCheckError(t *testing.T) {
-	svc, ops, _ := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) { return nil, errors.New("boom") },
-		func(string, bool) (bool, error) {
-			t.Fatal("Confirm should not be called when check errors")
-			return false, nil
-		},
-	)
+	svc, fx, _ := newUpdateService(func(string, bool) (bool, error) {
+		t.Fatal("Confirm should not be called when check errors")
+		return false, nil
+	})
+	fx.checkUpdates = func(deps.IntentCheckUpdates) deps.Event {
+		return deps.CheckUpdatesDoneEvent{Err: errors.New("boom")}
+	}
+
 	err := svc.RunUpdate()
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -384,61 +469,170 @@ func TestRunUpdateCheckError(t *testing.T) {
 	if !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("expected error to surface, got: %v", err)
 	}
-	if ops.updateCalls != 0 {
-		t.Fatalf("expected Update to be skipped, got %d", ops.updateCalls)
+	if fx.applyCalls != 0 {
+		t.Fatalf("expected apply skipped, got %d", fx.applyCalls)
 	}
 }
 
-func TestRunUpdateUpdateError(t *testing.T) {
-	svc, ops, _ := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
-			}, nil
-		},
-		func(string, bool) (bool, error) { return true, nil },
-	)
-	ops.updateFn = func(_ string, entries []utils.DependencyUpdateEntry) (utils.DependencyUpdateResult, error) {
-		want := []utils.DependencyUpdateEntry{{
+func TestRunUpdateApplyErrorBeforeMutation(t *testing.T) {
+	svc, fx, _ := newUpdateService(func(string, bool) (bool, error) { return true, nil })
+	fx.applyUpdates = func(i deps.IntentApplyUpdates) deps.Event {
+		want := []deps.DependencyUpdateEntry{{
 			Path:       "github.com/d/x",
 			OldVersion: "v1.0.0",
 			NewVersion: "v1.1.0",
 		}}
-		if !reflect.DeepEqual(entries, want) {
-			t.Fatalf("update entries = %#v, want %#v", entries, want)
+		if !reflect.DeepEqual(i.Entries, want) {
+			t.Fatalf("apply entries = %#v, want %#v", i.Entries, want)
 		}
-		return utils.DependencyUpdateResult{}, errors.New("go get failed")
+		return deps.ApplyUpdatesDoneEvent{Err: errors.New("go get failed")}
 	}
+
 	if err := svc.RunUpdate(); err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if ops.runChecksCalls != 0 || ops.rollbackCalls != 0 {
-		t.Fatalf("expected no further calls, got checks=%d rollback=%d", ops.runChecksCalls, ops.rollbackCalls)
+	if fx.checksCalls != 0 || fx.rollbackCalls != 0 || fx.compensateCalls != 0 {
+		t.Fatalf("expected no further ops, got checks=%d rollback=%d compensate=%d",
+			fx.checksCalls, fx.rollbackCalls, fx.compensateCalls)
 	}
 }
 
-func TestRunUpdateRollbackError(t *testing.T) {
-	svc, ops, stdout := newFakeDeps(
-		func(string) ([]utils.ModuleDependency, error) {
-			return []utils.ModuleDependency{
-				{Path: "github.com/d/x", Version: "v1.0.0", Latest: "v1.1.0"},
-			}, nil
-		},
-		func(string, bool) (bool, error) { return true, nil },
-	)
-	ops.runChecksFn = func(string) (utils.DependencyCheckResult, error) {
-		return utils.DependencyCheckResult{OK: false, Command: "go test", Output: "boom"}, nil
+func TestRunUpdateRollbackErrorRecoveryRequired(t *testing.T) {
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) { return true, nil })
+	fx.runChecks = func(deps.IntentRunChecks) deps.Event {
+		return deps.ChecksDoneEvent{Result: deps.DependencyCheckResult{OK: false, Command: "go test", Output: "boom"}}
 	}
-	ops.rollbackFn = func(string, *utils.DependencySnapshot) (utils.DependencyRollbackResult, error) {
-		return utils.DependencyRollbackResult{}, errors.New("disk full")
+	fx.rollback = func(deps.IntentRollback) deps.Event {
+		return deps.RollbackDoneEvent{Err: errors.New("disk full")}
 	}
-	if err := svc.RunUpdate(); err == nil {
+
+	err := svc.RunUpdate()
+	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if !strings.Contains(stdout.String(), "Checks failed") {
 		t.Fatalf("expected failure context, got:\n%s", stdout.String())
 	}
+	// RecoveryRequired must surface the persistent backup metadata.
+	if !strings.Contains(err.Error(), "2026-07-23_12-00-00.json") {
+		t.Fatalf("expected error to include backup name, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "/tmp/govm/2026-07-23_12-00-00.json") {
+		t.Fatalf("expected error to include backup path, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("expected rollback cause surfaced, got: %v", err)
+	}
 }
+
+// ---------------------------------------------------------------------------
+// New branches: inconclusive checks, compensation, recovery
+// ---------------------------------------------------------------------------
+
+func TestRunUpdateChecksInconclusivePromptsRollback(t *testing.T) {
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) { return true, nil })
+	fx.runChecks = func(deps.IntentRunChecks) deps.Event {
+		return deps.ChecksDoneEvent{Err: errors.New("resolve failed")}
+	}
+
+	if err := svc.RunUpdate(); err != nil {
+		t.Fatalf("RunUpdate: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Checks could not run") {
+		t.Fatalf("expected inconclusive output, got:\n%s", out)
+	}
+	if strings.Contains(out, "Checks failed:") {
+		t.Fatalf("inconclusive output must be distinct from failed checks, got:\n%s", out)
+	}
+	if fx.rollbackCalls != 1 {
+		t.Fatalf("expected rollback once, got %d", fx.rollbackCalls)
+	}
+}
+
+func TestRunUpdateCompensationRestoredIsError(t *testing.T) {
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) { return true, nil })
+	fx.applyUpdates = func(deps.IntentApplyUpdates) deps.Event {
+		return deps.ApplyUpdatesDoneEvent{
+			Snapshot: cliSnapshot(),
+			Backup:   cliBackup(),
+			Err:      errors.New("go get failed"),
+		}
+	}
+
+	err := svc.RunUpdate()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "automatically restored") {
+		t.Fatalf("expected restored message, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "go get failed") {
+		t.Fatalf("expected apply error surfaced, got: %v", err)
+	}
+	if fx.compensateCalls != 1 {
+		t.Fatalf("expected compensation once, got %d", fx.compensateCalls)
+	}
+	if fx.checksCalls != 0 || fx.rollbackCalls != 0 {
+		t.Fatalf("expected no checks/rollback, got checks=%d rollback=%d", fx.checksCalls, fx.rollbackCalls)
+	}
+}
+
+func TestRunUpdateRecoveryRequiredCompensationFailed(t *testing.T) {
+	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) { return true, nil })
+	fx.applyUpdates = func(deps.IntentApplyUpdates) deps.Event {
+		return deps.ApplyUpdatesDoneEvent{
+			Snapshot: cliSnapshot(),
+			Backup:   cliBackup(),
+			Err:      errors.New("go get failed"),
+		}
+	}
+	fx.compensate = func(deps.IntentCompensate) deps.Event {
+		return deps.CompensateDoneEvent{Err: errors.New("restore failed")}
+	}
+
+	err := svc.RunUpdate()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	out := stdout.String()
+	if strings.Contains(out, "automatically restored") {
+		t.Fatalf("must not claim restoration on recovery, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "restore failed") {
+		t.Fatalf("expected compensation error surfaced, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "2026-07-23_12-00-00.json") {
+		t.Fatalf("expected backup name in error, got: %v", err)
+	}
+	if fx.compensateCalls != 1 {
+		t.Fatalf("expected compensation once, got %d", fx.compensateCalls)
+	}
+}
+
+func TestRunUpdateExecutorError(t *testing.T) {
+	svc, fx, _ := newUpdateService(func(string, bool) (bool, error) {
+		t.Fatal("Confirm should not be called when executor errors")
+		return false, nil
+	})
+	fx.execErr = errors.New("executor unavailable")
+
+	err := svc.RunUpdate()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "executor unavailable") {
+		t.Fatalf("expected executor error surfaced, got: %v", err)
+	}
+	if fx.applyCalls != 0 {
+		t.Fatalf("expected apply skipped after check executor error, got %d", fx.applyCalls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// defaultConfirm and NewDepsService wiring
+// ---------------------------------------------------------------------------
 
 func TestDefaultConfirmReadsBufferedAnswersAcrossPrompts(t *testing.T) {
 	stdin := strings.NewReader("y\nn\nn\n")
@@ -460,5 +654,21 @@ func TestDefaultConfirmReadsBufferedAnswersAcrossPrompts(t *testing.T) {
 
 	if first != true || second != false || third != false {
 		t.Fatalf("expected true, false, false; got %t, %t, %t", first, second, third)
+	}
+}
+
+func TestNewDepsServiceWiresDefaults(t *testing.T) {
+	svc := NewDepsService("/tmp/m", &bytes.Buffer{}, &bytes.Buffer{})
+	if svc.ExecuteIntent == nil {
+		t.Fatal("ExecuteIntent should be wired to a deps.Executor")
+	}
+	if svc.ListDeps == nil || svc.ListBackups == nil || svc.RestoreBackup == nil {
+		t.Fatal("one-shot helpers should be wired")
+	}
+	if svc.Confirm == nil {
+		t.Fatal("Confirm should be wired")
+	}
+	if svc.ModuleDir != "/tmp/m" {
+		t.Fatalf("ModuleDir = %q", svc.ModuleDir)
 	}
 }

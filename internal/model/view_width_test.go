@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 )
 
 func TestViewRespectsTerminalWidth(t *testing.T) {
@@ -35,10 +35,13 @@ func TestViewRespectsTerminalWidth(t *testing.T) {
 		{
 			name: "rollback dialog",
 			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
-				m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
-					Command: "go test ./...",
-					Output:  strings.Repeat("failure output ", 12),
+				m.Deps.Dialog = ConfirmDialog{
+					Kind:      DialogRollback,
+					ChoiceYes: true,
+					CheckResult: &deps.DependencyCheckResult{
+						Command: "go test ./...",
+						Output:  strings.Repeat("failure output ", 12),
+					},
 				}
 			},
 		},
@@ -46,9 +49,9 @@ func TestViewRespectsTerminalWidth(t *testing.T) {
 			name: "restore dialog",
 			setup: func(m *Model) {
 				m.Deps.Dialog = ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
-				m.Deps.Backups = []utils.DependencyBackupInfo{{
+				m.Deps.Backups = []deps.DependencyBackupInfo{{
 					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
-					Kind:    utils.DependencyBackupKindPreUpdate,
+					Kind:    deps.DependencyBackupKindPreUpdate,
 					Updated: 1,
 				}}
 			},
@@ -104,14 +107,17 @@ func TestOverlayModalsRespectPhysicalViewport(t *testing.T) {
 		{
 			name: "dependency rollback",
 			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
-				m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
-					Command: "go test ./...",
-					Output: strings.Join([]string{
-						"FAIL: example.com/module/package",
-						"expected: successful update",
-						"actual: failed dependency check",
-					}, "\n"),
+				m.Deps.Dialog = ConfirmDialog{
+					Kind:      DialogRollback,
+					ChoiceYes: true,
+					CheckResult: &deps.DependencyCheckResult{
+						Command: "go test ./...",
+						Output: strings.Join([]string{
+							"FAIL: example.com/module/package",
+							"expected: successful update",
+							"actual: failed dependency check",
+						}, "\n"),
+					},
 				}
 			},
 		},
@@ -119,9 +125,9 @@ func TestOverlayModalsRespectPhysicalViewport(t *testing.T) {
 			name: "dependency restore",
 			setup: func(m *Model) {
 				m.Deps.Dialog = ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
-				m.Deps.Backups = []utils.DependencyBackupInfo{{
+				m.Deps.Backups = []deps.DependencyBackupInfo{{
 					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
-					Kind:    utils.DependencyBackupKindPreUpdate,
+					Kind:    deps.DependencyBackupKindPreUpdate,
 					Updated: 1,
 				}}
 			},
@@ -183,15 +189,17 @@ func TestRollbackDialogLimitsLongOutput(t *testing.T) {
 	m := newTestModel(t)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 	m = updated.(Model)
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
-
 	output := make([]string, maxDependencyListLines+4)
 	for i := range output {
 		output[i] = "failure output line " + strconv.Itoa(i+1)
 	}
-	m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
-		Command: "go test ./...",
-		Output:  strings.Join(output, "\n"),
+	m.Deps.Dialog = ConfirmDialog{
+		Kind:      DialogRollback,
+		ChoiceYes: true,
+		CheckResult: &deps.DependencyCheckResult{
+			Command: "go test ./...",
+			Output:  strings.Join(output, "\n"),
+		},
 	}
 
 	content := m.View().Content
@@ -228,12 +236,15 @@ func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
 		{
 			name: "update",
 			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
-				m.Deps.Dependencies = []utils.ModuleDependency{{
-					Path:    "github.com/acme/very-long-module-name-that-must-not-overflow-the-terminal",
-					Version: "v1.0.0",
-					Latest:  "v1.1.0",
-				}}
+				m.Deps.Dialog = ConfirmDialog{
+					Kind:      DialogUpdate,
+					ChoiceYes: true,
+					UpdateEntries: []deps.DependencyUpdateEntry{{
+						Path:       "github.com/acme/very-long-module-name-that-must-not-overflow-the-terminal",
+						OldVersion: "v1.0.0",
+						NewVersion: "v1.1.0",
+					}},
+				}
 			},
 		},
 		{
@@ -245,10 +256,13 @@ func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
 		{
 			name: "rollback",
 			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogRollback, ChoiceYes: true}
-				m.Deps.LastCheckResult = &utils.DependencyCheckResultMsg{
-					Command: "go test ./...",
-					Output:  strings.Repeat("failure output ", 12),
+				m.Deps.Dialog = ConfirmDialog{
+					Kind:      DialogRollback,
+					ChoiceYes: true,
+					CheckResult: &deps.DependencyCheckResult{
+						Command: "go test ./...",
+						Output:  strings.Repeat("failure output ", 12),
+					},
 				}
 			},
 		},
@@ -256,9 +270,9 @@ func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
 			name: "restore",
 			setup: func(m *Model) {
 				m.Deps.Dialog = ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
-				m.Deps.Backups = []utils.DependencyBackupInfo{{
+				m.Deps.Backups = []deps.DependencyBackupInfo{{
 					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
-					Kind:    utils.DependencyBackupKindPreUpdate,
+					Kind:    deps.DependencyBackupKindPreUpdate,
 					Updated: 1,
 				}}
 			},
