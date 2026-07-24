@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
@@ -210,8 +209,7 @@ func TestRenderStatus_AllTypes(t *testing.T) {
 
 func TestView_NoPanicWhenListEmpty(t *testing.T) {
 	m := newTestModel(t)
-	m.List.SetItems([]list.Item{})
-	m.Versions = nil
+	seedVersions(t, &m, nil)
 	view := m.View()
 	if view.Content == "" {
 		t.Fatal("expected non-empty view")

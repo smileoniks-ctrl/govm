@@ -91,12 +91,12 @@ func TestWindowSizeMsgKeepsContentSizesPositive(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
 	got := updated.(Model)
 
-	if got.List.Width() <= 0 || got.List.Height() <= 0 {
-		t.Fatalf("expected positive list size, got %dx%d", got.List.Width(), got.List.Height())
+	if got.list.Width() <= 0 || got.list.Height() <= 0 {
+		t.Fatalf("expected positive list size, got %dx%d", got.list.Width(), got.list.Height())
 	}
 
-	if got.InstalledTable.Width() <= 0 || got.InstalledTable.Height() <= 0 {
-		t.Fatalf("expected positive table size, got %dx%d", got.InstalledTable.Width(), got.InstalledTable.Height())
+	if got.installedTable.Width() <= 0 || got.installedTable.Height() <= 0 {
+		t.Fatalf("expected positive table size, got %dx%d", got.installedTable.Width(), got.installedTable.Height())
 	}
 }
 
@@ -330,24 +330,23 @@ func TestCycleExecutionErrorResetsState(t *testing.T) {
 // newVersionCacheTestModel builds a Model with a multi-version catalog
 // (installed, uninstalled, active) so that Download/Switch/Delete
 // handlers have a non-trivial starting state to mutate. The list and
-// table are populated via rebuildVersionViews so the model starts in a
-// consistent state.
+// table are populated via replaceVersions (through seedVersions) so the
+// model starts in a consistent state.
 func newVersionCacheTestModel(t *testing.T) Model {
 	t.Helper()
 	m := newTestModel(t)
-	m.Versions = []utils.GoVersion{
+	seedVersions(t, &m, []utils.GoVersion{
 		{Version: "1.24.4", Filename: "go1.24.4.darwin-arm64.tar.gz", Installed: true, Active: true, Path: "/p/1.24.4"},
 		{Version: "1.25.0", Filename: "go1.25.0.darwin-arm64.tar.gz", Installed: false},
 		{Version: "1.26.0", Filename: "go1.26.0.darwin-arm64.tar.gz", Installed: true, Active: false, Path: "/p/1.26.0"},
-	}
-	m.rebuildVersionViews()
+	})
 	return m
 }
 
 // TestVersionHandlersKeepCachesConsistent dispatches each of the four
 // version-mutating msgs through Update and asserts the postcondition
 // that the Available Versions list and the Installed Versions table
-// remain exact projections of m.Versions afterwards.
+// remain exact projections of the catalog afterwards.
 func TestVersionHandlersKeepCachesConsistent(t *testing.T) {
 	tests := []struct {
 		name string

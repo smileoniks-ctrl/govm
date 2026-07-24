@@ -150,13 +150,12 @@ func TestUpdateDependencyTable_StatusPriorities(t *testing.T) {
 
 func TestUpdateInstalledTable_SkipsUninstalled(t *testing.T) {
 	m := newTestModel(t)
-	m.Versions = []utils.GoVersion{
+	seedVersions(t, &m, []utils.GoVersion{
 		{Version: "1.20.0", Installed: true, Path: "/p/1.20", Active: true},
 		{Version: "1.21.0", Installed: false},
 		{Version: "1.22.0", Installed: true, Path: "/p/1.22"},
-	}
-	m.rebuildVersionViews()
-	rows := m.InstalledTable.Rows()
+	})
+	rows := m.installedTable.Rows()
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 installed rows, got %d", len(rows))
 	}

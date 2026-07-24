@@ -49,6 +49,13 @@ func TestTabSwitchPreservesGlobalStatus(t *testing.T) {
 // a stale warning stuck on screen.
 func TestTabSwitchClearsSwitchedToGoStatus(t *testing.T) {
 	m := newTestModel(t)
+	// Seed the switch target as an installed (but inactive) version so
+	// the SwitchCompletedMsg handler can activate it directly through
+	// the catalog without entering reconciliation.
+	seedVersions(t, &m, []utils.GoVersion{
+		{Version: "1.24.4", Filename: "go1.24.4.darwin-arm64.tar.gz", Installed: true, Active: true, Path: "/p/1.24.4"},
+		{Version: "1.26.5", Filename: "go1.26.5.darwin-arm64.tar.gz", Installed: true, Active: false, Path: "/p/1.26.5"},
+	})
 	// Simulate the switch completing with the shim already on PATH,
 	// which is the branch that produces "Switched to Go X! Run ...".
 	updated, _ := m.Update(utils.SwitchCompletedMsg{Version: "1.26.5", ShimInPath: true})

@@ -29,8 +29,9 @@ func benchModel(b *testing.B) Model {
 
 	versions := make([]utils.GoVersion, 0, 30)
 	for i := 0; i < 30; i++ {
+		version := strconv.Itoa(i/10+1) + ".2" + strconv.Itoa(i%10)
 		v := utils.GoVersion{
-			Version:   "1.2" + string(rune('0'+i%10)),
+			Version:   version,
 			Filename:  "go1.2.darwin-arm64.tar.gz",
 			Installed: i%3 == 0,
 			Active:    i == 0,
@@ -51,9 +52,12 @@ func benchModel(b *testing.B) Model {
 	}
 
 	m := New("", "", config.DefaultSettings(), "", styles.NewTheme(config.ThemeCurrent))
-	m.Versions = versions
-	m.rebuildVersionViews()
-	m.List.SetSize(80, 24)
+	if cmd, err := m.replaceVersions(versions); err != nil {
+		b.Fatalf("replaceVersions: %v", err)
+	} else {
+		_ = cmd
+	}
+	m.list.SetSize(80, 24)
 	m.Deps.Dependencies = depItems
 	m.Deps.Loaded = true
 	m.Loading = false
@@ -85,6 +89,28 @@ func BenchmarkView_InstalledTab(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		benchViewSink = m.View()
+	}
+}
+
+func BenchmarkVersionCatalog_MutationAndSync(b *testing.B) {
+	m := benchModel(b)
+	const (
+		version = "1.21"
+		path    = "/Users/example/.govm/versions/go1.21"
+	)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var err error
+		if i%2 == 0 {
+			_, _, err = m.markVersionInstalled(version, path)
+		} else {
+			_, _, err = m.markVersionDeleted(version)
+		}
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

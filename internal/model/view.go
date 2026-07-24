@@ -42,9 +42,9 @@ func (m Model) View() tea.View {
 
 	switch m.CurrentTab {
 	case AvailableTab:
-		components = append(components, renderContentCanvas(m.List.View(), width, height))
+		components = append(components, renderContentCanvas(m.list.View(), width, height))
 	case InstalledTab:
-		components = append(components, renderContentCanvas(m.InstalledTable.View(), width, height))
+		components = append(components, renderContentCanvas(m.installedTable.View(), width, height))
 	case DepsTab:
 		components = append(components, renderContentCanvas(m.Deps.Table.View(), width, height))
 	case SettingsTab:

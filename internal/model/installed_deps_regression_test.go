@@ -17,16 +17,15 @@ import (
 func TestInstalledTab_UKeyTriggersSwitchVersion(t *testing.T) {
 	m := newTestModel(t)
 	m.CurrentTab = InstalledTab
-	m.Versions = []utils.GoVersion{
+	seedVersions(t, &m, []utils.GoVersion{
 		{Version: "1.24.4", Installed: true, Active: true, Path: "/p/1.24.4"},
 		{Version: "1.26.0", Installed: true, Active: false, Path: "/p/1.26.0"},
-	}
-	m.rebuildVersionViews()
-	m.InstalledTable.Focus()
+	})
+	m.installedTable.Focus()
 	// Move the cursor to the non-active row (1.26.0).
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(Model)
-	if got := m.InstalledTable.Cursor(); got != 1 {
+	if got := m.installedTable.Cursor(); got != 1 {
 		t.Fatalf("cursor = %d, want 1 before pressing u", got)
 	}
 

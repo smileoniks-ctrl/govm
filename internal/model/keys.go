@@ -61,11 +61,11 @@ func (m Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 	switch m.CurrentTab {
 	case AvailableTab:
 		var cmd tea.Cmd
-		m.List, cmd = m.List.Update(msg)
+		m.list, cmd = m.list.Update(msg)
 		return m, cmd
 	case InstalledTab:
 		var cmd tea.Cmd
-		m.InstalledTable, cmd = m.InstalledTable.Update(msg)
+		m.installedTable, cmd = m.installedTable.Update(msg)
 		return m, cmd
 	case DepsTab:
 		var cmd tea.Cmd
@@ -115,50 +115,46 @@ func (m Model) handleInstallKey() (tea.Model, tea.Cmd) {
 	if selected == nil {
 		return m, nil
 	}
-	for _, v := range m.Versions {
-		if v.Version == selected.Name && !v.Installed {
-			m.Loading = true
-			m.InstallingVersion = v.Version
-			m.Status.SetGlobal("", "")
-			return m, utils.DownloadAndInstall(v)
-		}
+	v, ok := m.catalog.lookup(selected.Name)
+	if !ok || v.Installed {
+		return m, nil
 	}
-	return m, nil
+	m.Loading = true
+	m.InstallingVersion = v.Version
+	m.Status.SetGlobal("", "")
+	return m, utils.DownloadAndInstall(v)
 }
 
 func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab == AvailableTab {
 		selected := m.selectedItem()
 		if selected != nil {
-			for _, v := range m.Versions {
-				if v.Version == selected.Name && v.Installed {
-					m.Loading = true
-					m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
-					return m, utils.SwitchVersion(v)
-				}
+			v, ok := m.catalog.lookup(selected.Name)
+			if ok && v.Installed {
+				m.Loading = true
+				m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
+				return m, utils.SwitchVersion(v)
 			}
 		}
 		m.Status.SetTab("You need to install this version first. Press 'i' to install.", "error")
 		return m, nil
 	}
 	if m.CurrentTab == InstalledTab {
-		row := m.InstalledTable.SelectedRow()
+		row := m.installedTable.SelectedRow()
 		if len(row) == 0 {
 			return m, nil
 		}
-		for _, v := range m.Versions {
-			if v.Version != row[0] || !v.Installed {
-				continue
-			}
-			if v.Active {
-				m.Status.SetTab(fmt.Sprintf("Go %s is already active.", v.Version), "info")
-				return m, nil
-			}
-			m.Loading = true
-			m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
-			return m, utils.SwitchVersion(v)
+		v, ok := m.catalog.lookup(row[0])
+		if !ok || !v.Installed {
+			return m, nil
 		}
-		return m, nil
+		if v.Active {
+			m.Status.SetTab(fmt.Sprintf("Go %s is already active.", v.Version), "info")
+			return m, nil
+		}
+		m.Loading = true
+		m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
+		return m, utils.SwitchVersion(v)
 	}
 	if m.CurrentTab == DepsTab && m.Deps.Loaded {
 		return m.startUpdateCycle()
@@ -216,29 +212,39 @@ func (m Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab != AvailableTab && m.CurrentTab != InstalledTab {
 		return m, nil
 	}
-	selected := m.selectedItem()
-	if selected == nil {
-		return m, nil
-	}
-	for _, v := range m.Versions {
-		if v.Version == selected.Name && v.Installed {
-			if v.Active {
-				m.Status.SetTab("Cannot delete active version. Switch to another version first.", "error")
-				return m, nil
-			}
-			m.ConfirmingDelete = true
-			m.DeleteVersion = v.Version
-			m.Status.SetTab(fmt.Sprintf("Are you sure you want to delete Go %s? Press Y to confirm, N to cancel.", v.Version), "warning")
+	version := ""
+	if m.CurrentTab == AvailableTab {
+		selected := m.selectedItem()
+		if selected == nil {
 			return m, nil
 		}
+		version = selected.Name
+	} else {
+		row := m.installedTable.SelectedRow()
+		if len(row) == 0 {
+			return m, nil
+		}
+		version = row[0]
 	}
-	if m.CurrentTab == AvailableTab {
-		m.Status.SetTab("This version is not installed.", "error")
+	v, ok := m.catalog.lookup(version)
+	if !ok || !v.Installed {
+		if m.CurrentTab == AvailableTab {
+			m.Status.SetTab("This version is not installed.", "error")
+		}
+		return m, nil
 	}
+	if v.Active {
+		m.Status.SetTab("Cannot delete active version. Switch to another version first.", "error")
+		return m, nil
+	}
+	m.ConfirmingDelete = true
+	m.DeleteVersion = v.Version
+	m.Status.SetTab(fmt.Sprintf("Are you sure you want to delete Go %s? Press Y to confirm, N to cancel.", v.Version), "warning")
 	return m, nil
 }
 
 func (m Model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg.String() {
 	case "up", "k":
 		m.Settings.MoveUp()
@@ -248,25 +254,26 @@ func (m Model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.Settings.Cursor == 2 {
 			return m, m.Settings.OpenDepsBackupLimitInput()
 		}
-		m.toggleSelectedSetting()
+		cmd = m.toggleSelectedSetting()
 	case "left", "h":
 		if m.Settings.Cursor == 2 {
 			m.adjustDepsBackupLimit(-1)
 		} else {
-			m.toggleSelectedSetting()
+			cmd = m.toggleSelectedSetting()
 		}
 	case "right", "l":
 		if m.Settings.Cursor == 2 {
 			m.adjustDepsBackupLimit(1)
 		} else {
-			m.toggleSelectedSetting()
+			cmd = m.toggleSelectedSetting()
 		}
 	}
-	return m, nil
+	return m, cmd
 }
 
-func (m *Model) toggleSelectedSetting() {
+func (m *Model) toggleSelectedSetting() tea.Cmd {
 	m.Settings.Values = config.Normalize(m.Settings.Values)
+	var cmd tea.Cmd
 	switch m.Settings.Cursor {
 	case 0:
 		if m.Settings.Values.DepsDisplay == config.DepsDisplayDirect {
@@ -281,9 +288,10 @@ func (m *Model) toggleSelectedSetting() {
 		} else {
 			m.Settings.Values.Theme = config.ThemeCurrent
 		}
-		m.applyRuntimeTheme()
+		cmd = m.applyRuntimeTheme()
 	}
 	m.saveSettings()
+	return cmd
 }
 
 func (m *Model) adjustDepsBackupLimit(delta int) {
@@ -339,18 +347,26 @@ func (m Model) handleDepsBackupLimitInputKey(msg tea.KeyPressMsg) (tea.Model, te
 
 // applyRuntimeTheme rebuilds m.theme from the user's current settings
 // value and propagates the new theme to every component that caches
-// style values by value (Spinner, InstalledTable, Deps.Table, List
-// delegate). Replaces the previous "mutate package-level globals and
+// style values by value (Spinner, installedTable, Deps.Table, List
+// delegate). It also forwards the theme to the catalog and, when the
+// catalog accepts it, re-applies the version projection so the list
+// items pick up the new pre-rendered titles. The returned tea.Cmd
+// propagates the asynchronous refilter (if any) through the settings
+// key flow. Replaces the previous "mutate package-level globals and
 // hope readers pick them up" model with explicit value propagation.
-func (m *Model) applyRuntimeTheme() {
+func (m *Model) applyRuntimeTheme() tea.Cmd {
 	t := styles.NewTheme(config.ThemeName(m.Settings.Values.Theme))
 	m.theme = t
 	m.Settings.ApplyTheme()
 	m.Spinner.Style = t.SpinnerStyle
-	m.InstalledTable.SetStyles(tableStyles(t))
+	m.installedTable.SetStyles(tableStyles(t))
 	m.Deps.Table.SetStyles(tableStyles(t))
 	delegate := listDefaultDelegate(t)
-	m.List.SetDelegate(delegate)
+	m.list.SetDelegate(delegate)
+	if m.catalog.setTheme(t) {
+		return m.applyProjection(m.catalog.projection())
+	}
+	return nil
 }
 
 func (m *Model) saveSettings() {
@@ -365,17 +381,32 @@ func (m Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
 	if !m.ConfirmingDelete {
 		return m, nil
 	}
-	m.ConfirmingDelete = false
-	m.Loading = true
-	m.Status.SetGlobal(fmt.Sprintf("Deleting Go %s...", m.DeleteVersion), "info")
-
-	var target utils.GoVersion
-	for _, v := range m.Versions {
-		if v.Version == m.DeleteVersion {
-			target = v
-			break
-		}
+	version := m.DeleteVersion
+	target, ok := m.catalog.lookup(version)
+	if !ok {
+		// Missing lookup: surface an error and never dispatch a zero
+		// GoVersion to the deleter.
+		m.ConfirmingDelete = false
+		m.DeleteVersion = ""
+		m.Status.SetTab(fmt.Sprintf("Go %s is no longer available to delete.", version), "error")
+		return m, nil
 	}
+	if !target.Installed {
+		m.ConfirmingDelete = false
+		m.DeleteVersion = ""
+		m.Status.SetTab(fmt.Sprintf("Go %s is no longer installed.", version), "info")
+		return m, nil
+	}
+	if target.Active {
+		m.ConfirmingDelete = false
+		m.DeleteVersion = ""
+		m.Status.SetTab("Cannot delete active version. Switch to another version first.", "error")
+		return m, nil
+	}
+	m.ConfirmingDelete = false
+	m.DeleteVersion = ""
+	m.Loading = true
+	m.Status.SetGlobal(fmt.Sprintf("Deleting Go %s...", target.Version), "info")
 	return m, utils.DeleteVersion(target)
 }
 
@@ -390,10 +421,10 @@ func (m Model) handleDeleteConfirmNo() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) selectedItem() *styles.Item {
-	if m.List.SelectedItem() == nil {
+	if m.list.SelectedItem() == nil {
 		return nil
 	}
-	item, ok := m.List.SelectedItem().(styles.Item)
+	item, ok := m.list.SelectedItem().(styles.Item)
 	if !ok {
 		return nil
 	}

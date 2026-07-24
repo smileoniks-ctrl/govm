@@ -4,10 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	coredeps "github.com/smileoniks-ctrl/govm/internal/deps"
-	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -163,22 +161,22 @@ func TestConfirmDialogShiftTabTogglesChoice(t *testing.T) {
 
 func TestAvailableTabArrowKeysMoveListSelection(t *testing.T) {
 	m := newTestModel(t)
-	m.List.SetItems([]list.Item{
-		styles.Item{Name: "1.24.4"},
-		styles.Item{Name: "1.25.0"},
+	seedVersions(t, &m, []utils.GoVersion{
+		{Version: "1.24.4"},
+		{Version: "1.25.0"},
 	})
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(Model)
 
-	if got := m.List.Index(); got != 1 {
+	if got := m.list.Index(); got != 1 {
 		t.Fatalf("expected list selection to move down to index 1, got %d", got)
 	}
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	m = updated.(Model)
 
-	if got := m.List.Index(); got != 0 {
+	if got := m.list.Index(); got != 0 {
 		t.Fatalf("expected list selection to move up to index 0, got %d", got)
 	}
 }
@@ -186,25 +184,43 @@ func TestAvailableTabArrowKeysMoveListSelection(t *testing.T) {
 func TestInstalledTabArrowKeysMoveTableCursor(t *testing.T) {
 	m := newTestModel(t)
 	m.CurrentTab = InstalledTab
-	m.Versions = []utils.GoVersion{
+	seedVersions(t, &m, []utils.GoVersion{
 		{Version: "1.24.4", Installed: true, Path: "/p/1.24.4"},
 		{Version: "1.25.0", Installed: true, Path: "/p/1.25.0"},
-	}
-	m.rebuildVersionViews()
-	m.InstalledTable.Focus()
+	})
+	m.installedTable.Focus()
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(Model)
 
-	if got := m.InstalledTable.Cursor(); got != 1 {
+	if got := m.installedTable.Cursor(); got != 1 {
 		t.Fatalf("expected installed table cursor to move down to index 1, got %d", got)
 	}
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	m = updated.(Model)
 
-	if got := m.InstalledTable.Cursor(); got != 0 {
+	if got := m.installedTable.Cursor(); got != 0 {
 		t.Fatalf("expected installed table cursor to move up to index 0, got %d", got)
+	}
+}
+
+func TestInstalledTabDeleteUsesTableSelection(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = InstalledTab
+	seedVersions(t, &m, []utils.GoVersion{
+		{Version: "1.24.4", Installed: true, Path: "/p/1.24.4"},
+		{Version: "1.25.0", Installed: true, Path: "/p/1.25.0"},
+	})
+	m.installedTable.SetCursor(1)
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'd'})
+	got := updated.(Model)
+	if !got.ConfirmingDelete {
+		t.Fatal("expected delete confirmation")
+	}
+	if got.DeleteVersion != "1.25.0" {
+		t.Fatalf("delete version = %q, want 1.25.0", got.DeleteVersion)
 	}
 }
 

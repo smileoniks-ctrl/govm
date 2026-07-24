@@ -8,7 +8,7 @@ import (
 // Item is a single row in the Available Versions list. It carries the
 // data bubbles/list needs (Name as FilterValue, DescriptionText as
 // Description) plus a pre-rendered title string. Pre-rendering the
-// title at list-rebuild time (see Model.rebuildVersionViews) keeps
+// title when the version catalog builds its projection keeps
 // lipgloss.Style.Render calls out of the per-frame list.View hot path,
 // and lets Item stay a pure data carrier with no theme dependency.
 type Item struct {

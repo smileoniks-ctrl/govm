@@ -10,8 +10,8 @@ const (
 // StatusLine is the value-type module that owns the status triplet:
 // text, kind, and scope. It is the fifth application of the "implicit
 // module in flat fields -> explicit value-type module" pattern in this
-// package (after ConfirmDialog, DepsOperation, rebuildVersionViews,
-// and Theme).
+// package (after ConfirmDialog, DepsOperation, the version catalog
+// projection, and Theme).
 //
 // The zero value is an empty, tab-scoped, inactive status. Reads go
 // through Text/Kind/Scope; mutations go through SetTab/SetGlobal/

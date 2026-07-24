@@ -24,8 +24,28 @@ const (
 )
 
 type Model struct {
-	List              list.Model
-	Versions          []utils.GoVersion
+	// catalog is the private Version Catalog that owns the canonical
+	// Go version list and produces defensive projections for both
+	// version widgets. It replaces the previous public Versions slice
+	// and rebuildVersionViews derivation.
+	catalog versionCatalog
+	// projectionGeneration is bumped on every successful projection
+	// sync so deferred refilter restores can detect staleness.
+	projectionGeneration uint64
+	// pendingListRestore captures the Available-list selection that
+	// must be restored once the asynchronous refilter triggered by
+	// list.SetItems (while a filter is active) settles. It is consumed
+	// by the deferred refilter handler and invalidated on every new
+	// projection.
+	pendingListRestore pendingListRestore
+	// reconcile stores the context needed to verify a disk mutation
+	// (install/switch/delete) that reported a catalog error against a
+	// fresh catalog fetch. It is zero/active=false when no
+	// reconciliation is pending.
+	reconcile reconcileContext
+
+	list              list.Model
+	installedTable    table.Model
 	Loading           bool
 	Spinner           spinner.Model
 	CurrentTab        int
@@ -37,7 +57,6 @@ type Model struct {
 	// ShimPathWarning is the pre-rendered PATH warning captured before
 	// launching the TUI, so View does not resolve PATH on every render.
 	ShimPathWarning  string
-	InstalledTable   table.Model
 	ConfirmingDelete bool
 	DeleteVersion    string
 	Width            int
@@ -106,11 +125,11 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 	l.SetShowPagination(false)
 
 	return Model{
-		List:            l,
-		Versions:        []utils.GoVersion{},
+		list:            l,
+		catalog:         newVersionCatalog(theme),
 		Spinner:         sp,
 		Loading:         true,
-		InstalledTable:  installedTable,
+		installedTable:  installedTable,
 		Layout:          styles.LayoutNormal,
 		theme:           theme,
 		Deps:            NewDepsState(moduleDir, depTable),
@@ -130,8 +149,8 @@ func (m Model) viewHeight() int {
 	if m.Height > 0 {
 		return m.Height
 	}
-	if m.List.Height() > 0 {
-		return m.List.Height()
+	if m.list.Height() > 0 {
+		return m.list.Height()
 	}
 	return 24
 }
@@ -140,8 +159,8 @@ func (m Model) viewWidth() int {
 	if m.Width > 0 {
 		return m.Width
 	}
-	if m.List.Width() > 0 {
-		return m.List.Width()
+	if m.list.Width() > 0 {
+		return m.list.Width()
 	}
 	return 80
 }

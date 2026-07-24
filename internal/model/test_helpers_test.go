@@ -24,58 +24,89 @@ func testTheme() styles.Theme {
 	return styles.NewTheme(config.ThemeCurrent)
 }
 
-// assertVersionViewsConsistent verifies the postcondition that
-// rebuildVersionViews is responsible for: the Available Versions list
-// and the Installed Versions table must be exact projections of
-// m.Versions. Used after msg-dispatch in update tests to catch any
-// handler that mutates m.Versions without keeping the derived views in
-// sync.
+// seedVersions replaces the model's version catalog with the given
+// versions through the invariant-preserving replaceVersions path. It
+// fails the test on error. The returned tea.Cmd is deliberately not
+// executed: seeding is a synchronous state transition and executing
+// the command could trigger network or async side effects that break
+// test determinism. Tests that need to observe command behaviour
+// dispatch the originating msg through Update instead.
 //
-// Item no longer carries Installed/Active directly (those were only
-// ever consumed by Title()); instead we assert that RenderedTitle is
-// the string RenderItemTitle would produce for the source version, so
-// a regression that re-introduces live theme reads inside Title() is
-// caught here as well as in styles_test.go.
+// This is the single entry point for populating versions in tests —
+// never mutate catalog slices or widget items directly.
+func seedVersions(t *testing.T, m *Model, versions []utils.GoVersion) {
+	t.Helper()
+	cmd, err := m.replaceVersions(versions)
+	if err != nil {
+		t.Fatalf("replaceVersions(%+v): %v", versions, err)
+	}
+	_ = cmd
+}
+
+// assertVersionViewsConsistent verifies the postcondition that the
+// Available Versions list and the Installed Versions table must be
+// exact projections of the private catalog. It reads the catalog
+// through the projection()/lookup() API rather than touching backing
+// records, and asserts that every Available list item's fields and
+// pre-rendered title match the source version, and that every Installed
+// row matches its installed version.
+//
+// Used after msg-dispatch in update tests to catch any handler that
+// mutates the catalog without keeping the derived views in sync.
 func assertVersionViewsConsistent(t *testing.T, m Model) {
 	t.Helper()
 
-	items := m.List.Items()
-	if len(items) != len(m.Versions) {
-		t.Fatalf("list length = %d, want %d (len m.Versions)", len(items), len(m.Versions))
+	proj := m.catalog.projection()
+	items := m.list.Items()
+	if len(items) != len(proj.available) {
+		t.Fatalf("list length = %d, want %d (catalog projection)", len(items), len(proj.available))
 	}
 
-	wantInstalled := 0
-	for i, v := range m.Versions {
-		if v.Installed {
-			wantInstalled++
-		}
-		it, ok := items[i].(styles.Item)
+	for i, it := range items {
+		got, ok := it.(styles.Item)
 		if !ok {
-			t.Fatalf("list item %d is %T, want styles.Item", i, items[i])
+			t.Fatalf("list item %d is %T, want styles.Item", i, it)
 		}
-		if it.Name != v.Version {
-			t.Errorf("list item %d Name = %q, want %q", i, it.Name, v.Version)
+		want, ok := proj.available[i].(styles.Item)
+		if !ok {
+			t.Fatalf("catalog list item %d is %T, want styles.Item", i, proj.available[i])
 		}
-		if it.DescriptionText != v.DisplayDescription() {
-			t.Errorf("list item %d DescriptionText = %q, want %q", i, it.DescriptionText, v.DisplayDescription())
+		if got != want {
+			t.Errorf("list item %d = %+v, want %+v", i, got, want)
 		}
-		if wantTitle := styles.RenderItemTitle(m.theme, v.Version, v.Installed, v.Active); it.RenderedTitle != wantTitle {
-			t.Errorf("list item %d RenderedTitle = %q, want %q", i, it.RenderedTitle, wantTitle)
+		// Cross-check via lookup so the assertion does not rely on
+		// exposed records but still verifies semantic correctness.
+		v, found := m.catalog.lookup(got.Name)
+		if !found {
+			t.Fatalf("list item %d Name %q not in catalog", i, got.Name)
+		}
+		if got.DescriptionText != v.DisplayDescription() {
+			t.Errorf("list item %d DescriptionText = %q, want %q", i, got.DescriptionText, v.DisplayDescription())
+		}
+		if wantTitle := styles.RenderItemTitle(m.theme, v.Version, v.Installed, v.Active); got.RenderedTitle != wantTitle {
+			t.Errorf("list item %d RenderedTitle = %q, want %q", i, got.RenderedTitle, wantTitle)
 		}
 	}
 
-	rows := m.InstalledTable.Rows()
-	if len(rows) != wantInstalled {
-		t.Fatalf("installed table rows = %d, want %d", len(rows), wantInstalled)
+	rows := m.installedTable.Rows()
+	if len(rows) != len(proj.installed) {
+		t.Fatalf("installed table rows = %d, want %d (catalog projection)", len(rows), len(proj.installed))
 	}
 
-	rowIdx := 0
-	for _, v := range m.Versions {
-		if !v.Installed {
-			continue
+	for i, row := range rows {
+		wantRow := proj.installed[i]
+		if len(row) != len(wantRow) {
+			t.Fatalf("installed row %d length = %d, want %d", i, len(row), len(wantRow))
 		}
-		row := rows[rowIdx]
-		rowIdx++
+		for j := range row {
+			if row[j] != wantRow[j] {
+				t.Errorf("installed row %d column %d = %q, want %q", i, j, row[j], wantRow[j])
+			}
+		}
+		v, found := m.catalog.lookup(row[0])
+		if !found {
+			t.Fatalf("installed row %d Version %q not in catalog", i, row[0])
+		}
 		if row[0] != v.Version {
 			t.Errorf("installed row Version = %q, want %q", row[0], v.Version)
 		}
@@ -110,14 +141,13 @@ func newTestModel(t *testing.T) Model {
 		"",
 		testTheme(),
 	)
-	m.Versions = []utils.GoVersion{{
+	seedVersions(t, &m, []utils.GoVersion{{
 		Version:   "1.24.4",
 		Filename:  "go1.24.4.darwin-arm64.tar.gz",
 		Installed: true,
 		Active:    true,
 		Path:      filepath.Join(home, ".govm", "versions", "go1.24.4"),
-	}}
-	m.rebuildVersionViews()
+	}})
 	m.Status.SetTab("Successfully installed Go 1.24.4", "success")
 	m.Loading = false
 	m.Layout = styles.LayoutWide

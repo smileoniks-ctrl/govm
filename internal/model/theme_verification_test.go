@@ -119,22 +119,25 @@ func TestModelNewRequiresTheme(t *testing.T) {
 // Not parallel: newTestModel calls t.Setenv via its temp HOME shim.
 func TestRenderItemTitleUsedByList(t *testing.T) {
 	m := newTestModel(t)
-	items := m.List.Items()
+	items := m.list.Items()
 	if len(items) == 0 {
 		t.Fatal("test model has no list items")
 	}
 
-	v := m.Versions[0]
-	want := styles.RenderItemTitle(m.theme, v.Version, v.Installed, v.Active)
-
-	it, ok := items[0].(styles.Item)
+	it0, ok := items[0].(styles.Item)
 	if !ok {
 		t.Fatalf("list item 0 is %T, want styles.Item", items[0])
 	}
-	if got := it.Title(); got != want {
+	v, found := m.catalog.lookup(it0.Name)
+	if !found {
+		t.Fatalf("list item 0 version %q not in catalog", it0.Name)
+	}
+	want := styles.RenderItemTitle(m.theme, v.Version, v.Installed, v.Active)
+
+	if got := it0.Title(); got != want {
 		t.Fatalf("list item 0 Title = %q, want pre-rendered %q", got, want)
 	}
-	if got := it.RenderedTitle; !strings.Contains(got, v.Version) {
+	if got := it0.RenderedTitle; !strings.Contains(got, v.Version) {
 		t.Fatalf("RenderedTitle lost version name: %q", got)
 	}
 }
@@ -161,7 +164,7 @@ func TestApplyRuntimeThemePropagatesToComponents(t *testing.T) {
 	lightPrimary := styles.NewTheme(config.ThemeLight).Primary
 
 	currentSpinner := m.Spinner.Style.GetForeground()
-	currentInstalledOut := m.InstalledTable.View()
+	currentInstalledOut := m.installedTable.View()
 	currentDepsOut := m.Deps.Table.View()
 
 	m.Settings.Values.Theme = config.ThemeLight
@@ -176,17 +179,17 @@ func TestApplyRuntimeThemePropagatesToComponents(t *testing.T) {
 	if got := m.Spinner.Style.GetForeground(); got == currentSpinner {
 		t.Fatal("Spinner.Style did not change after applyRuntimeTheme")
 	}
-	if got := m.InstalledTable.View(); got == currentInstalledOut {
-		t.Fatal("InstalledTable.View did not change after applyRuntimeTheme")
+	if got := m.installedTable.View(); got == currentInstalledOut {
+		t.Fatal("installedTable.View did not change after applyRuntimeTheme")
 	}
 	if got := m.Deps.Table.View(); got == currentDepsOut {
 		t.Fatal("Deps.Table.View did not change after applyRuntimeTheme")
 	}
 	// List delegate is rebuilt via SetDelegate. bubbles/list does not
 	// expose the delegate, so the proof of propagation is that
-	// List.View still renders without panicking — implicit because the
+	// list.View still renders without panicking — implicit because the
 	// assertion below would have panicked above if SetDelegate broke.
-	if view := m.List.View(); view == "" {
-		t.Fatal("List.View is empty after applyRuntimeTheme")
+	if view := m.list.View(); view == "" {
+		t.Fatal("list.View is empty after applyRuntimeTheme")
 	}
 }
