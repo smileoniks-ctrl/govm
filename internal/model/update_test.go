@@ -360,8 +360,8 @@ func TestVersionHandlersKeepCachesConsistent(t *testing.T) {
 			},
 		},
 		{
-			name: "DownloadCompleteMsg marks installed",
-			msg:  utils.DownloadCompleteMsg{Version: "1.25.0", Path: "/new/1.25"},
+			name: "installSuccessMsg marks installed",
+			msg:  installSuccessMsg{Version: "1.25.0", Path: "/new/1.25"},
 		},
 		{
 			name: "SwitchCompletedMsg changes active",

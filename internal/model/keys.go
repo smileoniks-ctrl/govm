@@ -122,7 +122,7 @@ func (m Model) handleInstallKey() (tea.Model, tea.Cmd) {
 	m.Loading = true
 	m.InstallingVersion = v.Version
 	m.Status.SetGlobal("", "")
-	return m, utils.DownloadAndInstall(v)
+	return m, m.installVersionCmd(v)
 }
 
 func (m Model) handleUseKey() (tea.Model, tea.Cmd) {

@@ -37,6 +37,7 @@ func TestResolverLayoutFromHome(t *testing.T) {
 		{"RootDir", r.RootDir, filepath.Join(home, ".govm")},
 		{"VersionsDir", r.VersionsDir, filepath.Join(home, ".govm", "versions")},
 		{"DownloadsDir", r.DownloadsDir, filepath.Join(home, ".govm", "downloads")},
+		{"InstallationLockFile", r.InstallationLockFile, filepath.Join(home, ".govm", "install.lock")},
 		{"ShimDir", r.ShimDir, filepath.Join(home, ".govm", "shim")},
 		{"ActiveVersionFile", r.ActiveVersionFile, filepath.Join(home, ".govm", "active_version")},
 		{"SettingsFile", r.SettingsFile, filepath.Join(home, ".govm", "settings.json")},
@@ -106,6 +107,9 @@ func TestHomeDirErrorSurfaced(t *testing.T) {
 	}
 	if _, err := r.SettingsFile(); err == nil {
 		t.Fatal("expected error from SettingsFile when HomeDir fails")
+	}
+	if _, err := r.InstallationLockFile(); err == nil {
+		t.Fatal("expected error from InstallationLockFile when HomeDir fails")
 	}
 }
 

@@ -110,14 +110,14 @@ func TestVersionsMsgAcceptsUnmanagedActiveVersion(t *testing.T) {
 // 2. Completion for unknown version starts reconciliation.
 // ---------------------------------------------------------------------------
 
-// TestUnknownCompletionStartsReconciliation verifies that a
-// DownloadCompleteMsg for a version absent from the catalog triggers a
+// TestUnknownCompletionStartsReconciliation verifies that an install
+// completion for a version absent from the catalog triggers a
 // reconciliation: a fetch command is issued (asserted non-nil, not
 // invoked to avoid network) and a warning surfaces to the user.
 func TestUnknownCompletionStartsReconciliation(t *testing.T) {
 	m := newVersionCacheTestModel(t)
 
-	updated, cmd := m.Update(utils.DownloadCompleteMsg{
+	updated, cmd := m.Update(installSuccessMsg{
 		Version: "9.9.9-nonexistent",
 		Path:    "/p/9.9.9",
 	})
@@ -144,7 +144,7 @@ func TestReconciliationConfirmsPendingCompletion(t *testing.T) {
 	m := newVersionCacheTestModel(t)
 
 	// 1. Trigger reconciliation for a version not yet in the catalog.
-	updated, _ := m.Update(utils.DownloadCompleteMsg{
+	updated, _ := m.Update(installSuccessMsg{
 		Version: "1.30.0",
 		Path:    "/p/1.30.0",
 	})
@@ -228,7 +228,7 @@ func TestValidRefreshWithoutPendingConfirmationReportsError(t *testing.T) {
 	m := newVersionCacheTestModel(t)
 
 	// 1. Trigger reconciliation for an unknown completion.
-	updated, _ := m.Update(utils.DownloadCompleteMsg{
+	updated, _ := m.Update(installSuccessMsg{
 		Version: "1.30.0",
 		Path:    "/p/1.30.0",
 	})

@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/install"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -23,12 +24,16 @@ const (
 // (install/switch/delete) reports a catalog error. Because the disk
 // operation may still have succeeded, the handler re-fetches the
 // catalog and the resulting VersionsMsg uses this context to verify
-// the expected side-effect before claiming success.
+// the expected side-effect before claiming success. For installs,
+// warnings carries the non-fatal warnings reported by the install core
+// so they survive the reconciliation fetch and surface in the final
+// status.
 type reconcileContext struct {
 	active     bool
 	operation  reconcileOperation
 	version    string
 	shimInPath bool
+	warnings   []install.Warning
 }
 
 // pendingListRestore captures the Available-list selection that must be
@@ -281,7 +286,8 @@ func (m *Model) applyReconciliationSuccess(rc reconcileContext) {
 	m.Loading = false
 	switch rc.operation {
 	case reconcileInstall:
-		m.Status.SetGlobal(fmt.Sprintf("Successfully installed Go %s", rc.version), "success")
+		text, kind := installSuccessStatus(rc.version, rc.warnings)
+		m.Status.SetGlobal(text, kind)
 	case reconcileSwitch:
 		if rc.shimInPath {
 			m.Status.SetTab(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", rc.version), "success")

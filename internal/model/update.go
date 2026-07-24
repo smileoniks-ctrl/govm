@@ -136,8 +136,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Spinner, cmd = m.Spinner.Update(msg)
 		return m, cmd
 
-	case utils.DownloadCompleteMsg:
-		return m.handleDownloadComplete(msg)
+	case installSuccessMsg:
+		return m.handleInstallSuccess(msg)
+
+	case installFailureMsg:
+		return m.handleInstallFailure(msg)
 
 	case utils.SwitchCompletedMsg:
 		return m.handleSwitchCompleted(msg)
@@ -224,21 +227,40 @@ func (m Model) handleRefilterSettled(msg refilterSettledMsg) (tea.Model, tea.Cmd
 	return m, nil
 }
 
-// handleDownloadComplete marks the version installed via the catalog.
+// handleInstallSuccess marks the version installed via the catalog.
 // On a catalog error the disk install may still have succeeded, so the
 // model re-fetches and reconciles instead of trusting the stale state.
-func (m Model) handleDownloadComplete(msg utils.DownloadCompleteMsg) (tea.Model, tea.Cmd) {
+// Result warnings are copied into the reconcile context so they survive
+// a successful reconciliation and surface in the final status.
+func (m Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd) {
 	m.InstallingVersion = ""
 	_, cmd, err := m.markVersionInstalled(msg.Version, msg.Path)
 	if err != nil {
 		m.Loading = true
-		m.reconcile = reconcileContext{active: true, operation: reconcileInstall, version: msg.Version}
+		m.reconcile = reconcileContext{
+			active:    true,
+			operation: reconcileInstall,
+			version:   msg.Version,
+			warnings:  msg.Warnings,
+		}
 		m.Status.SetGlobal(fmt.Sprintf("Installed Go %s; verifying catalog...", msg.Version), "warning")
 		return m, tea.Batch(cmd, utils.FetchGoVersions)
 	}
 	m.Loading = false
-	m.Status.SetGlobal(fmt.Sprintf("Successfully installed Go %s", msg.Version), "success")
+	text, kind := installSuccessStatus(msg.Version, msg.Warnings)
+	m.Status.SetGlobal(text, kind)
 	return m, cmd
+}
+
+// handleInstallFailure clears the install/loading state and reports the
+// phase-aware error returned by the install core. Any pending
+// reconciliation is dropped because the disk operation did not succeed.
+func (m Model) handleInstallFailure(msg installFailureMsg) (tea.Model, tea.Cmd) {
+	m.Loading = false
+	m.InstallingVersion = ""
+	m.reconcile = reconcileContext{}
+	m.Status.SetGlobal(fmt.Sprintf("Failed to install Go %s: %v", msg.Version, msg.Err), "error")
+	return m, nil
 }
 
 // handleSwitchCompleted activates the version via the catalog, or

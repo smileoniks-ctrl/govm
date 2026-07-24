@@ -22,6 +22,7 @@ const (
 	shimDirName       = "shim"
 	depsBackupDirName = "deps_backup"
 	activeVersionName = "active_version"
+	installLockName   = "install.lock"
 	settingsFileName  = "settings.json"
 	legacyGovmDirName = "govm"
 )
@@ -84,6 +85,15 @@ func (r *Resolver) DownloadsDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(root, downloadsDirName), nil
+}
+
+// InstallationLockFile returns the cross-process installation lock path.
+func (r *Resolver) InstallationLockFile() (string, error) {
+	root, err := r.RootDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, installLockName), nil
 }
 
 // ShimDir returns the directory that holds the shim scripts, e.g.

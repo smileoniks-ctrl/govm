@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// goDevPayload mirrors the go.dev /dl/?mode=json shape. It keeps the
-// Size field so we can assert the decoder tolerates unknown fields
-// even though goDevFile deliberately omits it.
+// goDevPayload mirrors the go.dev /dl/?mode=json shape, including the
+// sha256 and size fields that goDevFile now decodes.
 type goDevPayload []struct {
 	Version string `json:"version"`
 	Stable  bool   `json:"stable"`
@@ -18,6 +17,8 @@ type goDevPayload []struct {
 		Filename string `json:"filename"`
 		OS       string `json:"os"`
 		Arch     string `json:"arch"`
+		Kind     string `json:"kind"`
+		SHA256   string `json:"sha256"`
 		Size     int    `json:"size"`
 	} `json:"files"`
 }
@@ -31,9 +32,11 @@ func TestFetchGoDevReleases_Success(t *testing.T) {
 				Filename string `json:"filename"`
 				OS       string `json:"os"`
 				Arch     string `json:"arch"`
+				Kind     string `json:"kind"`
+				SHA256   string `json:"sha256"`
 				Size     int    `json:"size"`
 			}{
-				{Filename: "go1.22.0.darwin-arm64.tar.gz", OS: "darwin", Arch: "arm64", Size: 12345},
+				{Filename: "go1.22.0.darwin-arm64.tar.gz", OS: "darwin", Arch: "arm64", Kind: "archive", SHA256: "abc123", Size: 12345},
 			},
 		},
 		{
@@ -43,9 +46,11 @@ func TestFetchGoDevReleases_Success(t *testing.T) {
 				Filename string `json:"filename"`
 				OS       string `json:"os"`
 				Arch     string `json:"arch"`
+				Kind     string `json:"kind"`
+				SHA256   string `json:"sha256"`
 				Size     int    `json:"size"`
 			}{
-				{Filename: "go1.21.5.linux-amd64.tar.gz", OS: "linux", Arch: "amd64", Size: 67890},
+				{Filename: "go1.21.5.linux-amd64.tar.gz", OS: "linux", Arch: "amd64", Kind: "archive", SHA256: "def456", Size: 67890},
 			},
 		},
 	}
@@ -77,6 +82,17 @@ func TestFetchGoDevReleases_Success(t *testing.T) {
 	}
 	if got := releases[0].Files[0].Filename; got != "go1.22.0.darwin-arm64.tar.gz" {
 		t.Errorf("Filename = %q, want %q", got, "go1.22.0.darwin-arm64.tar.gz")
+	}
+	if got := releases[0].Files[0].Kind; got != "archive" {
+		t.Errorf("Kind = %q, want archive", got)
+	}
+	// Integrity metadata must be decoded so it can flow into the
+	// install core's verification step.
+	if got := releases[0].Files[0].SHA256; got != "abc123" {
+		t.Errorf("SHA256 = %q, want %q", got, "abc123")
+	}
+	if got := releases[0].Files[0].Size; got != 12345 {
+		t.Errorf("Size = %d, want %d", got, 12345)
 	}
 }
 

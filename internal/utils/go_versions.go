@@ -26,9 +26,15 @@ import (
 )
 
 type GoVersion struct {
-	Version   string
-	Filename  string
-	URL       string
+	Version  string
+	Filename string
+	URL      string
+	// SHA256 is the archive checksum published by go.dev. It is empty
+	// for releases where go.dev did not publish one; callers may treat
+	// the absence as a warning rather than a hard failure.
+	SHA256 string
+	// Size is the archive size in bytes published by go.dev.
+	Size      int64
 	Installed bool
 	Active    bool
 	Path      string
@@ -192,12 +198,15 @@ type Doer interface {
 }
 
 // goDevFile mirrors the per-file entry in go.dev's /dl/?mode=json
-// payload. The Size field is intentionally omitted: govm never
-// uses it.
+// payload. SHA256 and Size are propagated into GoVersion so the
+// install core can verify archive integrity.
 type goDevFile struct {
 	Filename string `json:"filename"`
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
+	Kind     string `json:"kind"`
+	SHA256   string `json:"sha256"`
+	Size     int64  `json:"size"`
 }
 
 // goDevRelease mirrors a release entry in go.dev's /dl/?mode=json
@@ -257,13 +266,15 @@ func buildVersionCatalog(
 	var versions []GoVersion
 	for _, release := range releases {
 		for _, file := range release.Files {
-			if file.OS != currentOS || file.Arch != arch {
+			if file.OS != currentOS || file.Arch != arch || (file.Kind != "" && file.Kind != "archive") {
 				continue
 			}
 			v := GoVersion{
 				Version:  release.Version,
 				Filename: file.Filename,
 				URL:      "https://go.dev/dl/" + file.Filename,
+				SHA256:   file.SHA256,
+				Size:     file.Size,
 				Stable:   release.Stable,
 			}
 			if path, ok := installed[release.Version]; ok {

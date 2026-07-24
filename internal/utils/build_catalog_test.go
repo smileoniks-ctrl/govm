@@ -151,3 +151,42 @@ func TestBuildVersionCatalog_NoOSArchMatchYieldsNothing(t *testing.T) {
 		t.Errorf("windows/arm64 has no matching files, expected empty, got %v", got)
 	}
 }
+
+// TestBuildVersionCatalog_PropagatesMetadata verifies that the go.dev
+// archive checksum (sha256) and size are propagated end-to-end from the
+// decoded release payload into the GoVersion handed to the install
+// core, so the adapter can build an integrity-checked install.Request.
+func TestBuildVersionCatalog_PropagatesMetadata(t *testing.T) {
+	releases := []goDevRelease{
+		{
+			Version: "1.22.0",
+			Stable:  true,
+			Files: []goDevFile{
+				{
+					Filename: "go1.22.0.darwin-arm64.pkg",
+					OS:       "darwin",
+					Arch:     "arm64",
+					Kind:     "installer",
+				},
+				{
+					Filename: "go1.22.0.darwin-arm64.tar.gz",
+					OS:       "darwin",
+					Arch:     "arm64",
+					Kind:     "archive",
+					SHA256:   "deadbeefcafebabe",
+					Size:     123456,
+				},
+			},
+		},
+	}
+	got := buildVersionCatalog(releases, "darwin", "arm64", nil, "")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d: %+v", len(got), got)
+	}
+	if got[0].SHA256 != "deadbeefcafebabe" {
+		t.Errorf("SHA256 = %q, want deadbeefcafebabe", got[0].SHA256)
+	}
+	if got[0].Size != 123456 {
+		t.Errorf("Size = %d, want 123456", got[0].Size)
+	}
+}

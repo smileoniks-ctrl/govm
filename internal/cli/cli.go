@@ -1,14 +1,25 @@
 package cli
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"github.com/smileoniks-ctrl/govm/internal/paths"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
+	"io"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/smileoniks-ctrl/govm/internal/install"
+	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
+// InstallVersion resolves and installs a Go version from go.dev.
+//
+// The user-facing flow and messages mirror the previous implementation:
+// it prints the lookup/install prompts, then delegates the long-running
+// transactional install to a private, testable adapter driven by
+// install.Service. No tea.Cmd/tea.Msg is produced or inspected here.
 func InstallVersion(version string) {
 	fmt.Printf("🔍 Looking for Go version matching %s...\n", version)
 	matchedVersion, err := findMatchingVersion(version)
@@ -17,34 +28,127 @@ func InstallVersion(version string) {
 		return
 	}
 	fmt.Printf("📥 Installing Go %s...\n", matchedVersion.Version)
-	done := make(chan bool)
-	errCh := make(chan error)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	svc := install.NewService()
+	newInstallAdapter(matchedVersion, svc.Install, os.Stdout).run(ctx)
+}
+
+// installFunc mirrors install.(*Service).Install. It is parameterised so
+// the CLI adapter can be exercised in tests without performing real
+// network or disk work.
+type installFunc func(ctx context.Context, req install.Request) (install.Result, error)
+
+// installOutcome carries the service result and error together through a
+// single buffered channel, so the adapter never needs separate done/err
+// channels.
+type installOutcome struct {
+	result install.Result
+	err    error
+}
+
+// installAdapter drives the animated spinner while a transactional
+// installFunc runs. It is package-private and fully deterministic when
+// constructed with a controllable tick channel and an injected install
+// function.
+type installAdapter struct {
+	version  string
+	request  install.Request
+	install  installFunc
+	out      io.Writer
+	tick     <-chan time.Time // nil -> real ticker at spinRate
+	spinRate time.Duration
+}
+
+// buildInstallRequest maps the full utils.GoVersion metadata (including
+// integrity checksum and archive size) onto an install.Request.
+func buildInstallRequest(v utils.GoVersion) install.Request {
+	return install.Request{
+		Version:  v.Version,
+		Filename: v.Filename,
+		URL:      v.URL,
+		SHA256:   v.SHA256,
+		Size:     v.Size,
+	}
+}
+
+// newInstallAdapter wires the adapter for the public CLI path: output to
+// stdout and a 100ms spinner cadence.
+func newInstallAdapter(v utils.GoVersion, fn installFunc, out io.Writer) *installAdapter {
+	return &installAdapter{
+		version:  v.Version,
+		request:  buildInstallRequest(v),
+		install:  fn,
+		out:      out,
+		spinRate: 100 * time.Millisecond,
+	}
+}
+
+// installSpinChars is the braille spinner animation shared by the CLI
+// and TUI install flows.
+var installSpinChars = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// run animates the spinner until the install func completes, then prints
+// the success / warning / failure output to a.out.
+//
+// The install func runs in its own goroutine carrying ctx, so the service
+// observes cancellation. On ctx cancellation the adapter does NOT abandon
+// the worker: it disables the done case and keeps waiting for the service
+// result (whose error carries the cancellation), which avoids stranding
+// the goroutine and a resulting leak.
+func (a *installAdapter) run(ctx context.Context) {
+	if a.install == nil {
+		a.finish(installOutcome{err: errors.New("no installer configured")})
+		return
+	}
+
+	tick := a.tick
+	if tick == nil {
+		ticker := time.NewTicker(a.spinRate)
+		defer ticker.Stop()
+		tick = ticker.C
+	}
+
+	outcomeCh := make(chan installOutcome, 1)
 	go func() {
-		msg := utils.DownloadAndInstall(matchedVersion)()
-		switch msg := msg.(type) {
-		case utils.ErrMsg:
-			errCh <- msg
-		case utils.DownloadCompleteMsg:
-			done <- true
-		}
+		res, err := a.install(ctx, a.request)
+		outcomeCh <- installOutcome{result: res, err: err}
 	}()
-	spinChars := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-	spinIdx := 0
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
+
+	done := ctx.Done()
+	idx := 0
 	for {
 		select {
+		case o := <-outcomeCh:
+			a.finish(o)
+			return
+		case <-tick:
+			fmt.Fprintf(a.out, "\r%s Installing Go %s...", installSpinChars[idx], a.version)
+			idx = (idx + 1) % len(installSpinChars)
 		case <-done:
-			fmt.Printf("\r✅ Successfully installed Go %s\n", matchedVersion.Version)
-			fmt.Printf("👉 To activate this version, run: govm use %s\n", matchedVersion.Version)
-			return
-		case err := <-errCh:
-			fmt.Printf("\r❌ Installation failed: %v\n", err)
-			return
-		case <-ticker.C:
-			fmt.Printf("\r%s Installing Go %s...", spinChars[spinIdx], matchedVersion.Version)
-			spinIdx = (spinIdx + 1) % len(spinChars)
+			// Deadline/cancellation reached. Do not return and strand the
+			// worker: nil out done so this case stops firing, and keep
+			// waiting for the service result, which reports the
+			// cancellation as a phase-aware error.
+			done = nil
 		}
+	}
+}
+
+// finish renders the terminal output for a completed install. The error
+// path passes the typed install.Error through unchanged, so its
+// phase-aware message and RecoveryPath remain visible.
+func (a *installAdapter) finish(o installOutcome) {
+	if o.err != nil {
+		fmt.Fprintf(a.out, "\r❌ Installation failed: %v\n", o.err)
+		return
+	}
+	fmt.Fprintf(a.out, "\r✅ Successfully installed Go %s\n", a.version)
+	fmt.Fprintf(a.out, "👉 To activate this version, run: govm use %s\n", a.version)
+	for _, w := range o.result.Warnings {
+		fmt.Fprintf(a.out, "⚠️  %s\n", w)
 	}
 }
 func UseVersion(version string) {
