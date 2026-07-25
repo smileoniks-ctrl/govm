@@ -7,7 +7,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
-	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -50,37 +49,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.Width = contentWidth
 		m.Height = contentHeight
-		m.list.SetSize(contentWidth, contentHeight)
-		m.installedTable.SetWidth(contentWidth)
-		m.installedTable.SetHeight(contentHeight)
-		m.installedTable.SetColumns(installedTableColumns(contentWidth))
+		m.projection.resize(contentWidth, contentHeight)
 		m.Deps.Table.SetWidth(contentWidth)
 		m.Deps.Table.SetHeight(contentHeight)
 		m.Deps.Table.SetColumns(dependencyTableColumns(contentWidth))
 		return m, nil
 
-	case utils.ErrMsg:
-		m.Loading = false
-		// A fetch failure while reconciling must drop the pending
-		// context so a later normal VersionsMsg is not misread as the
-		// verification of an operation that never got re-checked.
-		m.reconcile = reconcileContext{}
-		m.Status.SetGlobal(msg.Error(), "error")
-		return m, nil
+	case catalogLoadedMsg:
+		return m.handleCatalogOutcome(m.projection.acceptLoad(msg.RequestID, msg.Versions))
 
-	case utils.VersionsMsg:
-		return m.handleVersionsMsg(msg)
+	case catalogLoadFailedMsg:
+		return m.handleCatalogOutcome(m.projection.failLoad(msg.RequestID, msg.Err))
 
 	case list.FilterMatchesMsg:
-		// Projection-triggered refilters are wrapped when the command is
-		// created. A plain FilterMatchesMsg belongs to normal filtering
-		// and is applied directly exactly once.
-		newList, cmd := m.list.Update(msg)
-		m.list = newList
-		return m, cmd
+		return m, m.projection.updateAvailable(msg)
 
-	case refilterSettledMsg:
-		return m.handleRefilterSettled(msg)
+	case catalogProjectionRefilterMsg:
+		return m, m.projection.settleRefilter(msg)
 
 	case DependenciesMsg:
 		m.Deps.Dependencies = msg
@@ -150,177 +135,183 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleDeletionSuccess(msg)
 
 	case lifecycleFailureMsg:
-		m.Loading = false
-		m.reconcile = reconcileContext{}
+		outcome := m.projection.failMutation(msg.OperationID, msg.Err)
+		if outcome.kind == catalogProjectionOutcomeStale {
+			return m, nil
+		}
 		m.Status.SetGlobal(fmt.Sprintf("Failed to %s Go %s: %v", msg.Operation, msg.Version, msg.Err), "error")
 		return m, nil
 	}
 
-	newListModel, cmd := m.list.Update(msg)
-	m.list = newListModel
-	cmds = append(cmds, cmd)
-	newTableModel, tableCmd := m.installedTable.Update(msg)
-	m.installedTable = newTableModel
-	cmds = append(cmds, tableCmd)
+	cmds = append(cmds, m.projection.update(msg))
 	newDepsTableModel, depsTableCmd := m.Deps.Table.Update(msg)
 	m.Deps.Table = newDepsTableModel
 	cmds = append(cmds, depsTableCmd)
 	return m, tea.Batch(cmds...)
 }
 
-// handleVersionsMsg applies a fetched catalog. When a reconciliation is
-// pending (a completion mutation reported a catalog error), the fresh
-// snapshot is used to verify the expected disk side-effect; otherwise
-// it is a normal load. A normal VersionsMsg never fabricates a success
-// status.
-func (m Model) handleVersionsMsg(msg utils.VersionsMsg) (tea.Model, tea.Cmd) {
-	if m.reconcile.active {
-		cmd, err := m.replaceVersions(msg)
-		if err != nil {
-			// Invalid reconciliation snapshot: stop loading, keep the
-			// previous catalog, surface the error and clear the pending
-			// context to avoid a reconcile loop.
-			m.Loading = false
-			m.reconcile = reconcileContext{}
-			m.Status.SetGlobal(fmt.Sprintf("Could not verify the operation: %v.", err), "error")
-			return m, nil
-		}
-		pending := m.reconcile
-		confirmed := m.verifyReconciliation()
-		m.reconcile = reconcileContext{}
-		if confirmed {
-			m.applyReconciliationSuccess(pending)
-			return m, cmd
-		}
-		m.Loading = false
-		m.Status.SetGlobal("The operation could not be confirmed against the installed catalog.", "error")
-		return m, cmd
-	}
-
-	cmd, err := m.replaceVersions(msg)
-	if err != nil {
-		// Invalid snapshot: keep the previous catalog, stop loading and
-		// surface the error.
-		m.Loading = false
-		m.Status.SetGlobal(fmt.Sprintf("Failed to load Go versions: %v.", err), "error")
+func (m Model) handleCatalogOutcome(outcome catalogProjectionOutcome) (tea.Model, tea.Cmd) {
+	switch outcome.kind {
+	case catalogProjectionOutcomeStale, catalogProjectionOutcomeSuppressed:
 		return m, nil
+	case catalogProjectionOutcomeLoadStarted:
+		m.Status.SetGlobal(m.verifyingStatus(outcome.receipt.operation), "warning")
+		return m, LoadVersionsCmd(m.runtime, outcome.loadRequest)
+	case catalogProjectionOutcomeReconciled:
+		m.applyCompletion(outcome.receipt.operation)
+		return m, outcome.cmd
+	case catalogProjectionOutcomeRejected:
+		if outcome.receipt.operation.id != 0 {
+			m.Status.SetGlobal(fmt.Sprintf("Could not verify the operation: %v.", outcome.err), "error")
+		} else {
+			m.Status.SetGlobal(fmt.Sprintf("Failed to load Go versions: %v.", outcome.err), "error")
+		}
+		return m, outcome.cmd
+	case catalogProjectionOutcomeFailed:
+		if outcome.receipt.operation.id != 0 {
+			m.Status.SetGlobal("The operation could not be confirmed against the installed catalog.", "error")
+		} else {
+			text := "catalog load failed"
+			if outcome.err != nil {
+				text = outcome.err.Error()
+			}
+			m.Status.SetGlobal(text, "error")
+		}
+		return m, outcome.cmd
+	case catalogProjectionOutcomeCommittedWarning:
+		m.applyCommittedProjectionWarning(outcome.receipt.operation, outcome.err)
+		return m, outcome.cmd
+	default:
+		return m, outcome.cmd
 	}
-	m.Loading = false
-	return m, cmd
 }
 
-// handleRefilterSettled applies a deferred refilter result. Stale
-// results (superseded by a newer projection or further filter input)
-// are dropped; otherwise the matches are applied to the list exactly
-// once and, when this refilter belongs to a pending projection, the
-// captured Available-list selection is restored by identity.
-func (m Model) handleRefilterSettled(msg refilterSettledMsg) (tea.Model, tea.Cmd) {
-	if msg.generation != m.projectionGeneration || msg.filterText != m.list.FilterInput.Value() {
-		if m.pendingListRestore.active &&
-			m.pendingListRestore.generation == msg.generation &&
-			m.pendingListRestore.filterText == msg.filterText {
-			m.pendingListRestore = pendingListRestore{}
-		}
-		return m, nil
-	}
-	newList, _ := m.list.Update(msg.matches)
-	m.list = newList
-	if m.pendingListRestore.active &&
-		m.pendingListRestore.generation == msg.generation &&
-		m.pendingListRestore.filterText == msg.filterText {
-		m.restoreListSelection(m.pendingListRestore.version, m.pendingListRestore.index)
-		m.pendingListRestore = pendingListRestore{}
-	}
-	return m, nil
-}
-
-// handleInstallSuccess marks the version installed via the catalog.
-// On a catalog error the disk install may still have succeeded, so the
-// model re-fetches and reconciles instead of trusting the stale state.
-// Result warnings are copied into the reconcile context so they survive
-// a successful reconciliation and surface in the final status.
 func (m Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd) {
-	m.InstallingVersion = ""
-	_, cmd, err := m.markVersionInstalled(msg.Version, msg.Path)
-	if err != nil {
-		m.Loading = true
-		m.reconcile = reconcileContext{
-			active:          true,
-			operation:       reconcileInstall,
-			version:         msg.Version,
-			installWarnings: msg.Warnings,
-		}
-		m.Status.SetGlobal(fmt.Sprintf("Installed Go %s; verifying catalog...", msg.Version), "warning")
-		return m, tea.Batch(cmd, LoadVersionsCmd(m.runtime))
-	}
-	m.Loading = false
-	text, kind := installSuccessStatus(msg.Version, msg.Warnings)
-	m.Status.SetGlobal(text, kind)
-	return m, cmd
+	outcome := m.projection.completeInstall(
+		msg.OperationID,
+		msg.Version,
+		msg.Path,
+		msg.Warnings,
+	)
+	return m.handleMutationCompletion(outcome)
 }
 
-// handleInstallFailure clears the install/loading state and reports the
-// phase-aware error returned by the install core. Any pending
-// reconciliation is dropped because the disk operation did not succeed.
 func (m Model) handleInstallFailure(msg installFailureMsg) (tea.Model, tea.Cmd) {
-	m.Loading = false
-	m.InstallingVersion = ""
-	m.reconcile = reconcileContext{}
+	outcome := m.projection.failMutation(msg.OperationID, msg.Err)
+	if outcome.kind == catalogProjectionOutcomeStale {
+		return m, nil
+	}
 	m.Status.SetGlobal(fmt.Sprintf("Failed to install Go %s: %v", msg.Version, msg.Err), "error")
 	return m, nil
 }
 
-// handleActivationSuccess activates the version via the catalog, or
-// reconciles on a catalog error. The success status stays tab-scoped
-// to mirror the direct completion path.
 func (m Model) handleActivationSuccess(msg activationSuccessMsg) (tea.Model, tea.Cmd) {
-	_, cmd, err := m.activateVersion(msg.Result.Version)
-	if err != nil {
-		m.Loading = true
-		m.reconcile = reconcileContext{
-			active:            true,
-			operation:         reconcileSwitch,
-			version:           msg.Result.Version,
-			shimInPath:        msg.ShimInPath,
-			lifecycleWarnings: msg.Result.Warnings,
-		}
-		m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s; verifying catalog...", msg.Result.Version), "warning")
-		return m, tea.Batch(cmd, LoadVersionsCmd(m.runtime))
-	}
-	m.Loading = false
-	if len(msg.Result.Warnings) > 0 {
-		m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s with warnings: %s", msg.Result.Version, joinLifecycleWarnings(msg.Result.Warnings)), "warning")
-		return m, cmd
-	}
-	if msg.ShimInPath {
-		m.Status.SetTab(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", msg.Result.Version), "success")
-	} else {
-		m.Status.SetTab(fmt.Sprintf("Switched to Go %s!\n\n%s", msg.Result.Version, utils.GetShimPathInstructions()), "success")
-	}
-	return m, cmd
+	outcome := m.projection.completeActivation(
+		msg.OperationID,
+		msg.Result.Version,
+		msg.Result.Warnings,
+		msg.ShimInPath,
+	)
+	return m.handleMutationCompletion(outcome)
 }
 
-// handleDeletionSuccess marks the version deleted via the catalog, or
-// reconciles on a catalog error.
 func (m Model) handleDeletionSuccess(msg deletionSuccessMsg) (tea.Model, tea.Cmd) {
-	result := lifecycle.DeletionResult(msg)
-	_, cmd, err := m.markVersionDeleted(result.Version)
-	if err != nil {
-		m.Loading = true
-		m.reconcile = reconcileContext{
-			active:            true,
-			operation:         reconcileDelete,
-			version:           result.Version,
-			lifecycleWarnings: result.Warnings,
+	outcome := m.projection.completeDeletion(
+		msg.OperationID,
+		msg.Result.Version,
+		msg.Result.Warnings,
+	)
+	return m.handleMutationCompletion(outcome)
+}
+
+func (m Model) handleMutationCompletion(outcome catalogProjectionOutcome) (tea.Model, tea.Cmd) {
+	if outcome.kind == catalogProjectionOutcomeStale {
+		return m, nil
+	}
+	if outcome.kind == catalogProjectionOutcomeLoadStarted {
+		return m.handleCatalogOutcome(outcome)
+	}
+	if outcome.kind == catalogProjectionOutcomeCommittedWarning {
+		return m.handleCatalogOutcome(outcome)
+	}
+	if outcome.kind == catalogProjectionOutcomePublished || outcome.kind == catalogProjectionOutcomeNoop {
+		m.applyCompletion(outcome.receipt.operation)
+	}
+	return m, outcome.cmd
+}
+
+func (m *Model) applyCompletion(operation catalogOperation) {
+	switch operation.kind {
+	case catalogMutationInstall:
+		text, kind := installSuccessStatus(operation.version, operation.installWarnings)
+		m.Status.SetGlobal(text, kind)
+	case catalogMutationActivation:
+		if len(operation.lifecycleWarnings) > 0 {
+			m.Status.SetGlobal(
+				fmt.Sprintf(
+					"Switched to Go %s with warnings: %s",
+					operation.version,
+					joinLifecycleWarnings(operation.lifecycleWarnings),
+				),
+				"warning",
+			)
+			return
 		}
-		m.Status.SetGlobal(fmt.Sprintf("Deleted Go %s; verifying catalog...", result.Version), "warning")
-		return m, tea.Batch(cmd, LoadVersionsCmd(m.runtime))
+		if operation.shimInPath {
+			m.Status.SetTab(
+				fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", operation.version),
+				"success",
+			)
+			return
+		}
+		m.Status.SetTab(
+			fmt.Sprintf("Switched to Go %s!\n\n%s", operation.version, utils.GetShimPathInstructions()),
+			"success",
+		)
+	case catalogMutationDeletion:
+		if len(operation.lifecycleWarnings) > 0 {
+			m.Status.SetGlobal(
+				fmt.Sprintf(
+					"Deleted Go %s with warnings: %s",
+					operation.version,
+					joinLifecycleWarnings(operation.lifecycleWarnings),
+				),
+				"warning",
+			)
+			return
+		}
+		m.Status.SetGlobal(fmt.Sprintf("Successfully deleted Go %s", operation.version), "success")
 	}
-	m.Loading = false
-	if len(result.Warnings) > 0 {
-		m.Status.SetGlobal(fmt.Sprintf("Deleted Go %s with warnings: %s", result.Version, joinLifecycleWarnings(result.Warnings)), "warning")
-		return m, cmd
+}
+
+func (m *Model) applyCommittedProjectionWarning(operation catalogOperation, err error) {
+	action := "Version operation"
+	switch operation.kind {
+	case catalogMutationInstall:
+		action = fmt.Sprintf("Installed Go %s", operation.version)
+	case catalogMutationActivation:
+		action = fmt.Sprintf("Switched to Go %s", operation.version)
+	case catalogMutationDeletion:
+		action = fmt.Sprintf("Deleted Go %s", operation.version)
 	}
-	m.Status.SetGlobal(fmt.Sprintf("Successfully deleted Go %s", result.Version), "success")
-	return m, cmd
+	m.Status.SetGlobal(
+		fmt.Sprintf("%s, but the catalog view could not be updated: %v. Refresh to synchronize.", action, err),
+		"warning",
+	)
+}
+
+func (m Model) verifyingStatus(operation catalogOperation) string {
+	if operation.id == 0 {
+		return "Verifying catalog..."
+	}
+	switch operation.kind {
+	case catalogMutationInstall:
+		return fmt.Sprintf("Installed Go %s; verifying catalog...", operation.version)
+	case catalogMutationActivation:
+		return fmt.Sprintf("Switched to Go %s; verifying catalog...", operation.version)
+	case catalogMutationDeletion:
+		return fmt.Sprintf("Deleted Go %s; verifying catalog...", operation.version)
+	default:
+		return "Verifying catalog..."
+	}
 }

@@ -1,0 +1,741 @@
+package model
+
+import (
+	"errors"
+	"fmt"
+
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/install"
+	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
+	"github.com/smileoniks-ctrl/govm/internal/styles"
+	"github.com/smileoniks-ctrl/govm/internal/utils"
+)
+
+// catalogActivityKind describes the operation currently represented by the
+// adapter. It is intentionally separate from catalogMutationKind: loading and
+// reconciliation are adapter activities, not catalog mutations.
+type catalogActivityKind int
+
+const (
+	catalogActivityIdle catalogActivityKind = iota
+	catalogActivityLoading
+	catalogActivityInstalling
+	catalogActivityActivating
+	catalogActivityDeleting
+	catalogActivityReconciling
+)
+
+type catalogActivity struct {
+	kind    catalogActivityKind
+	version string
+}
+
+type catalogOperationPhase int
+
+const (
+	catalogOperationPhaseIdle catalogOperationPhase = iota
+	catalogOperationPhaseLoading
+	catalogOperationPhaseMutating
+	catalogOperationPhaseReconciling
+)
+
+type catalogMutationKind int
+
+const (
+	catalogMutationInstall catalogMutationKind = iota
+	catalogMutationActivation
+	catalogMutationDeletion
+)
+
+type catalogOperation struct {
+	id                uint64
+	kind              catalogMutationKind
+	version           string
+	installWarnings   []install.Warning
+	lifecycleWarnings []lifecycle.Warning
+	shimInPath        bool
+}
+
+type catalogReceipt struct {
+	operation  catalogOperation
+	reconciled bool
+}
+
+type catalogProjectionOutcomeKind int
+
+const (
+	catalogProjectionOutcomeNoop catalogProjectionOutcomeKind = iota
+	catalogProjectionOutcomePublished
+	catalogProjectionOutcomeLoadStarted
+	catalogProjectionOutcomeReconciled
+	catalogProjectionOutcomeStale
+	catalogProjectionOutcomeRejected
+	catalogProjectionOutcomeFailed
+	catalogProjectionOutcomeSuppressed
+	catalogProjectionOutcomeCommittedWarning
+)
+
+type catalogProjectionOutcome struct {
+	kind        catalogProjectionOutcomeKind
+	cmd         tea.Cmd
+	loadRequest catalogLoadRequest
+	receipt     catalogReceipt
+	err         error
+}
+
+type catalogProjectionReconciliation struct {
+	active    bool
+	operation catalogOperation
+	loadID    uint64
+}
+
+type catalogProjectionPendingRestore struct {
+	active     bool
+	generation uint64
+	filterText string
+	version    string
+	index      int
+}
+
+type catalogProjectionRefilterMsg struct {
+	matches    list.FilterMatchesMsg
+	generation uint64
+	filterText string
+}
+
+// catalogProjectionAdapter owns the catalog and both render-facing widgets.
+// The catalog is committed before a projection is published, and widget
+// updates are performed as one transaction. Consequently an invalid snapshot
+// or stale asynchronous result leaves both widgets and their prior selection
+// unchanged.
+type catalogProjectionAdapter struct {
+	catalog         versionCatalog
+	list            list.Model
+	installedTable  table.Model
+	generation      uint64
+	pendingRestore  catalogProjectionPendingRestore
+	activity        catalogActivity
+	phase           catalogOperationPhase
+	reconciliation  catalogProjectionReconciliation
+	operation       catalogOperation
+	operationActive bool
+	load            catalogLoadRequest
+	loadActive      bool
+	nextOperationID uint64
+	nextLoadID      uint64
+}
+
+// newCatalogProjectionAdapter constructs a complete adapter from a theme.
+// Keeping widget construction here lets Model integration depend on the
+// adapter's role methods instead of owning a second catalog projection.
+func newCatalogProjectionAdapter(theme styles.Theme) catalogProjectionAdapter {
+	available := list.New([]list.Item{}, listDefaultDelegate(theme), 0, 0)
+	available.Title = "Available Versions"
+	available.SetShowTitle(false)
+	available.SetShowStatusBar(false)
+	available.SetShowHelp(false)
+	available.SetShowPagination(false)
+
+	installed := table.New(
+		table.WithColumns(installedTableColumns(defaultConstructionWidth)),
+		table.WithFocused(true),
+		table.WithHeight(10),
+	)
+	installed.SetStyles(tableStyles(theme))
+
+	return catalogProjectionAdapter{
+		catalog:        newVersionCatalog(theme),
+		list:           available,
+		installedTable: installed,
+	}
+}
+
+func (a *catalogProjectionAdapter) startLoad(purpose catalogLoadPurpose) catalogProjectionOutcome {
+	if a.reconciliation.active {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
+	}
+	request := a.registerLoad(purpose)
+	if !a.hasActiveMutation() {
+		a.phase = catalogOperationPhaseLoading
+		a.activity = catalogActivity{kind: catalogActivityLoading}
+	}
+	return catalogProjectionOutcome{
+		kind:        catalogProjectionOutcomeLoadStarted,
+		loadRequest: request,
+	}
+}
+
+func (a *catalogProjectionAdapter) startReconciliationLoad(op catalogOperation) catalogProjectionOutcome {
+	request := a.registerLoad(catalogLoadPurposeRefresh)
+	a.reconciliation = catalogProjectionReconciliation{
+		active:    true,
+		operation: op,
+		loadID:    request.ID,
+	}
+	a.activity = catalogActivity{kind: catalogActivityReconciling, version: op.version}
+	a.phase = catalogOperationPhaseReconciling
+	return catalogProjectionOutcome{
+		kind:        catalogProjectionOutcomeLoadStarted,
+		loadRequest: request,
+		receipt:     catalogReceipt{operation: op},
+	}
+}
+
+// acceptLoad accepts only the latest known request. Older responses are
+// dropped even when they arrive after a newer request has already published.
+func (a *catalogProjectionAdapter) acceptLoad(requestID uint64, versions []utils.GoVersion) catalogProjectionOutcome {
+	if !a.loadActive || requestID != a.load.ID {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
+	}
+	if a.reconciliation.active && requestID != a.reconciliation.loadID {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
+	}
+	request := a.load
+	reconciliationRequest := a.isReconciliationRequest(requestID)
+	a.invalidateLoad()
+
+	changed, err := a.catalog.replace(versions)
+	if err != nil {
+		if !reconciliationRequest {
+			if a.hasActiveMutation() {
+				return catalogProjectionOutcome{
+					kind: catalogProjectionOutcomeSuppressed,
+					err:  err,
+				}
+			}
+			a.activity = catalogActivity{kind: catalogActivityIdle}
+			a.phase = catalogOperationPhaseIdle
+			return catalogProjectionOutcome{
+				kind: catalogProjectionOutcomeRejected,
+				err:  err,
+			}
+		}
+		return a.finishReconciliation(catalogProjectionOutcome{
+			kind: catalogProjectionOutcomeRejected,
+			err:  err,
+		})
+	}
+
+	outcome := catalogProjectionOutcome{kind: catalogProjectionOutcomeNoop}
+	if changed {
+		outcome.kind = catalogProjectionOutcomePublished
+		outcome.cmd = a.publish(a.catalog.projection())
+	}
+
+	if a.reconciliation.active {
+		pending := a.reconciliation.operation
+		if !a.verify(pending) {
+			return a.finishReconciliation(catalogProjectionOutcome{
+				kind: catalogProjectionOutcomeFailed,
+				cmd:  outcome.cmd,
+				err:  fmt.Errorf("operation %d could not be confirmed against the installed catalog", pending.id),
+			})
+		}
+		a.reconciliation = catalogProjectionReconciliation{}
+		a.clearOperation()
+		a.activity = catalogActivity{kind: catalogActivityIdle}
+		a.phase = catalogOperationPhaseIdle
+		outcome.kind = catalogProjectionOutcomeReconciled
+		outcome.receipt = catalogReceipt{
+			operation:  pending,
+			reconciled: true,
+		}
+		return outcome
+	}
+
+	if a.hasActiveMutation() {
+		return outcome
+	}
+	if request.Purpose == catalogLoadPurposeInitial || request.Purpose == catalogLoadPurposeRefresh {
+		a.activity = catalogActivity{kind: catalogActivityIdle}
+		a.phase = catalogOperationPhaseIdle
+	}
+	return outcome
+}
+
+func (a *catalogProjectionAdapter) failLoad(requestID uint64, err error) catalogProjectionOutcome {
+	if !a.loadActive || requestID != a.load.ID {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
+	}
+	if a.reconciliation.active && requestID != a.reconciliation.loadID {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
+	}
+	reconciliationRequest := a.isReconciliationRequest(requestID)
+	a.invalidateLoad()
+	if err == nil {
+		err = errors.New("catalog load failed")
+	}
+	if !reconciliationRequest && a.hasActiveMutation() {
+		return catalogProjectionOutcome{
+			kind: catalogProjectionOutcomeSuppressed,
+			err:  err,
+		}
+	}
+	if !reconciliationRequest {
+		a.activity = catalogActivity{kind: catalogActivityIdle}
+		a.phase = catalogOperationPhaseIdle
+		return catalogProjectionOutcome{
+			kind: catalogProjectionOutcomeFailed,
+			err:  err,
+		}
+	}
+	return a.finishReconciliation(catalogProjectionOutcome{
+		kind: catalogProjectionOutcomeFailed,
+		err:  err,
+	})
+}
+
+// replaceSnapshot applies a synchronous snapshot without request
+// correlation. Asynchronous callers should use acceptLoad instead.
+func (a *catalogProjectionAdapter) replaceSnapshot(versions []utils.GoVersion) catalogProjectionOutcome {
+	changed, err := a.catalog.replace(versions)
+	if err != nil {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeRejected, err: err}
+	}
+	if !changed {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeNoop}
+	}
+	return catalogProjectionOutcome{
+		kind: catalogProjectionOutcomePublished,
+		cmd:  a.publish(a.catalog.projection()),
+	}
+}
+
+func (a *catalogProjectionAdapter) startMutation(kind catalogMutationKind, version string) catalogOperation {
+	if a.hasActiveMutation() || a.reconciliation.active {
+		return catalogOperation{}
+	}
+	a.nextOperationID++
+	op := catalogOperation{id: a.nextOperationID, kind: kind, version: version}
+	a.operation = op
+	a.operationActive = true
+	a.phase = catalogOperationPhaseMutating
+	a.activity = catalogActivity{
+		kind:    mutationActivity(kind),
+		version: version,
+	}
+	return op
+}
+
+func mutationActivity(kind catalogMutationKind) catalogActivityKind {
+	switch kind {
+	case catalogMutationInstall:
+		return catalogActivityInstalling
+	case catalogMutationActivation:
+		return catalogActivityActivating
+	case catalogMutationDeletion:
+		return catalogActivityDeleting
+	default:
+		return catalogActivityIdle
+	}
+}
+
+func (a *catalogProjectionAdapter) completeInstall(
+	operationID uint64,
+	version, path string,
+	warnings []install.Warning,
+) catalogProjectionOutcome {
+	return a.completeMutation(operationID, catalogMutationInstall, version, func(op *catalogOperation) {
+		op.installWarnings = cloneInstallWarnings(warnings)
+	}, func() (bool, error) {
+		return a.catalog.markInstalled(version, path)
+	})
+}
+
+func (a *catalogProjectionAdapter) completeActivation(
+	operationID uint64,
+	version string,
+	warnings []lifecycle.Warning,
+	shimInPath bool,
+) catalogProjectionOutcome {
+	return a.completeMutation(operationID, catalogMutationActivation, version, func(op *catalogOperation) {
+		op.lifecycleWarnings = cloneLifecycleWarnings(warnings)
+		op.shimInPath = shimInPath
+	}, func() (bool, error) {
+		return a.catalog.activate(version)
+	})
+}
+
+func (a *catalogProjectionAdapter) completeDeletion(
+	operationID uint64,
+	version string,
+	warnings []lifecycle.Warning,
+) catalogProjectionOutcome {
+	return a.completeMutation(operationID, catalogMutationDeletion, version, func(op *catalogOperation) {
+		op.lifecycleWarnings = cloneLifecycleWarnings(warnings)
+	}, func() (bool, error) {
+		return a.catalog.markDeleted(version)
+	})
+}
+
+func (a *catalogProjectionAdapter) completeMutation(
+	operationID uint64,
+	kind catalogMutationKind,
+	version string,
+	storeReceipt func(*catalogOperation),
+	mutate func() (bool, error),
+) catalogProjectionOutcome {
+	if !a.operationActive ||
+		a.operation.id != operationID ||
+		a.operation.kind != kind ||
+		a.operation.version != version {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
+	}
+	op := a.operation
+	storeReceipt(&op)
+	a.operation = op
+	a.invalidateLoads()
+
+	changed, err := mutate()
+	if err != nil {
+		if errors.Is(err, errCatalogNotFound) {
+			outcome := a.startReconciliationLoad(op)
+			outcome.err = err
+			return outcome
+		}
+		a.clearOperation()
+		a.activity = catalogActivity{kind: catalogActivityIdle}
+		a.phase = catalogOperationPhaseIdle
+		return catalogProjectionOutcome{
+			kind:    catalogProjectionOutcomeCommittedWarning,
+			receipt: catalogReceipt{operation: op},
+			err:     err,
+		}
+	}
+	a.clearOperation()
+	a.activity = catalogActivity{kind: catalogActivityIdle}
+	a.phase = catalogOperationPhaseIdle
+	receipt := catalogReceipt{operation: op}
+	if !changed {
+		return catalogProjectionOutcome{
+			kind:    catalogProjectionOutcomeNoop,
+			receipt: receipt,
+		}
+	}
+	return catalogProjectionOutcome{
+		kind:    catalogProjectionOutcomePublished,
+		cmd:     a.publish(a.catalog.projection()),
+		receipt: receipt,
+	}
+}
+
+func (a *catalogProjectionAdapter) failMutation(operationID uint64, err error) catalogProjectionOutcome {
+	if !a.operationActive || a.operation.id != operationID {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
+	}
+	op := a.operation
+	a.clearOperation()
+	if a.reconciliation.active && a.reconciliation.operation.id == operationID {
+		a.reconciliation = catalogProjectionReconciliation{}
+		a.invalidateLoads()
+	}
+	a.activity = catalogActivity{kind: catalogActivityIdle}
+	a.phase = catalogOperationPhaseIdle
+	return catalogProjectionOutcome{
+		kind:    catalogProjectionOutcomeFailed,
+		receipt: catalogReceipt{operation: op},
+		err:     err,
+	}
+}
+
+func (a *catalogProjectionAdapter) verify(op catalogOperation) bool {
+	v, ok := a.catalog.lookup(op.version)
+	switch op.kind {
+	case catalogMutationInstall:
+		return ok && v.Installed && v.Path != ""
+	case catalogMutationActivation:
+		return ok && v.Active
+	case catalogMutationDeletion:
+		return !ok || !v.Installed
+	default:
+		return false
+	}
+}
+
+func (a *catalogProjectionAdapter) finishReconciliation(outcome catalogProjectionOutcome) catalogProjectionOutcome {
+	if a.reconciliation.active {
+		op := a.reconciliation.operation
+		a.clearOperation()
+		a.reconciliation = catalogProjectionReconciliation{}
+		outcome.receipt.operation = op
+	}
+	a.invalidateLoads()
+	a.activity = catalogActivity{kind: catalogActivityIdle}
+	a.phase = catalogOperationPhaseIdle
+	return outcome
+}
+
+func (a *catalogProjectionAdapter) hasActiveMutation() bool {
+	return a.operationActive
+}
+
+func (a *catalogProjectionAdapter) isReconciliationRequest(requestID uint64) bool {
+	return a.reconciliation.active && a.reconciliation.loadID == requestID
+}
+
+func (a *catalogProjectionAdapter) registerLoad(purpose catalogLoadPurpose) catalogLoadRequest {
+	a.nextLoadID++
+	a.load = catalogLoadRequest{ID: a.nextLoadID, Purpose: purpose}
+	a.loadActive = true
+	return a.load
+}
+
+func (a *catalogProjectionAdapter) clearOperation() {
+	a.operation = catalogOperation{}
+	a.operationActive = false
+}
+
+func (a *catalogProjectionAdapter) invalidateLoad() {
+	a.load = catalogLoadRequest{}
+	a.loadActive = false
+}
+
+func (a *catalogProjectionAdapter) invalidateLoads() {
+	a.invalidateLoad()
+}
+
+func cloneInstallWarnings(warnings []install.Warning) []install.Warning {
+	cloned := make([]install.Warning, len(warnings))
+	copy(cloned, warnings)
+	return cloned
+}
+
+func cloneLifecycleWarnings(warnings []lifecycle.Warning) []lifecycle.Warning {
+	cloned := make([]lifecycle.Warning, len(warnings))
+	copy(cloned, warnings)
+	return cloned
+}
+
+func (a *catalogProjectionAdapter) publish(projection versionProjection) tea.Cmd {
+	oldVersion := a.selectedAvailableVersion()
+	oldIndex := a.list.Index()
+	if oldVersion == "" && a.pendingRestore.active && a.list.FilterState() != list.Unfiltered {
+		oldVersion = a.pendingRestore.version
+		oldIndex = a.pendingRestore.index
+	}
+	oldInstalled, oldInstalledIndex := a.selectedInstalledIdentity()
+	a.generation++
+
+	a.installedTable.SetRows(projection.installed)
+	a.restoreInstalledSelection(oldInstalled, oldInstalledIndex)
+	cmd := a.list.SetItems(projection.available)
+	if a.list.FilterState() == list.Unfiltered {
+		a.restoreAvailableSelection(oldVersion, oldIndex)
+		a.pendingRestore = catalogProjectionPendingRestore{}
+		return cmd
+	}
+
+	a.pendingRestore = catalogProjectionPendingRestore{
+		active:     true,
+		generation: a.generation,
+		filterText: a.list.FilterInput.Value(),
+		version:    oldVersion,
+		index:      oldIndex,
+	}
+	return wrapCatalogProjectionRefilter(cmd, a.generation, a.pendingRestore.filterText)
+}
+
+func wrapCatalogProjectionRefilter(cmd tea.Cmd, generation uint64, filterText string) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg := cmd()
+		matches, ok := msg.(list.FilterMatchesMsg)
+		if !ok {
+			return msg
+		}
+		return catalogProjectionRefilterMsg{
+			matches:    matches,
+			generation: generation,
+			filterText: filterText,
+		}
+	}
+}
+
+func (a *catalogProjectionAdapter) settleRefilter(msg catalogProjectionRefilterMsg) tea.Cmd {
+	if msg.generation != a.generation || msg.filterText != a.list.FilterInput.Value() {
+		if a.pendingRestore.active &&
+			a.pendingRestore.generation == msg.generation &&
+			a.pendingRestore.filterText == msg.filterText {
+			a.pendingRestore = catalogProjectionPendingRestore{}
+		}
+		return nil
+	}
+	var cmd tea.Cmd
+	a.list, cmd = a.list.Update(msg.matches)
+	if a.pendingRestore.active &&
+		a.pendingRestore.generation == msg.generation &&
+		a.pendingRestore.filterText == msg.filterText {
+		a.restoreAvailableSelection(a.pendingRestore.version, a.pendingRestore.index)
+		a.pendingRestore = catalogProjectionPendingRestore{}
+	}
+	return cmd
+}
+
+func (a *catalogProjectionAdapter) selectedAvailableVersion() string {
+	item := a.list.SelectedItem()
+	if item == nil {
+		return ""
+	}
+	selected, ok := item.(styles.Item)
+	if !ok {
+		return ""
+	}
+	return selected.Name
+}
+
+func (a *catalogProjectionAdapter) selectedInstalledIdentity() (string, int) {
+	row := a.installedTable.SelectedRow()
+	version := ""
+	if len(row) > 0 {
+		version = row[0]
+	}
+	return version, a.installedTable.Cursor()
+}
+
+func (a *catalogProjectionAdapter) restoreAvailableSelection(version string, oldIndex int) {
+	visible := a.list.VisibleItems()
+	if len(visible) == 0 {
+		return
+	}
+	target := -1
+	if version != "" {
+		for i, item := range visible {
+			if selected, ok := item.(styles.Item); ok && selected.Name == version {
+				target = i
+				break
+			}
+		}
+	}
+	if target < 0 {
+		target = oldIndex
+	}
+	if target < 0 {
+		target = 0
+	}
+	if target >= len(visible) {
+		target = len(visible) - 1
+	}
+	a.list.Select(target)
+}
+
+func (a *catalogProjectionAdapter) restoreInstalledSelection(version string, oldIndex int) {
+	rows := a.installedTable.Rows()
+	if len(rows) == 0 {
+		return
+	}
+	target := -1
+	if version != "" {
+		for i, row := range rows {
+			if len(row) > 0 && row[0] == version {
+				target = i
+				break
+			}
+		}
+	}
+	if target < 0 {
+		target = oldIndex
+	}
+	if target < 0 {
+		target = 0
+	}
+	if target >= len(rows) {
+		target = len(rows) - 1
+	}
+	a.installedTable.SetCursor(target)
+}
+
+func (a *catalogProjectionAdapter) resize(width, height int) {
+	a.list.SetSize(width, height)
+	a.installedTable.SetWidth(width)
+	a.installedTable.SetHeight(height)
+	a.installedTable.SetColumns(installedTableColumns(width))
+}
+
+func (a *catalogProjectionAdapter) updateAvailable(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	a.list, cmd = a.list.Update(msg)
+	return cmd
+}
+
+func (a *catalogProjectionAdapter) updateInstalled(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	a.installedTable, cmd = a.installedTable.Update(msg)
+	return cmd
+}
+
+func (a *catalogProjectionAdapter) update(msg tea.Msg) tea.Cmd {
+	return tea.Batch(a.updateAvailable(msg), a.updateInstalled(msg))
+}
+
+func (a *catalogProjectionAdapter) setAvailableFilteringEnabled(enabled bool) {
+	a.list.SetFilteringEnabled(enabled)
+}
+
+func (a *catalogProjectionAdapter) setAvailableFilterText(filter string) {
+	a.list.SetFilterText(filter)
+}
+
+func (a *catalogProjectionAdapter) selectAvailable(index int) {
+	a.list.Select(index)
+}
+
+func (a *catalogProjectionAdapter) selectedAvailableItem() *styles.Item {
+	item := a.list.SelectedItem()
+	selected, ok := item.(styles.Item)
+	if !ok {
+		return nil
+	}
+	return &selected
+}
+
+func (a catalogProjectionAdapter) selectedInstalledItem() table.Row {
+	return a.installedTable.SelectedRow()
+}
+
+func (a *catalogProjectionAdapter) setTheme(theme styles.Theme) catalogProjectionOutcome {
+	if !a.catalog.setTheme(theme) {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeNoop}
+	}
+	a.list.SetDelegate(listDefaultDelegate(theme))
+	a.installedTable.SetStyles(tableStyles(theme))
+	return catalogProjectionOutcome{
+		kind: catalogProjectionOutcomePublished,
+		cmd:  a.publish(a.catalog.projection()),
+	}
+}
+
+func (a *catalogProjectionAdapter) availableModel() list.Model {
+	return a.list
+}
+
+func (a *catalogProjectionAdapter) installedModel() table.Model {
+	return a.installedTable
+}
+
+func (a *catalogProjectionAdapter) availableView() string {
+	return a.list.View()
+}
+
+func (a *catalogProjectionAdapter) installedView() string {
+	return a.installedTable.View()
+}
+
+func (a *catalogProjectionAdapter) lookup(version string) (utils.GoVersion, bool) {
+	return a.catalog.lookup(version)
+}
+
+func (a *catalogProjectionAdapter) projection() versionProjection {
+	return a.catalog.projection()
+}
+
+func (a *catalogProjectionAdapter) activityState() catalogActivity {
+	return a.activity
+}
+
+func (a *catalogProjectionAdapter) operationPhase() catalogOperationPhase {
+	return a.phase
+}

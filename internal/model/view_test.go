@@ -33,7 +33,11 @@ func TestViewUsesModernZones(t *testing.T) {
 func TestGoDevErrorKeepsTUIClosable(t *testing.T) {
 	m := newTestModel(t)
 
-	updated, _ := m.Update(utils.ErrMsg(errors.New("failed to connect to go.dev: context deadline exceeded")))
+	load := m.projection.startLoad(catalogLoadPurposeRefresh)
+	updated, _ := m.Update(catalogLoadFailedMsg{
+		RequestID: load.loadRequest.ID,
+		Err:       errors.New("failed to connect to go.dev: context deadline exceeded"),
+	})
 	m = updated.(Model)
 
 	view := stripANSI(m.View().Content)

@@ -1,7 +1,6 @@
 package model
 
 import (
-	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
@@ -24,32 +23,11 @@ const (
 )
 
 type Model struct {
-	// catalog is the private Version Catalog that owns the canonical
-	// Go version list and produces defensive projections for both
-	// version widgets. It replaces the previous public Versions slice
-	// and rebuildVersionViews derivation.
-	catalog versionCatalog
-	// projectionGeneration is bumped on every successful projection
-	// sync so deferred refilter restores can detect staleness.
-	projectionGeneration uint64
-	// pendingListRestore captures the Available-list selection that
-	// must be restored once the asynchronous refilter triggered by
-	// list.SetItems (while a filter is active) settles. It is consumed
-	// by the deferred refilter handler and invalidated on every new
-	// projection.
-	pendingListRestore pendingListRestore
-	// reconcile stores the context needed to verify a disk mutation
-	// (install/switch/delete) that reported a catalog error against a
-	// fresh catalog fetch. It is zero/active=false when no
-	// reconciliation is pending.
-	reconcile reconcileContext
+	projection  catalogProjectionAdapter
+	initialLoad catalogLoadRequest
 
-	list              list.Model
-	installedTable    table.Model
-	Loading           bool
-	Spinner           spinner.Model
-	CurrentTab        int
-	InstallingVersion string
+	Spinner    spinner.Model
+	CurrentTab int
 	// Status owns the status triplet (text, kind, scope) as the
 	// StatusLine value-type module. Reads go through Text/Kind/Scope;
 	// mutations go through SetTab/SetGlobal/Clear/ClearTab.
@@ -107,13 +85,6 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 	sp.Spinner = spinner.Dot
 	sp.Style = theme.SpinnerStyle
 
-	installedTable := table.New(
-		table.WithColumns(installedTableColumns(defaultConstructionWidth)),
-		table.WithFocused(true),
-		table.WithHeight(10),
-	)
-	installedTable.SetStyles(tableStyles(theme))
-
 	depTable := table.New(
 		table.WithColumns(dependencyTableColumns(defaultConstructionWidth)),
 		table.WithFocused(true),
@@ -121,21 +92,13 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 	)
 	depTable.SetStyles(tableStyles(theme))
 
-	delegate := listDefaultDelegate(theme)
-
-	l := list.New([]list.Item{}, delegate, 0, 0)
-	l.Title = "Available Versions"
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetShowHelp(false)
-	l.SetShowPagination(false)
+	projection := newCatalogProjectionAdapter(theme)
+	initialLoad := projection.startLoad(catalogLoadPurposeInitial).loadRequest
 
 	return Model{
-		list:            l,
-		catalog:         newVersionCatalog(theme),
+		projection:      projection,
+		initialLoad:     initialLoad,
 		Spinner:         sp,
-		Loading:         true,
-		installedTable:  installedTable,
 		Layout:          styles.LayoutNormal,
 		theme:           theme,
 		Deps:            NewDepsState(moduleDir, depTable),
@@ -165,8 +128,12 @@ func (m Model) BindVersionOperations(operations VersionOperations) Model {
 }
 
 func (m Model) Init() tea.Cmd {
+	var load tea.Cmd
+	if m.initialLoad.ID != 0 {
+		load = LoadVersionsCmd(m.runtime, m.initialLoad)
+	}
 	return tea.Batch(
-		LoadVersionsCmd(m.runtime),
+		load,
 		m.Spinner.Tick,
 	)
 }
@@ -175,8 +142,9 @@ func (m Model) viewHeight() int {
 	if m.Height > 0 {
 		return m.Height
 	}
-	if m.list.Height() > 0 {
-		return m.list.Height()
+	available := m.projection.availableModel()
+	if available.Height() > 0 {
+		return available.Height()
 	}
 	return 24
 }
@@ -185,8 +153,9 @@ func (m Model) viewWidth() int {
 	if m.Width > 0 {
 		return m.Width
 	}
-	if m.list.Width() > 0 {
-		return m.list.Width()
+	available := m.projection.availableModel()
+	if available.Width() > 0 {
+		return available.Width()
 	}
 	return 80
 }

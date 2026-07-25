@@ -59,9 +59,11 @@ func TestTabSwitchClearsSwitchedToGoStatus(t *testing.T) {
 	})
 	// Simulate the switch completing with the shim already on PATH,
 	// which is the branch that produces "Switched to Go X! Run ...".
+	operation := m.projection.startMutation(catalogMutationActivation, "1.26.5")
 	updated, _ := m.Update(activationSuccessMsg{
-		Result:     lifecycle.ActivationResult{Version: "1.26.5"},
-		ShimInPath: true,
+		OperationID: operation.id,
+		Result:      lifecycle.ActivationResult{Version: "1.26.5"},
+		ShimInPath:  true,
 	})
 	m = updated.(Model)
 

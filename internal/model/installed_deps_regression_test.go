@@ -21,11 +21,11 @@ func TestInstalledTab_UKeyTriggersSwitchVersion(t *testing.T) {
 		{Version: "1.24.4", Installed: true, Active: true, Path: "/p/1.24.4"},
 		{Version: "1.26.0", Installed: true, Active: false, Path: "/p/1.26.0"},
 	})
-	m.installedTable.Focus()
+	focusInstalled(&m)
 	// Move the cursor to the non-active row (1.26.0).
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(Model)
-	if got := m.installedTable.Cursor(); got != 1 {
+	if got := m.projection.installedModel().Cursor(); got != 1 {
 		t.Fatalf("cursor = %d, want 1 before pressing u", got)
 	}
 
@@ -35,8 +35,8 @@ func TestInstalledTab_UKeyTriggersSwitchVersion(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected SwitchVersion command when pressing 'u' on Installed tab, got nil")
 	}
-	if !got.Loading {
-		t.Fatal("expected Loading=true while switch is in flight")
+	if activity := got.projection.activityState(); activity.kind != catalogActivityActivating || activity.version != "1.26.0" {
+		t.Fatalf("activity = %+v, want activating 1.26.0", activity)
 	}
 }
 

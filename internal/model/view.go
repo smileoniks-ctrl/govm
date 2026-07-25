@@ -42,9 +42,9 @@ func (m Model) View() tea.View {
 
 	switch m.CurrentTab {
 	case AvailableTab:
-		components = append(components, renderContentCanvas(m.list.View(), width, height))
+		components = append(components, renderContentCanvas(m.projection.availableView(), width, height))
 	case InstalledTab:
-		components = append(components, renderContentCanvas(m.installedTable.View(), width, height))
+		components = append(components, renderContentCanvas(m.projection.installedView(), width, height))
 	case DepsTab:
 		components = append(components, renderContentCanvas(m.Deps.Table.View(), width, height))
 	case SettingsTab:
@@ -117,13 +117,29 @@ func renderMinimumViewport(t styles.Theme, width, height int) string {
 func (m Model) composeStatus() (string, string) {
 	status := m.Status.Text()
 	statusType := m.Status.Kind()
-	if m.Loading || m.Deps.operationInProgress() {
+	activity := m.projection.activityState()
+	if activity.kind != catalogActivityIdle || m.Deps.operationInProgress() {
 		statusType = "info"
-		if m.InstallingVersion != "" {
-			status = fmt.Sprintf("%s Downloading Go %s", m.Spinner.View(), m.InstallingVersion)
-		} else if text := m.Deps.SpinnerText(); text != "" {
+		switch activity.kind {
+		case catalogActivityInstalling:
+			status = fmt.Sprintf("%s Downloading Go %s", m.Spinner.View(), activity.version)
+		case catalogActivityActivating:
+			if status == "" {
+				status = fmt.Sprintf("%s Switching to Go %s", m.Spinner.View(), activity.version)
+			}
+		case catalogActivityDeleting:
+			if status == "" {
+				status = fmt.Sprintf("%s Deleting Go %s", m.Spinner.View(), activity.version)
+			}
+		case catalogActivityReconciling:
+			if status == "" {
+				status = fmt.Sprintf("%s Verifying catalog", m.Spinner.View())
+			}
+		}
+		if text := m.Deps.SpinnerText(); status == "" && text != "" {
 			status = fmt.Sprintf("%s %s", m.Spinner.View(), text)
-		} else if status == "" {
+		}
+		if status == "" {
 			status = fmt.Sprintf("%s Loading", m.Spinner.View())
 		}
 	}

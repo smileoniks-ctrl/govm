@@ -46,7 +46,8 @@ func TestInstallVersionCmd_MapsRequestAndTimeout(t *testing.T) {
 		SHA256:   "deadbeef",
 		Size:     987654,
 	}
-	msg := m.installVersionCmd(src)()
+	const operationID = 42
+	msg := m.installVersionCmd(operationID, src)()
 
 	// Every field, including the propagated integrity metadata, is
 	// mapped into the request.
@@ -76,6 +77,9 @@ func TestInstallVersionCmd_MapsRequestAndTimeout(t *testing.T) {
 	if success.Version != "1.30.0" || success.Path != "/p/1.30.0" {
 		t.Fatalf("success result = %+v", success)
 	}
+	if success.OperationID != operationID {
+		t.Fatalf("operation ID = %d, want %d", success.OperationID, operationID)
+	}
 }
 
 // TestInstallVersionCmd_FailureReturnsTypedError verifies a failing
@@ -88,7 +92,7 @@ func TestInstallVersionCmd_FailureReturnsTypedError(t *testing.T) {
 		return install.Result{}, installErr
 	}
 
-	msg := m.installVersionCmd(utils.GoVersion{Version: "1.30.0"})()
+	msg := m.installVersionCmd(42, utils.GoVersion{Version: "1.30.0"})()
 
 	failure, ok := msg.(installFailureMsg)
 	if !ok {
@@ -114,7 +118,7 @@ func TestInstallVersionCmd_NilInstallerDoesNotPanic(t *testing.T) {
 	m := newTestModel(t)
 	m.installGo = nil
 
-	msg := m.installVersionCmd(utils.GoVersion{Version: "1.30.0"})()
+	msg := m.installVersionCmd(42, utils.GoVersion{Version: "1.30.0"})()
 	if _, ok := msg.(installFailureMsg); !ok {
 		t.Fatalf("expected installFailureMsg for nil installer, got %T", msg)
 	}
@@ -129,7 +133,7 @@ func TestHandleInstallKey_IssuesInstallCmd(t *testing.T) {
 	// The seeded catalog sorts desc: 1.26.0, 1.25.0 (uninstalled), 1.24.4.
 	// Select the uninstalled 1.25.0 entry by identity.
 	target := -1
-	for i := 0; i < len(m.list.Items()); i++ {
+	for i := 0; i < len(m.projection.availableModel().Items()); i++ {
 		if listItemName(m, i) == "1.25.0" {
 			target = i
 			break
@@ -138,7 +142,7 @@ func TestHandleInstallKey_IssuesInstallCmd(t *testing.T) {
 	if target < 0 {
 		t.Fatal("could not find uninstalled 1.25.0 entry to install")
 	}
-	m.list.Select(target)
+	m.projection.selectAvailable(target)
 
 	// Sentinel fake: any install run flips this flag.
 	called := false
@@ -150,8 +154,8 @@ func TestHandleInstallKey_IssuesInstallCmd(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'i'})
 	got := updated.(Model)
 
-	if !got.Loading || got.InstallingVersion != "1.25.0" {
-		t.Fatalf("Loading=%v InstallingVersion=%q, want loading for 1.25.0", got.Loading, got.InstallingVersion)
+	if activity := got.projection.activityState(); activity.kind != catalogActivityInstalling || activity.version != "1.25.0" {
+		t.Fatalf("activity = %+v, want installing 1.25.0", activity)
 	}
 	if cmd == nil {
 		t.Fatal("expected an install command to be dispatched")
@@ -171,9 +175,11 @@ func TestHandleInstallKey_IssuesInstallCmd(t *testing.T) {
 // success text via the direct completion path.
 func TestInstallSuccess_PreservesExistingSuccessText(t *testing.T) {
 	m := newVersionCacheTestModel(t)
+	operation := m.projection.startMutation(catalogMutationInstall, "1.25.0")
 	updated, _ := m.Update(installSuccessMsg{
-		Version: "1.25.0",
-		Path:    "/new/1.25",
+		OperationID: operation.id,
+		Version:     "1.25.0",
+		Path:        "/new/1.25",
 	})
 	got := updated.(Model)
 
@@ -183,8 +189,8 @@ func TestInstallSuccess_PreservesExistingSuccessText(t *testing.T) {
 	if got.Status.Kind() != "success" {
 		t.Fatalf("kind = %q, want success", got.Status.Kind())
 	}
-	if got.Loading {
-		t.Fatal("expected Loading cleared after successful install")
+	if activity := got.projection.activityState(); activity.kind != catalogActivityIdle {
+		t.Fatalf("activity = %+v, want idle after successful install", activity)
 	}
 }
 
@@ -193,9 +199,11 @@ func TestInstallSuccess_PreservesExistingSuccessText(t *testing.T) {
 // marking the version installed.
 func TestInstallSuccess_WarningsProduceWarningStatus(t *testing.T) {
 	m := newVersionCacheTestModel(t)
+	operation := m.projection.startMutation(catalogMutationInstall, "1.25.0")
 	updated, _ := m.Update(installSuccessMsg{
-		Version: "1.25.0",
-		Path:    "/new/1.25",
+		OperationID: operation.id,
+		Version:     "1.25.0",
+		Path:        "/new/1.25",
 		Warnings: []install.Warning{
 			{Kind: install.WarningIntegrityUnavailable},
 		},
@@ -208,7 +216,7 @@ func TestInstallSuccess_WarningsProduceWarningStatus(t *testing.T) {
 	if !strings.Contains(got.Status.Text(), "with warnings") {
 		t.Fatalf("status = %q, want warnings surfaced", got.Status.Text())
 	}
-	v, ok := got.catalog.lookup("1.25.0")
+	v, ok := got.projection.lookup("1.25.0")
 	if !ok || !v.Installed {
 		t.Fatalf("version still marked uninstalled despite warnings: %+v", v)
 	}
@@ -219,11 +227,11 @@ func TestInstallSuccess_WarningsProduceWarningStatus(t *testing.T) {
 // reports the phase-aware typed error.
 func TestInstallFailure_ClearsStateAndReportsError(t *testing.T) {
 	m := newVersionCacheTestModel(t)
-	m.Loading = true
-	m.InstallingVersion = "1.30.0"
+	operation := m.projection.startMutation(catalogMutationInstall, "1.30.0")
 
 	updated, _ := m.Update(installFailureMsg{
-		Version: "1.30.0",
+		OperationID: operation.id,
+		Version:     "1.30.0",
 		Err: &install.Error{
 			Stage: install.StageExtract,
 			Err:   errors.New("corrupt archive"),
@@ -231,14 +239,11 @@ func TestInstallFailure_ClearsStateAndReportsError(t *testing.T) {
 	})
 	got := updated.(Model)
 
-	if got.Loading {
-		t.Fatal("expected Loading cleared on failure")
+	if activity := got.projection.activityState(); activity.kind != catalogActivityIdle {
+		t.Fatalf("activity = %+v, want idle on failure", activity)
 	}
-	if got.InstallingVersion != "" {
-		t.Fatalf("InstallingVersion = %q, want cleared", got.InstallingVersion)
-	}
-	if got.reconcile.active {
-		t.Fatal("expected reconcile context cleared on failure")
+	if phase := got.projection.operationPhase(); phase != catalogOperationPhaseIdle {
+		t.Fatalf("operation phase = %v, want idle on failure", phase)
 	}
 	if !strings.Contains(got.Status.Text(), "Failed to install Go 1.30.0") {
 		t.Fatalf("status = %q, want failure prefix", got.Status.Text())
@@ -257,23 +262,22 @@ func TestInstallFailure_ClearsStateAndReportsError(t *testing.T) {
 // status.
 func TestUnknownCompletionReconciliationPreservesWarnings(t *testing.T) {
 	m := newVersionCacheTestModel(t)
+	operation := m.projection.startMutation(catalogMutationInstall, "1.30.0")
 
 	// 1. Completion for a version absent from the catalog triggers a
 	//    reconciliation carrying the install warnings.
-	updated, _ := m.Update(installSuccessMsg{
-		Version: "1.30.0",
-		Path:    "/p/1.30.0",
+	updated, cmd := m.Update(installSuccessMsg{
+		OperationID: operation.id,
+		Version:     "1.30.0",
+		Path:        "/p/1.30.0",
 		Warnings: []install.Warning{
 			{Kind: install.WarningCleanup, Err: errors.New("temp file busy")},
 		},
 	})
 	m = updated.(Model)
 
-	if !m.reconcile.active {
-		t.Fatal("expected reconciliation active for unknown completion")
-	}
-	if len(m.reconcile.installWarnings) != 1 {
-		t.Fatalf("expected warnings copied into reconcile context, got %d", len(m.reconcile.installWarnings))
+	if activity := m.projection.activityState(); activity.kind != catalogActivityReconciling {
+		t.Fatalf("activity = %+v, want reconciling unknown completion", activity)
 	}
 
 	// 2. The reconciliation fetch returns a catalog that now includes
@@ -284,7 +288,10 @@ func TestUnknownCompletionReconciliationPreservesWarnings(t *testing.T) {
 		Installed: true,
 		Path:      "/p/1.30.0",
 	})
-	updated, _ = m.Update(utils.VersionsMsg(fresh))
+	updated, _ = m.Update(catalogLoadedMsg{
+		RequestID: catalogRequestID(t, cmd),
+		Versions:  fresh,
+	})
 	got := updated.(Model)
 
 	if got.Status.Kind() != "warning" {

@@ -169,14 +169,14 @@ func TestAvailableTabArrowKeysMoveListSelection(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(Model)
 
-	if got := m.list.Index(); got != 1 {
+	if got := m.projection.availableModel().Index(); got != 1 {
 		t.Fatalf("expected list selection to move down to index 1, got %d", got)
 	}
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	m = updated.(Model)
 
-	if got := m.list.Index(); got != 0 {
+	if got := m.projection.availableModel().Index(); got != 0 {
 		t.Fatalf("expected list selection to move up to index 0, got %d", got)
 	}
 }
@@ -188,19 +188,19 @@ func TestInstalledTabArrowKeysMoveTableCursor(t *testing.T) {
 		{Version: "1.24.4", Installed: true, Path: "/p/1.24.4"},
 		{Version: "1.25.0", Installed: true, Path: "/p/1.25.0"},
 	})
-	m.installedTable.Focus()
+	focusInstalled(&m)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(Model)
 
-	if got := m.installedTable.Cursor(); got != 1 {
+	if got := m.projection.installedModel().Cursor(); got != 1 {
 		t.Fatalf("expected installed table cursor to move down to index 1, got %d", got)
 	}
 
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 	m = updated.(Model)
 
-	if got := m.installedTable.Cursor(); got != 0 {
+	if got := m.projection.installedModel().Cursor(); got != 0 {
 		t.Fatalf("expected installed table cursor to move up to index 0, got %d", got)
 	}
 }
@@ -212,7 +212,7 @@ func TestInstalledTabDeleteUsesTableSelection(t *testing.T) {
 		{Version: "1.24.4", Installed: true, Path: "/p/1.24.4"},
 		{Version: "1.25.0", Installed: true, Path: "/p/1.25.0"},
 	})
-	m.installedTable.SetCursor(1)
+	setInstalledCursor(&m, 1)
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'd'})
 	got := updated.(Model)

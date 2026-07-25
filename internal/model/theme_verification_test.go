@@ -119,7 +119,7 @@ func TestModelNewRequiresTheme(t *testing.T) {
 // Not parallel: newTestModel calls t.Setenv via its temp HOME shim.
 func TestRenderItemTitleUsedByList(t *testing.T) {
 	m := newTestModel(t)
-	items := m.list.Items()
+	items := m.projection.availableModel().Items()
 	if len(items) == 0 {
 		t.Fatal("test model has no list items")
 	}
@@ -128,7 +128,7 @@ func TestRenderItemTitleUsedByList(t *testing.T) {
 	if !ok {
 		t.Fatalf("list item 0 is %T, want styles.Item", items[0])
 	}
-	v, found := m.catalog.lookup(it0.Name)
+	v, found := m.projection.lookup(it0.Name)
 	if !found {
 		t.Fatalf("list item 0 version %q not in catalog", it0.Name)
 	}
@@ -164,7 +164,7 @@ func TestApplyRuntimeThemePropagatesToComponents(t *testing.T) {
 	lightPrimary := styles.NewTheme(config.ThemeLight).Primary
 
 	currentSpinner := m.Spinner.Style.GetForeground()
-	currentInstalledOut := m.installedTable.View()
+	currentInstalledOut := m.projection.installedView()
 	currentDepsOut := m.Deps.Table.View()
 
 	m.Settings.Values.Theme = config.ThemeLight
@@ -179,7 +179,7 @@ func TestApplyRuntimeThemePropagatesToComponents(t *testing.T) {
 	if got := m.Spinner.Style.GetForeground(); got == currentSpinner {
 		t.Fatal("Spinner.Style did not change after applyRuntimeTheme")
 	}
-	if got := m.installedTable.View(); got == currentInstalledOut {
+	if got := m.projection.installedView(); got == currentInstalledOut {
 		t.Fatal("installedTable.View did not change after applyRuntimeTheme")
 	}
 	if got := m.Deps.Table.View(); got == currentDepsOut {
@@ -189,7 +189,7 @@ func TestApplyRuntimeThemePropagatesToComponents(t *testing.T) {
 	// expose the delegate, so the proof of propagation is that
 	// list.View still renders without panicking — implicit because the
 	// assertion below would have panicked above if SetDelegate broke.
-	if view := m.list.View(); view == "" {
+	if view := m.projection.availableView(); view == "" {
 		t.Fatal("list.View is empty after applyRuntimeTheme")
 	}
 }

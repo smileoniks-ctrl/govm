@@ -31,6 +31,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if m.projection.operationPhase() == catalogOperationPhaseMutating {
+		switch msg.String() {
+		case "i", "u", "d":
+			return m, nil
+		}
+	}
 	switch msg.String() {
 	case "i":
 		return m.handleInstallKey()
@@ -59,13 +65,9 @@ func (m Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 
 	switch m.CurrentTab {
 	case AvailableTab:
-		var cmd tea.Cmd
-		m.list, cmd = m.list.Update(msg)
-		return m, cmd
+		return m, m.projection.updateAvailable(msg)
 	case InstalledTab:
-		var cmd tea.Cmd
-		m.installedTable, cmd = m.installedTable.Update(msg)
-		return m, cmd
+		return m, m.projection.updateInstalled(msg)
 	case DepsTab:
 		var cmd tea.Cmd
 		m.Deps.Table, cmd = m.Deps.Table.Update(msg)
@@ -107,43 +109,52 @@ func (m Model) handleShiftTabKey() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleInstallKey() (tea.Model, tea.Cmd) {
-	if m.CurrentTab != AvailableTab {
+	if m.CurrentTab != AvailableTab || m.projection.operationPhase() != catalogOperationPhaseIdle {
 		return m, nil
 	}
-	selected := m.selectedItem()
+	selected := m.projection.selectedAvailableItem()
 	if selected == nil {
 		return m, nil
 	}
-	v, ok := m.catalog.lookup(selected.Name)
+	v, ok := m.projection.lookup(selected.Name)
 	if !ok || v.Installed {
 		return m, nil
 	}
-	m.Loading = true
-	m.InstallingVersion = v.Version
+	operation := m.projection.startMutation(catalogMutationInstall, v.Version)
+	if operation.id == 0 {
+		return m, nil
+	}
 	m.Status.SetGlobal("", "")
-	return m, m.installVersionCmd(v)
+	return m, m.installVersionCmd(operation.id, v)
 }
 
 func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
+	if (m.CurrentTab == AvailableTab || m.CurrentTab == InstalledTab) &&
+		m.projection.operationPhase() != catalogOperationPhaseIdle {
+		return m, nil
+	}
 	if m.CurrentTab == AvailableTab {
-		selected := m.selectedItem()
+		selected := m.projection.selectedAvailableItem()
 		if selected != nil {
-			v, ok := m.catalog.lookup(selected.Name)
+			v, ok := m.projection.lookup(selected.Name)
 			if ok && v.Installed {
-				m.Loading = true
+				operation := m.projection.startMutation(catalogMutationActivation, v.Version)
+				if operation.id == 0 {
+					return m, nil
+				}
 				m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
-				return m, m.activateVersionCmd(v.Version)
+				return m, m.activateVersionCmd(operation.id, v.Version)
 			}
 		}
 		m.Status.SetTab("You need to install this version first. Press 'i' to install.", "error")
 		return m, nil
 	}
 	if m.CurrentTab == InstalledTab {
-		row := m.installedTable.SelectedRow()
+		row := m.projection.selectedInstalledItem()
 		if len(row) == 0 {
 			return m, nil
 		}
-		v, ok := m.catalog.lookup(row[0])
+		v, ok := m.projection.lookup(row[0])
 		if !ok || !v.Installed {
 			return m, nil
 		}
@@ -151,9 +162,12 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 			m.Status.SetTab(fmt.Sprintf("Go %s is already active.", v.Version), "info")
 			return m, nil
 		}
-		m.Loading = true
+		operation := m.projection.startMutation(catalogMutationActivation, v.Version)
+		if operation.id == 0 {
+			return m, nil
+		}
 		m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
-		return m, m.activateVersionCmd(v.Version)
+		return m, m.activateVersionCmd(operation.id, v.Version)
 	}
 	if m.CurrentTab == DepsTab && m.Deps.Loaded {
 		return m.startUpdateCycle()
@@ -188,9 +202,13 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 		m.Status.Clear()
 		return m, CheckModuleDependencyUpdatesCmd(m.Deps.ModuleDir)
 	}
-	m.Loading = true
+	phase := m.projection.operationPhase()
+	if phase == catalogOperationPhaseReconciling {
+		return m, nil
+	}
+	outcome := m.projection.startLoad(catalogLoadPurposeRefresh)
 	m.Status.SetGlobal("", "")
-	return m, LoadVersionsCmd(m.runtime)
+	return m, LoadVersionsCmd(m.runtime, outcome.loadRequest)
 }
 
 func (m Model) handleBackupsKey() (tea.Model, tea.Cmd) {
@@ -211,21 +229,24 @@ func (m Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab != AvailableTab && m.CurrentTab != InstalledTab {
 		return m, nil
 	}
+	if m.projection.operationPhase() != catalogOperationPhaseIdle {
+		return m, nil
+	}
 	version := ""
 	if m.CurrentTab == AvailableTab {
-		selected := m.selectedItem()
+		selected := m.projection.selectedAvailableItem()
 		if selected == nil {
 			return m, nil
 		}
 		version = selected.Name
 	} else {
-		row := m.installedTable.SelectedRow()
+		row := m.projection.selectedInstalledItem()
 		if len(row) == 0 {
 			return m, nil
 		}
 		version = row[0]
 	}
-	v, ok := m.catalog.lookup(version)
+	v, ok := m.projection.lookup(version)
 	if !ok || !v.Installed {
 		if m.CurrentTab == AvailableTab {
 			m.Status.SetTab("This version is not installed.", "error")
@@ -358,14 +379,8 @@ func (m *Model) applyRuntimeTheme() tea.Cmd {
 	m.theme = t
 	m.Settings.ApplyTheme()
 	m.Spinner.Style = t.SpinnerStyle
-	m.installedTable.SetStyles(tableStyles(t))
 	m.Deps.Table.SetStyles(tableStyles(t))
-	delegate := listDefaultDelegate(t)
-	m.list.SetDelegate(delegate)
-	if m.catalog.setTheme(t) {
-		return m.applyProjection(m.catalog.projection())
-	}
-	return nil
+	return m.projection.setTheme(t).cmd
 }
 
 func (m *Model) saveSettings() {
@@ -380,8 +395,11 @@ func (m Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
 	if !m.ConfirmingDelete {
 		return m, nil
 	}
+	if m.projection.operationPhase() != catalogOperationPhaseIdle {
+		return m, nil
+	}
 	version := m.DeleteVersion
-	target, ok := m.catalog.lookup(version)
+	target, ok := m.projection.lookup(version)
 	if !ok {
 		// Missing lookup: surface an error and never dispatch a zero
 		// GoVersion to the deleter.
@@ -404,9 +422,12 @@ func (m Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
 	}
 	m.ConfirmingDelete = false
 	m.DeleteVersion = ""
-	m.Loading = true
+	operation := m.projection.startMutation(catalogMutationDeletion, target.Version)
+	if operation.id == 0 {
+		return m, nil
+	}
 	m.Status.SetGlobal(fmt.Sprintf("Deleting Go %s...", target.Version), "info")
-	return m, m.deleteVersionCmd(target.Version)
+	return m, m.deleteVersionCmd(operation.id, target.Version)
 }
 
 func (m Model) handleDeleteConfirmNo() (tea.Model, tea.Cmd) {
@@ -417,15 +438,4 @@ func (m Model) handleDeleteConfirmNo() (tea.Model, tea.Cmd) {
 	m.DeleteVersion = ""
 	m.Status.SetTab("Delete operation canceled.", "info")
 	return m, nil
-}
-
-func (m Model) selectedItem() *styles.Item {
-	if m.list.SelectedItem() == nil {
-		return nil
-	}
-	item, ok := m.list.SelectedItem().(styles.Item)
-	if !ok {
-		return nil
-	}
-	return &item
 }

@@ -17,6 +17,7 @@ package model
 // identifies which catalog behaviour diverged.
 
 import (
+	"reflect"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,15 +30,15 @@ import (
 // projectionVersions snapshots the model's catalog into a VersionsMsg,
 // optionally appending extra versions. Used to simulate the result of a
 // reconciliation fetch without network I/O.
-func projectionVersions(m Model, extra ...utils.GoVersion) utils.VersionsMsg {
-	items := m.list.Items()
-	out := make(utils.VersionsMsg, 0, len(items)+len(extra))
+func projectionVersions(m Model, extra ...utils.GoVersion) []utils.GoVersion {
+	items := m.projection.availableModel().Items()
+	out := make([]utils.GoVersion, 0, len(items)+len(extra))
 	for _, item := range items {
 		it, ok := item.(styles.Item)
 		if !ok {
 			continue
 		}
-		if v, found := m.catalog.lookup(it.Name); found {
+		if v, found := m.projection.lookup(it.Name); found {
 			out = append(out, v)
 		}
 	}
@@ -48,7 +49,7 @@ func projectionVersions(m Model, extra ...utils.GoVersion) utils.VersionsMsg {
 // list index, or "" if the index is out of range or the item is not a
 // styles.Item.
 func listItemName(m Model, index int) string {
-	items := m.list.Items()
+	items := m.projection.availableModel().Items()
 	if index < 0 || index >= len(items) {
 		return ""
 	}
@@ -70,16 +71,20 @@ func listItemName(m Model, index int) string {
 // preserved and an error must be surfaced to the user.
 func TestInvalidVersionsMsgPreservesPriorProjection(t *testing.T) {
 	m := newVersionCacheTestModel(t)
-	priorLen := len(m.catalog.projection().available)
+	priorLen := len(m.projection.projection().available)
+	load := m.projection.startLoad(catalogLoadPurposeRefresh)
 
 	// Duplicate version ids are rejected by the catalog as invalid input.
-	updated, _ := m.Update(utils.VersionsMsg{
-		{Version: "1.0.0", Filename: "go1.0.0.tar.gz"},
-		{Version: "1.0.0", Filename: "go1.0.0.tar.gz"},
+	updated, _ := m.Update(catalogLoadedMsg{
+		RequestID: load.loadRequest.ID,
+		Versions: []utils.GoVersion{
+			{Version: "1.0.0", Filename: "go1.0.0.tar.gz"},
+			{Version: "1.0.0", Filename: "go1.0.0.tar.gz"},
+		},
 	})
 	got := updated.(Model)
 
-	if gotLen := len(got.catalog.projection().available); gotLen != priorLen {
+	if gotLen := len(got.projection.projection().available); gotLen != priorLen {
 		t.Fatalf("projection length = %d, want %d (prior preserved on invalid VersionsMsg)", gotLen, priorLen)
 	}
 	if got.Status.Kind() != "error" {
@@ -89,21 +94,25 @@ func TestInvalidVersionsMsgPreservesPriorProjection(t *testing.T) {
 
 func TestVersionsMsgAcceptsUnmanagedActiveVersion(t *testing.T) {
 	m := newVersionCacheTestModel(t)
-	updated, _ := m.Update(utils.VersionsMsg{{
-		Version: "1.26.0",
-		Active:  true,
-	}})
+	load := m.projection.startLoad(catalogLoadPurposeRefresh)
+	updated, _ := m.Update(catalogLoadedMsg{
+		RequestID: load.loadRequest.ID,
+		Versions: []utils.GoVersion{{
+			Version: "1.26.0",
+			Active:  true,
+		}},
+	})
 	got := updated.(Model)
 
-	v, ok := got.catalog.lookup("1.26.0")
+	v, ok := got.projection.lookup("1.26.0")
 	if !ok || !v.Active || v.Installed {
 		t.Fatalf("unmanaged active version = %+v, found=%v", v, ok)
 	}
 	if got.Status.Kind() == "error" {
 		t.Fatalf("status = %q, want non-error", got.Status.Text())
 	}
-	if len(got.installedTable.Rows()) != 0 {
-		t.Fatalf("installed rows = %v, want none", got.installedTable.Rows())
+	if len(got.projection.installedModel().Rows()) != 0 {
+		t.Fatalf("installed rows = %v, want none", got.projection.installedModel().Rows())
 	}
 }
 
@@ -117,10 +126,12 @@ func TestVersionsMsgAcceptsUnmanagedActiveVersion(t *testing.T) {
 // invoked to avoid network) and a warning surfaces to the user.
 func TestUnknownCompletionStartsReconciliation(t *testing.T) {
 	m := newVersionCacheTestModel(t)
+	operation := m.projection.startMutation(catalogMutationInstall, "9.9.9-nonexistent")
 
 	updated, cmd := m.Update(installSuccessMsg{
-		Version: "9.9.9-nonexistent",
-		Path:    "/p/9.9.9",
+		OperationID: operation.id,
+		Version:     "9.9.9-nonexistent",
+		Path:        "/p/9.9.9",
 	})
 	got := updated.(Model)
 
@@ -143,11 +154,13 @@ func TestUnknownCompletionStartsReconciliation(t *testing.T) {
 // the path from the original completion message.
 func TestReconciliationConfirmsPendingCompletion(t *testing.T) {
 	m := newVersionCacheTestModel(t)
+	operation := m.projection.startMutation(catalogMutationInstall, "1.30.0")
 
 	// 1. Trigger reconciliation for a version not yet in the catalog.
-	updated, _ := m.Update(installSuccessMsg{
-		Version: "1.30.0",
-		Path:    "/p/1.30.0",
+	updated, cmd := m.Update(installSuccessMsg{
+		OperationID: operation.id,
+		Version:     "1.30.0",
+		Path:        "/p/1.30.0",
 	})
 	m = updated.(Model)
 
@@ -159,10 +172,13 @@ func TestReconciliationConfirmsPendingCompletion(t *testing.T) {
 		Installed: true,
 		Path:      "/p/1.30.0",
 	})
-	updated, _ = m.Update(utils.VersionsMsg(fresh))
+	updated, _ = m.Update(catalogLoadedMsg{
+		RequestID: catalogRequestID(t, cmd),
+		Versions:  fresh,
+	})
 	got := updated.(Model)
 
-	v, ok := got.catalog.lookup("1.30.0")
+	v, ok := got.projection.lookup("1.30.0")
 	if !ok {
 		t.Fatal("expected 1.30.0 in catalog after reconciliation")
 	}
@@ -176,9 +192,11 @@ func TestReconciliationConfirmsPendingCompletion(t *testing.T) {
 
 func TestSwitchReconciliationConfirmsActiveVersion(t *testing.T) {
 	m := newVersionCacheTestModel(t)
-	updated, _ := m.Update(activationSuccessMsg{
-		Result:     lifecycle.ActivationResult{Version: "1.30.0"},
-		ShimInPath: true,
+	operation := m.projection.startMutation(catalogMutationActivation, "1.30.0")
+	updated, cmd := m.Update(activationSuccessMsg{
+		OperationID: operation.id,
+		Result:      lifecycle.ActivationResult{Version: "1.30.0"},
+		ShimInPath:  true,
 	})
 	m = updated.(Model)
 
@@ -192,30 +210,40 @@ func TestSwitchReconciliationConfirmsActiveVersion(t *testing.T) {
 		Active:    true,
 		Path:      "/p/1.30.0",
 	})
-	updated, _ = m.Update(fresh)
+	updated, _ = m.Update(catalogLoadedMsg{
+		RequestID: catalogRequestID(t, cmd),
+		Versions:  fresh,
+	})
 	got := updated.(Model)
 
-	v, ok := got.catalog.lookup("1.30.0")
+	v, ok := got.projection.lookup("1.30.0")
 	if !ok || !v.Active {
 		t.Fatalf("reconciled switch version = %+v, found=%v", v, ok)
 	}
-	if got.Status.Kind() != "success" || got.reconcile.active {
-		t.Fatalf("status=%q reconcile.active=%v", got.Status.Kind(), got.reconcile.active)
+	if got.Status.Kind() != "success" || got.projection.operationPhase() != catalogOperationPhaseIdle {
+		t.Fatalf("status=%q phase=%v", got.Status.Kind(), got.projection.operationPhase())
 	}
 }
 
 func TestDeleteReconciliationAcceptsAbsentVersion(t *testing.T) {
 	m := newVersionCacheTestModel(t)
-	updated, _ := m.Update(deletionSuccessMsg(lifecycle.DeletionResult{Version: "1.30.0"}))
+	operation := m.projection.startMutation(catalogMutationDeletion, "1.30.0")
+	updated, cmd := m.Update(deletionSuccessMsg{
+		OperationID: operation.id,
+		Result:      lifecycle.DeletionResult{Version: "1.30.0"},
+	})
 	m = updated.(Model)
 
-	updated, _ = m.Update(projectionVersions(m))
+	updated, _ = m.Update(catalogLoadedMsg{
+		RequestID: catalogRequestID(t, cmd),
+		Versions:  projectionVersions(m),
+	})
 	got := updated.(Model)
 	if got.Status.Kind() != "success" {
 		t.Fatalf("status kind = %q, want success", got.Status.Kind())
 	}
-	if got.reconcile.active {
-		t.Fatal("reconciliation context was not cleared")
+	if got.projection.operationPhase() != catalogOperationPhaseIdle {
+		t.Fatalf("operation phase = %v, want idle", got.projection.operationPhase())
 	}
 }
 
@@ -230,22 +258,27 @@ func TestDeleteReconciliationAcceptsAbsentVersion(t *testing.T) {
 // error is reported about the unconfirmable pending operation.
 func TestValidRefreshWithoutPendingConfirmationReportsError(t *testing.T) {
 	m := newVersionCacheTestModel(t)
+	operation := m.projection.startMutation(catalogMutationInstall, "1.30.0")
 
 	// 1. Trigger reconciliation for an unknown completion.
-	updated, _ := m.Update(installSuccessMsg{
-		Version: "1.30.0",
-		Path:    "/p/1.30.0",
+	updated, cmd := m.Update(installSuccessMsg{
+		OperationID: operation.id,
+		Version:     "1.30.0",
+		Path:        "/p/1.30.0",
 	})
 	m = updated.(Model)
 
 	// 2. The fetch returns a catalog WITHOUT the completed version —
 	//    the pending operation cannot be confirmed.
 	fresh := projectionVersions(m)
-	updated, _ = m.Update(utils.VersionsMsg(fresh))
+	updated, _ = m.Update(catalogLoadedMsg{
+		RequestID: catalogRequestID(t, cmd),
+		Versions:  fresh,
+	})
 	got := updated.(Model)
 
 	// The snapshot must still be applied (catalog is non-empty).
-	if len(got.catalog.projection().available) == 0 {
+	if len(got.projection.projection().available) == 0 {
 		t.Fatal("expected non-empty catalog after valid refresh despite unconfirmable completion")
 	}
 	// The unconfirmable pending completion must be reported as an error.
@@ -266,7 +299,7 @@ func TestValidRefreshWithoutPendingConfirmationReportsError(t *testing.T) {
 func TestThemeToggleRefreshesRenderedTitle(t *testing.T) {
 	m := newVersionCacheTestModel(t)
 
-	items := m.list.Items()
+	items := m.projection.availableModel().Items()
 	if len(items) == 0 {
 		t.Fatal("expected at least one list item")
 	}
@@ -281,7 +314,7 @@ func TestThemeToggleRefreshesRenderedTitle(t *testing.T) {
 	m.applyRuntimeTheme()
 
 	// The cached RenderedTitle must reflect the new theme.
-	items = m.list.Items()
+	items = m.projection.availableModel().Items()
 	it0, ok = items[0].(styles.Item)
 	if !ok {
 		t.Fatalf("list item 0 is %T after theme toggle", items[0])
@@ -290,13 +323,13 @@ func TestThemeToggleRefreshesRenderedTitle(t *testing.T) {
 		t.Fatal("expected RenderedTitle to change after theme toggle")
 	}
 	// The refreshed title must still be correct for the source version.
-	items = m.list.Items()
+	items = m.projection.availableModel().Items()
 	if len(items) > 0 {
 		it0, ok = items[0].(styles.Item)
 		if !ok {
 			t.Fatalf("list item 0 is %T after theme toggle", items[0])
 		}
-		v, found := m.catalog.lookup(it0.Name)
+		v, found := m.projection.lookup(it0.Name)
 		if !found {
 			t.Fatalf("list item 0 version %q not in catalog after theme toggle", it0.Name)
 		}
@@ -325,8 +358,8 @@ func TestSelectionPreservedByVersionIdentityAcrossReorder(t *testing.T) {
 	})
 
 	// Select the middle version (1.21.0, index 1).
-	m.list.Select(1)
-	if got := listItemName(m, m.list.Index()); got != "1.21.0" {
+	m.projection.selectAvailable(1)
+	if got := listItemName(m, m.projection.availableModel().Index()); got != "1.21.0" {
 		t.Fatalf("pre-reorder selected = %q, want 1.21.0", got)
 	}
 
@@ -338,24 +371,28 @@ func TestSelectionPreservedByVersionIdentityAcrossReorder(t *testing.T) {
 	})
 
 	// Selection must follow 1.21.0 by identity, not stay at index 1.
-	if got := listItemName(m, m.list.Index()); got != "1.21.0" {
+	if got := listItemName(m, m.projection.availableModel().Index()); got != "1.21.0" {
 		t.Fatalf("selected = %q after reorder, want 1.21.0 (identity preserved)", got)
 	}
 }
 
 func TestUnchangedReplaceDoesNotRepublishProjection(t *testing.T) {
 	m := newVersionCacheTestModel(t)
-	generation := m.projectionGeneration
+	priorItems := projectionVersions(m)
+	priorSelection := selectedListVersion(m)
 
-	cmd, err := m.replaceVersions(projectionVersions(m))
+	cmd, err := replaceVersions(&m, projectionVersions(m))
 	if err != nil {
 		t.Fatalf("replace unchanged catalog: %v", err)
 	}
 	if cmd != nil {
 		t.Fatal("unchanged replace returned a projection command")
 	}
-	if m.projectionGeneration != generation {
-		t.Fatalf("generation = %d, want %d", m.projectionGeneration, generation)
+	if !reflect.DeepEqual(projectionVersions(m), priorItems) {
+		t.Fatalf("unchanged replace altered available items: got %+v, want %+v", projectionVersions(m), priorItems)
+	}
+	if selected := selectedListVersion(m); selected != priorSelection {
+		t.Fatalf("unchanged replace selected %q, want %q", selected, priorSelection)
 	}
 }
 
@@ -374,7 +411,7 @@ func TestFallbackIndexAfterSelectedIdentityRemoval(t *testing.T) {
 		{Version: "1.21.0"},
 		{Version: "1.22.0"},
 	})
-	m.list.Select(0) // Select 1.20.0.
+	m.projection.selectAvailable(0) // Select 1.20.0.
 
 	// Remove the selected version from the catalog.
 	seedVersions(t, &m, []utils.GoVersion{
@@ -382,8 +419,8 @@ func TestFallbackIndexAfterSelectedIdentityRemoval(t *testing.T) {
 		{Version: "1.22.0"},
 	})
 
-	idx := m.list.Index()
-	availLen := len(m.catalog.projection().available)
+	idx := m.projection.availableModel().Index()
+	availLen := len(m.projection.projection().available)
 	if idx < 0 || idx >= availLen {
 		t.Fatalf("selection index %d out of range [0, %d) after selected identity removal", idx, availLen)
 	}
@@ -396,11 +433,11 @@ func TestFilteredSelectionRestoredAfterProjectionRefilter(t *testing.T) {
 		{Version: "1.21.0"},
 		{Version: "1.22.0"},
 	})
-	m.list.SetFilteringEnabled(true)
-	m.list.SetFilterText("1.2")
-	m.list.Select(1)
+	m.projection.setAvailableFilteringEnabled(true)
+	m.projection.setAvailableFilterText("1.2")
+	m.projection.selectAvailable(1)
 
-	cmd, err := m.replaceVersions([]utils.GoVersion{
+	cmd, err := replaceVersions(&m, []utils.GoVersion{
 		{Version: "1.22.0"},
 		{Version: "1.20.0"},
 		{Version: "1.21.0"},
@@ -411,18 +448,15 @@ func TestFilteredSelectionRestoredAfterProjectionRefilter(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected deferred refilter command")
 	}
-	msg, ok := cmd().(refilterSettledMsg)
+	msg, ok := cmd().(catalogProjectionRefilterMsg)
 	if !ok {
 		t.Fatalf("refilter command returned %T", cmd())
 	}
 	updated, _ := m.Update(msg)
 	got := updated.(Model)
 
-	if selected := got.selectedListVersion(); selected != "1.21.0" {
+	if selected := selectedListVersion(got); selected != "1.21.0" {
 		t.Fatalf("selected version = %q, want 1.21.0", selected)
-	}
-	if got.pendingListRestore.active {
-		t.Fatal("pending selection restore was not cleared")
 	}
 }
 
@@ -433,10 +467,10 @@ func TestStaleProjectionRefilterGenerationIsIgnored(t *testing.T) {
 		{Version: "1.21.0"},
 		{Version: "1.22.0"},
 	})
-	m.list.SetFilterText("1.2")
-	m.list.Select(1)
+	m.projection.setAvailableFilterText("1.2")
+	m.projection.selectAvailable(1)
 
-	staleCmd, err := m.replaceVersions([]utils.GoVersion{
+	staleCmd, err := replaceVersions(&m, []utils.GoVersion{
 		{Version: "1.22.0"},
 		{Version: "1.21.0"},
 		{Version: "1.20.0"},
@@ -444,7 +478,7 @@ func TestStaleProjectionRefilterGenerationIsIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first replace: %v", err)
 	}
-	currentCmd, err := m.replaceVersions([]utils.GoVersion{
+	currentCmd, err := replaceVersions(&m, []utils.GoVersion{
 		{Version: "1.20.0"},
 		{Version: "1.22.0"},
 		{Version: "1.21.0"},
@@ -452,24 +486,22 @@ func TestStaleProjectionRefilterGenerationIsIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second replace: %v", err)
 	}
-	currentGeneration := m.projectionGeneration
+	currentSelection := selectedListVersion(m)
+	currentItems := projectionVersions(m)
 
 	updated, _ := m.Update(staleCmd())
 	m = updated.(Model)
-	if m.projectionGeneration != currentGeneration {
-		t.Fatalf("generation = %d, want %d", m.projectionGeneration, currentGeneration)
+	if !reflect.DeepEqual(projectionVersions(m), currentItems) {
+		t.Fatalf("stale result changed current items: got %+v, want %+v", projectionVersions(m), currentItems)
 	}
-	if !m.pendingListRestore.active || m.pendingListRestore.generation != currentGeneration {
-		t.Fatal("stale result cleared the current pending restore")
+	if selected := selectedListVersion(m); selected != currentSelection {
+		t.Fatalf("stale result selected %q, want %q", selected, currentSelection)
 	}
 
 	updated, _ = m.Update(currentCmd())
 	m = updated.(Model)
-	if selected := m.selectedListVersion(); selected != "1.21.0" {
+	if selected := selectedListVersion(m); selected != "1.21.0" {
 		t.Fatalf("selected version = %q, want 1.21.0", selected)
-	}
-	if m.pendingListRestore.active {
-		t.Fatal("current refilter did not clear pending restore")
 	}
 }
 
@@ -480,9 +512,9 @@ func TestStaleProjectionRefilterTextIsIgnored(t *testing.T) {
 		{Version: "1.21.0"},
 		{Version: "1.30.0"},
 	})
-	m.list.SetFilterText("1.2")
+	m.projection.setAvailableFilterText("1.2")
 
-	cmd, err := m.replaceVersions([]utils.GoVersion{
+	cmd, err := replaceVersions(&m, []utils.GoVersion{
 		{Version: "1.20.0"},
 		{Version: "1.30.0"},
 		{Version: "1.31.0"},
@@ -490,14 +522,11 @@ func TestStaleProjectionRefilterTextIsIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replace filtered catalog: %v", err)
 	}
-	m.list.SetFilterText("1.3")
+	m.projection.setAvailableFilterText("1.3")
 
 	updated, _ := m.Update(cmd())
 	got := updated.(Model)
-	if got.pendingListRestore.active {
-		t.Fatal("stale filter-text result did not clear pending restore")
-	}
-	for _, item := range got.list.VisibleItems() {
+	for _, item := range got.projection.availableModel().VisibleItems() {
 		version := item.(styles.Item).Name
 		if version != "1.30.0" && version != "1.31.0" {
 			t.Fatalf("visible version = %q after stale filter result", version)
@@ -519,8 +548,8 @@ func TestMissingDeleteConfirmLookupNeverInvokesDeletion(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'Y'})
 	got := updated.(Model)
 
-	if got.Loading {
-		t.Fatal("expected Loading=false when delete target is missing from catalog")
+	if activity := got.projection.activityState(); activity.kind != catalogActivityIdle {
+		t.Fatalf("activity = %+v, want idle when delete target is missing", activity)
 	}
 	if cmd != nil {
 		t.Fatal("expected nil command when delete target is missing from catalog")

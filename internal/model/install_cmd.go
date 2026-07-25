@@ -24,16 +24,22 @@ const installTimeout = 30 * time.Minute
 // ((*Service).Install), and by fakes injected in tests.
 type installFunc func(context.Context, install.Request) (install.Result, error)
 
-// installSuccessMsg carries the whole install.Result for a completed
-// installation, including any non-fatal warnings the core surfaced.
-type installSuccessMsg install.Result
+// installSuccessMsg carries the operation ID and whole install.Result for a
+// completed installation, including any non-fatal warnings the core surfaced.
+type installSuccessMsg struct {
+	OperationID uint64
+	Version     string
+	Path        string
+	Warnings    []install.Warning
+}
 
 // installFailureMsg carries the requested version and the typed error
 // that terminated the installation (typically an *install.Error whose
 // Error() reports the failing stage).
 type installFailureMsg struct {
-	Version string
-	Err     error
+	OperationID uint64
+	Version     string
+	Err         error
 }
 
 // installVersionCmd maps a catalog GoVersion to an install.Request and
@@ -43,7 +49,7 @@ type installFailureMsg struct {
 // installFailureMsg (carrying the requested version and the typed
 // error). A model whose installer was never bound surfaces a failure
 // instead of panicking, which keeps bare test constructors safe.
-func (m Model) installVersionCmd(v utils.GoVersion) tea.Cmd {
+func (m Model) installVersionCmd(operationID uint64, v utils.GoVersion) tea.Cmd {
 	return func() tea.Msg {
 		req := install.Request{
 			Version:  v.Version,
@@ -53,15 +59,24 @@ func (m Model) installVersionCmd(v utils.GoVersion) tea.Cmd {
 			Size:     v.Size,
 		}
 		if m.installGo == nil {
-			return installFailureMsg{Version: req.Version, Err: errors.New("no installer configured")}
+			return installFailureMsg{
+				OperationID: operationID,
+				Version:     req.Version,
+				Err:         errors.New("no installer configured"),
+			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), installTimeout)
 		defer cancel()
 		result, err := m.installGo(ctx, req)
 		if err != nil {
-			return installFailureMsg{Version: req.Version, Err: err}
+			return installFailureMsg{OperationID: operationID, Version: req.Version, Err: err}
 		}
-		return installSuccessMsg(result)
+		return installSuccessMsg{
+			OperationID: operationID,
+			Version:     result.Version,
+			Path:        result.Path,
+			Warnings:    result.Warnings,
+		}
 	}
 }
 

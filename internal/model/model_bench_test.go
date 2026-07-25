@@ -52,15 +52,14 @@ func benchModel(b *testing.B) Model {
 	}
 
 	m := New("", "", config.DefaultSettings(), "", styles.NewTheme(config.ThemeCurrent))
-	if cmd, err := m.replaceVersions(versions); err != nil {
+	if cmd, err := replaceVersions(&m, versions); err != nil {
 		b.Fatalf("replaceVersions: %v", err)
 	} else {
 		_ = cmd
 	}
-	m.list.SetSize(80, 24)
+	m.projection.resize(80, 24)
 	m.Deps.Dependencies = depItems
 	m.Deps.Loaded = true
-	m.Loading = false
 	m.Width = 80
 	m.Height = 24
 	return m
@@ -102,14 +101,16 @@ func BenchmarkVersionCatalog_MutationAndSync(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		var err error
+		var outcome catalogProjectionOutcome
 		if i%2 == 0 {
-			_, _, err = m.markVersionInstalled(version, path)
+			op := m.projection.startMutation(catalogMutationInstall, version)
+			outcome = m.projection.completeInstall(op.id, version, path, nil)
 		} else {
-			_, _, err = m.markVersionDeleted(version)
+			op := m.projection.startMutation(catalogMutationDeletion, version)
+			outcome = m.projection.completeDeletion(op.id, version, nil)
 		}
-		if err != nil {
-			b.Fatal(err)
+		if outcome.err != nil {
+			b.Fatal(outcome.err)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
@@ -36,11 +37,58 @@ func testTheme() styles.Theme {
 // never mutate catalog slices or widget items directly.
 func seedVersions(t *testing.T, m *Model, versions []utils.GoVersion) {
 	t.Helper()
-	cmd, err := m.replaceVersions(versions)
-	if err != nil {
-		t.Fatalf("replaceVersions(%+v): %v", versions, err)
+	outcome := catalogProjectionOutcome{}
+	if m.initialLoad.ID != 0 && m.projection.operationPhase() == catalogOperationPhaseLoading {
+		outcome = m.projection.acceptLoad(m.initialLoad.ID, versions)
+		m.initialLoad = catalogLoadRequest{}
+	} else {
+		outcome = m.projection.replaceSnapshot(versions)
 	}
-	_ = cmd
+	if outcome.kind == catalogProjectionOutcomeRejected {
+		t.Fatalf("replaceSnapshot(%+v): %v", versions, outcome.err)
+	}
+}
+
+func replaceVersions(m *Model, versions []utils.GoVersion) (tea.Cmd, error) {
+	outcome := m.projection.replaceSnapshot(versions)
+	return outcome.cmd, outcome.err
+}
+
+func selectedListVersion(m Model) string {
+	selected := m.projection.selectedAvailableItem()
+	if selected == nil {
+		return ""
+	}
+	return selected.Name
+}
+
+func focusInstalled(m *Model) {
+	// The projection constructs the installed table focused. Keeping
+	// this helper documents that tests depend on that observable setup.
+	if !m.projection.installedModel().Focused() {
+		panic("installed projection is not focused")
+	}
+}
+
+func setInstalledCursor(m *Model, cursor int) {
+	for m.projection.installedModel().Cursor() < cursor {
+		m.projection.updateInstalled(tea.KeyPressMsg{Code: tea.KeyDown})
+	}
+	for m.projection.installedModel().Cursor() > cursor {
+		m.projection.updateInstalled(tea.KeyPressMsg{Code: tea.KeyUp})
+	}
+}
+
+func catalogRequestID(t *testing.T, cmd tea.Cmd) uint64 {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected catalog load command")
+	}
+	msg, ok := cmd().(catalogLoadFailedMsg)
+	if !ok {
+		t.Fatalf("catalog load command returned %T, want catalogLoadFailedMsg", msg)
+	}
+	return msg.RequestID
 }
 
 // assertVersionViewsConsistent verifies the postcondition that the
@@ -56,8 +104,8 @@ func seedVersions(t *testing.T, m *Model, versions []utils.GoVersion) {
 func assertVersionViewsConsistent(t *testing.T, m Model) {
 	t.Helper()
 
-	proj := m.catalog.projection()
-	items := m.list.Items()
+	proj := m.projection.projection()
+	items := m.projection.availableModel().Items()
 	if len(items) != len(proj.available) {
 		t.Fatalf("list length = %d, want %d (catalog projection)", len(items), len(proj.available))
 	}
@@ -76,7 +124,7 @@ func assertVersionViewsConsistent(t *testing.T, m Model) {
 		}
 		// Cross-check via lookup so the assertion does not rely on
 		// exposed records but still verifies semantic correctness.
-		v, found := m.catalog.lookup(got.Name)
+		v, found := m.projection.lookup(got.Name)
 		if !found {
 			t.Fatalf("list item %d Name %q not in catalog", i, got.Name)
 		}
@@ -88,7 +136,7 @@ func assertVersionViewsConsistent(t *testing.T, m Model) {
 		}
 	}
 
-	rows := m.installedTable.Rows()
+	rows := m.projection.installedModel().Rows()
 	if len(rows) != len(proj.installed) {
 		t.Fatalf("installed table rows = %d, want %d (catalog projection)", len(rows), len(proj.installed))
 	}
@@ -103,7 +151,7 @@ func assertVersionViewsConsistent(t *testing.T, m Model) {
 				t.Errorf("installed row %d column %d = %q, want %q", i, j, row[j], wantRow[j])
 			}
 		}
-		v, found := m.catalog.lookup(row[0])
+		v, found := m.projection.lookup(row[0])
 		if !found {
 			t.Fatalf("installed row %d Version %q not in catalog", i, row[0])
 		}
@@ -149,7 +197,6 @@ func newTestModel(t *testing.T) Model {
 		Path:      filepath.Join(home, ".govm", "versions", "go1.24.4"),
 	}})
 	m.Status.SetTab("Successfully installed Go 1.24.4", "success")
-	m.Loading = false
 	m.Layout = styles.LayoutWide
 	return m
 }

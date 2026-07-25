@@ -92,12 +92,12 @@ func TestWindowSizeMsgKeepsContentSizesPositive(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
 	got := updated.(Model)
 
-	if got.list.Width() <= 0 || got.list.Height() <= 0 {
-		t.Fatalf("expected positive list size, got %dx%d", got.list.Width(), got.list.Height())
+	if got.projection.availableModel().Width() <= 0 || got.projection.availableModel().Height() <= 0 {
+		t.Fatalf("expected positive list size, got %dx%d", got.projection.availableModel().Width(), got.projection.availableModel().Height())
 	}
 
-	if got.installedTable.Width() <= 0 || got.installedTable.Height() <= 0 {
-		t.Fatalf("expected positive table size, got %dx%d", got.installedTable.Width(), got.installedTable.Height())
+	if got.projection.installedModel().Width() <= 0 || got.projection.installedModel().Height() <= 0 {
+		t.Fatalf("expected positive table size, got %dx%d", got.projection.installedModel().Width(), got.projection.installedModel().Height())
 	}
 }
 
@@ -350,37 +350,56 @@ func newVersionCacheTestModel(t *testing.T) Model {
 // remain exact projections of the catalog afterwards.
 func TestVersionHandlersKeepCachesConsistent(t *testing.T) {
 	tests := []struct {
-		name string
-		msg  tea.Msg
+		name  string
+		apply func(*Model) tea.Msg
 	}{
 		{
-			name: "VersionsMsg replaces catalog",
-			msg: utils.VersionsMsg{
-				{Version: "1.25.0", Filename: "go1.25.0.linux-amd64.tar.gz", Installed: true, Active: true, Path: "/p/1.25"},
-				{Version: "1.27.0", Filename: "go1.27.0.linux-amd64.tar.gz"},
+			name: "catalogLoadedMsg replaces catalog",
+			apply: func(m *Model) tea.Msg {
+				load := m.projection.startLoad(catalogLoadPurposeRefresh)
+				return catalogLoadedMsg{
+					RequestID: load.loadRequest.ID,
+					Versions: []utils.GoVersion{
+						{Version: "1.25.0", Filename: "go1.25.0.linux-amd64.tar.gz", Installed: true, Active: true, Path: "/p/1.25"},
+						{Version: "1.27.0", Filename: "go1.27.0.linux-amd64.tar.gz"},
+					},
+				}
 			},
 		},
 		{
 			name: "installSuccessMsg marks installed",
-			msg:  installSuccessMsg{Version: "1.25.0", Path: "/new/1.25"},
+			apply: func(m *Model) tea.Msg {
+				op := m.projection.startMutation(catalogMutationInstall, "1.25.0")
+				return installSuccessMsg{OperationID: op.id, Version: "1.25.0", Path: "/new/1.25"}
+			},
 		},
 		{
 			name: "activationSuccessMsg changes active",
-			msg: activationSuccessMsg{
-				Result:     lifecycle.ActivationResult{Version: "1.26.0"},
-				ShimInPath: true,
+			apply: func(m *Model) tea.Msg {
+				op := m.projection.startMutation(catalogMutationActivation, "1.26.0")
+				return activationSuccessMsg{
+					OperationID: op.id,
+					Result:      lifecycle.ActivationResult{Version: "1.26.0"},
+					ShimInPath:  true,
+				}
 			},
 		},
 		{
 			name: "deletionSuccessMsg marks uninstalled",
-			msg:  deletionSuccessMsg(lifecycle.DeletionResult{Version: "1.24.4"}),
+			apply: func(m *Model) tea.Msg {
+				op := m.projection.startMutation(catalogMutationDeletion, "1.24.4")
+				return deletionSuccessMsg{
+					OperationID: op.id,
+					Result:      lifecycle.DeletionResult{Version: "1.24.4"},
+				}
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newVersionCacheTestModel(t)
-			updated, _ := m.Update(tt.msg)
+			updated, _ := m.Update(tt.apply(&m))
 			got := updated.(Model)
 			assertVersionViewsConsistent(t, got)
 		})

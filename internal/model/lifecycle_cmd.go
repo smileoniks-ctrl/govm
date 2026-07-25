@@ -13,45 +13,74 @@ type activateFunc func(context.Context, string) (lifecycle.ActivationResult, err
 type deleteFunc func(context.Context, string) (lifecycle.DeletionResult, error)
 
 type activationSuccessMsg struct {
-	Result     lifecycle.ActivationResult
-	ShimInPath bool
+	OperationID uint64
+	Result      lifecycle.ActivationResult
+	ShimInPath  bool
 }
 
-type deletionSuccessMsg lifecycle.DeletionResult
+type deletionSuccessMsg struct {
+	OperationID uint64
+	Result      lifecycle.DeletionResult
+}
 
 type lifecycleFailureMsg struct {
-	Operation string
-	Version   string
-	Err       error
+	OperationID uint64
+	Operation   string
+	Version     string
+	Err         error
 }
 
-func (m Model) activateVersionCmd(version string) tea.Cmd {
+func (m Model) activateVersionCmd(operationID uint64, version string) tea.Cmd {
 	return func() tea.Msg {
 		if m.activateGo == nil {
-			return lifecycleFailureMsg{Operation: "switch", Version: version, Err: errors.New("no lifecycle activator configured")}
+			return lifecycleFailureMsg{
+				OperationID: operationID,
+				Operation:   "switch",
+				Version:     version,
+				Err:         errors.New("no lifecycle activator configured"),
+			}
 		}
 		result, err := m.activateGo(context.Background(), version)
 		if err != nil {
-			return lifecycleFailureMsg{Operation: "switch", Version: version, Err: err}
+			return lifecycleFailureMsg{
+				OperationID: operationID,
+				Operation:   "switch",
+				Version:     version,
+				Err:         err,
+			}
 		}
 		shimInPath := false
 		if m.shimInPath != nil {
 			shimInPath = m.shimInPath()
 		}
-		return activationSuccessMsg{Result: result, ShimInPath: shimInPath}
+		return activationSuccessMsg{
+			OperationID: operationID,
+			Result:      result,
+			ShimInPath:  shimInPath,
+		}
 	}
 }
 
-func (m Model) deleteVersionCmd(version string) tea.Cmd {
+func (m Model) deleteVersionCmd(operationID uint64, version string) tea.Cmd {
 	return func() tea.Msg {
 		if m.deleteGo == nil {
-			return lifecycleFailureMsg{Operation: "delete", Version: version, Err: errors.New("no lifecycle deleter configured")}
+			return lifecycleFailureMsg{
+				OperationID: operationID,
+				Operation:   "delete",
+				Version:     version,
+				Err:         errors.New("no lifecycle deleter configured"),
+			}
 		}
 		result, err := m.deleteGo(context.Background(), version)
 		if err != nil {
-			return lifecycleFailureMsg{Operation: "delete", Version: version, Err: err}
+			return lifecycleFailureMsg{
+				OperationID: operationID,
+				Operation:   "delete",
+				Version:     version,
+				Err:         err,
+			}
 		}
-		return deletionSuccessMsg(result)
+		return deletionSuccessMsg{OperationID: operationID, Result: result}
 	}
 }
 
