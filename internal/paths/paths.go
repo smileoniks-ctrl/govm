@@ -23,6 +23,7 @@ const (
 	depsBackupDirName = "deps_backup"
 	activeVersionName = "active_version"
 	installLockName   = "install.lock"
+	transactionName   = "transaction.json"
 	settingsFileName  = "settings.json"
 	legacyGovmDirName = "govm"
 )
@@ -89,11 +90,28 @@ func (r *Resolver) DownloadsDir() (string, error) {
 
 // InstallationLockFile returns the cross-process installation lock path.
 func (r *Resolver) InstallationLockFile() (string, error) {
+	return r.StateMutationLockFile()
+}
+
+// StateMutationLockFile returns the cross-process lock path used to
+// serialize every mutation of govm's installed-version state. The
+// historical filename remains install.lock for compatibility.
+func (r *Resolver) StateMutationLockFile() (string, error) {
 	root, err := r.RootDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(root, installLockName), nil
+}
+
+// StateTransactionFile returns the durable in-progress state
+// transaction marker path.
+func (r *Resolver) StateTransactionFile() (string, error) {
+	root, err := r.RootDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, transactionName), nil
 }
 
 // ShimDir returns the directory that holds the shim scripts, e.g.

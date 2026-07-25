@@ -38,6 +38,8 @@ func TestResolverLayoutFromHome(t *testing.T) {
 		{"VersionsDir", r.VersionsDir, filepath.Join(home, ".govm", "versions")},
 		{"DownloadsDir", r.DownloadsDir, filepath.Join(home, ".govm", "downloads")},
 		{"InstallationLockFile", r.InstallationLockFile, filepath.Join(home, ".govm", "install.lock")},
+		{"StateMutationLockFile", r.StateMutationLockFile, filepath.Join(home, ".govm", "install.lock")},
+		{"StateTransactionFile", r.StateTransactionFile, filepath.Join(home, ".govm", "transaction.json")},
 		{"ShimDir", r.ShimDir, filepath.Join(home, ".govm", "shim")},
 		{"ActiveVersionFile", r.ActiveVersionFile, filepath.Join(home, ".govm", "active_version")},
 		{"SettingsFile", r.SettingsFile, filepath.Join(home, ".govm", "settings.json")},
@@ -110,6 +112,12 @@ func TestHomeDirErrorSurfaced(t *testing.T) {
 	}
 	if _, err := r.InstallationLockFile(); err == nil {
 		t.Fatal("expected error from InstallationLockFile when HomeDir fails")
+	}
+	if _, err := r.StateMutationLockFile(); err == nil {
+		t.Fatal("expected error from StateMutationLockFile when HomeDir fails")
+	}
+	if _, err := r.StateTransactionFile(); err == nil {
+		t.Fatal("expected error from StateTransactionFile when HomeDir fails")
 	}
 }
 

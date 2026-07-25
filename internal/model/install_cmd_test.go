@@ -272,8 +272,8 @@ func TestUnknownCompletionReconciliationPreservesWarnings(t *testing.T) {
 	if !m.reconcile.active {
 		t.Fatal("expected reconciliation active for unknown completion")
 	}
-	if len(m.reconcile.warnings) != 1 {
-		t.Fatalf("expected warnings copied into reconcile context, got %d", len(m.reconcile.warnings))
+	if len(m.reconcile.installWarnings) != 1 {
+		t.Fatalf("expected warnings copied into reconcile context, got %d", len(m.reconcile.installWarnings))
 	}
 
 	// 2. The reconciliation fetch returns a catalog that now includes

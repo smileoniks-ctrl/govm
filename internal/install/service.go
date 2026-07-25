@@ -21,13 +21,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/gofrs/flock"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"github.com/smileoniks-ctrl/govm/internal/state"
+	"github.com/smileoniks-ctrl/govm/internal/version"
 )
 
 const (
@@ -52,8 +53,6 @@ const (
 	// fileMode is the restrictive mode used for the download part file.
 	fileMode = 0o600
 )
-
-var versionRe = regexp.MustCompile(`^[0-9]+\.[0-9]+(?:(?:\.[0-9]+)|(?:beta|rc)[0-9]+)?$`)
 
 // httpDoer executes a single HTTP request below the redirect/policy
 // layer. Production wires an *http.Client whose CheckRedirect enforces
@@ -81,23 +80,79 @@ type remover func(path string) error
 // Service is the transactional Go toolchain installer.
 type Service struct {
 	resolver *paths.Resolver
+	state    *state.Coordinator
 	doer     httpDoer
 	extract  extractor
 	verify   commandRunner
 	rename   renamer
 	cleanup  remover
+
+	coordinatorOnce sync.Once
+	coordinatorErr  error
 }
 
 // NewService returns a production-configured Service.
 func NewService() *Service {
-	return &Service{
-		resolver: paths.New(),
+	resolver := paths.New()
+	return newService(resolver, state.NewCoordinator(resolver))
+}
+
+// NewServiceWithCoordinator returns a production-configured Service using the
+// supplied shared state coordinator. The coordinator must use the same
+// resolver as the service when a non-default filesystem root is required.
+func NewServiceWithCoordinator(coordinator *state.Coordinator) *Service {
+	resolver := paths.New()
+	return newService(resolver, coordinator)
+}
+
+// NewServiceWithResolverAndCoordinator returns a production-configured
+// Service with explicitly shared filesystem resolution and state coordination.
+func NewServiceWithResolverAndCoordinator(resolver *paths.Resolver, coordinator *state.Coordinator) *Service {
+	if resolver == nil {
+		resolver = paths.New()
+	}
+	return newService(resolver, coordinator)
+}
+
+func newService(resolver *paths.Resolver, coordinator *state.Coordinator) *Service {
+	if resolver == nil {
+		resolver = paths.New()
+	}
+	if coordinator == nil {
+		coordinator = state.NewCoordinator(resolver)
+	}
+	s := &Service{
+		resolver: resolver,
+		state:    coordinator,
 		doer:     newProductionHTTPClient(),
 		extract:  extractArchive,
 		verify:   defaultCommandRunner,
 		rename:   os.Rename,
 		cleanup:  os.RemoveAll,
 	}
+	s.coordinatorOnce.Do(func() {
+		s.coordinatorErr = coordinator.RegisterRecoveryHandler(state.OperationInstall, s.RecoveryHandler())
+	})
+	return s
+}
+
+// RecoveryHandler exposes the install-specific transaction recovery seam for
+// composition with a shared state coordinator.
+func (s *Service) RecoveryHandler() state.RecoveryHandler {
+	return installRecoveryHandler{service: s}
+}
+
+func (s *Service) ensureCoordinator() error {
+	s.coordinatorOnce.Do(func() {
+		if s.resolver == nil {
+			s.resolver = paths.New()
+		}
+		if s.state == nil {
+			s.state = state.NewCoordinator(s.resolver)
+		}
+		s.coordinatorErr = s.state.RegisterRecoveryHandler(state.OperationInstall, s.RecoveryHandler())
+	})
+	return s.coordinatorErr
 }
 
 // Install performs a transactional install of req.Version.
@@ -109,37 +164,20 @@ func (s *Service) Install(ctx context.Context, req Request) (Result, error) {
 	if err := validateRequest(req); err != nil {
 		return Result{}, &Error{Stage: StageValidate, Err: err}
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, &Error{Stage: StageValidate, Err: err}
+	}
+	if err := s.ensureCoordinator(); err != nil {
+		return Result{}, &Error{Stage: StageLock, Err: err}
 	}
 
 	root, err := s.resolver.RootDir()
 	if err != nil {
-		return Result{}, &Error{Stage: StageLock, Err: err}
+		return Result{}, &Error{Stage: StagePrepare, Err: err}
 	}
-	// The lock file lives under root, so root must exist before we try
-	// to acquire it. MkdirAll is idempotent and safe across processes.
-	if err := os.MkdirAll(root, dirMode); err != nil {
-		return Result{}, &Error{Stage: StageLock, Err: fmt.Errorf("create root directory: %w", err)}
-	}
-	lockPath, err := s.resolver.InstallationLockFile()
-	if err != nil {
-		return Result{}, &Error{Stage: StageLock, Err: err}
-	}
-	lock := flock.New(lockPath)
-	locked, err := lock.TryLock()
-	if err != nil {
-		return Result{}, &Error{Stage: StageLock, Err: fmt.Errorf("acquire install lock: %w", err)}
-	}
-	if !locked {
-		// Contention: another process (or goroutine) holds the lock.
-		// Fail fast rather than block.
-		return Result{}, &Error{Stage: StageLock, Err: errors.New("another installation is in progress")}
-	}
-	defer lock.Unlock()
-	// The lock file is intentionally never deleted; it persists for the
-	// lifetime of the govm root.
-
 	versionsDir, err := s.resolver.VersionsDir()
 	if err != nil {
 		return Result{}, &Error{Stage: StagePrepare, Err: err}
@@ -148,34 +186,44 @@ func (s *Service) Install(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, &Error{Stage: StagePrepare, Err: err}
 	}
-	for _, dir := range []string{versionsDir, downloadsDir} {
+	if !paths.IsDirectChild(root, versionsDir) || !paths.IsDirectChild(root, downloadsDir) {
+		return Result{}, &Error{Stage: StagePrepare, Err: errors.New("resolved install paths are outside the canonical root")}
+	}
+	for _, dir := range []string{root, versionsDir, downloadsDir} {
 		if err := os.MkdirAll(dir, dirMode); err != nil {
 			return Result{}, &Error{Stage: StagePrepare, Err: fmt.Errorf("create directory %q: %w", dir, err)}
 		}
+		if err := requireRealInstallDirectory(dir); err != nil {
+			return Result{}, &Error{Stage: StagePrepare, Err: err}
+		}
 	}
-	// Drop recognisable leftovers from previously crashed installs.
-	// Interrupted commit backups are preserved under recovery names.
-	orphanWarnings := cleanOrphans(ctx, versionsDir, downloadsDir)
 
 	stagingDir := filepath.Join(versionsDir, stagingPrefix+uniqueID())
 	if err := os.Mkdir(stagingDir, dirMode); err != nil {
 		return Result{}, &Error{Stage: StagePrepare, Err: fmt.Errorf("create staging directory: %w", err)}
 	}
 	partPath := filepath.Join(downloadsDir, partPrefix+uniqueID()+partSuffix)
+	finalDir := filepath.Join(versionsDir, "go"+req.Version)
+	finalInfo, finalStatErr := os.Lstat(finalDir)
+	finalExisted := finalStatErr == nil
+	if finalStatErr != nil && !errors.Is(finalStatErr, os.ErrNotExist) {
+		return Result{}, &Error{Stage: StagePrepare, Err: fmt.Errorf("inspect existing install: %w", finalStatErr)}
+	}
+	if finalExisted && (finalInfo.Mode()&os.ModeSymlink != 0 || !finalInfo.IsDir()) {
+		return Result{}, &Error{Stage: StagePrepare, Err: fmt.Errorf("existing install is not a real directory: %q", finalDir)}
+	}
 
-	res, err := s.install(ctx, req, versionsDir, stagingDir, partPath)
+	res, err := s.install(ctx, req, versionsDir, downloadsDir, stagingDir, partPath, finalExisted)
 	if err != nil {
 		joinFailureCleanup(partPath, stagingDir, &err)
 		return res, err
 	}
-	res.Warnings = append(orphanWarnings, res.Warnings...)
 	return res, nil
 }
 
-// install runs the post-lock pipeline: download, integrity, extract,
-// verify, commit. On success it also performs the non-fatal
-// post-commit cleanup.
-func (s *Service) install(ctx context.Context, req Request, versionsDir, stagingDir, partPath string) (Result, error) {
+// install performs preparation without the global mutation lock, then uses
+// the coordinator only for recovery, final revalidation, and commit.
+func (s *Service) install(ctx context.Context, req Request, versionsDir, downloadsDir, stagingDir, partPath string, finalExisted bool) (Result, error) {
 	var warnings []Warning
 
 	_, digest, err := s.download(ctx, req, partPath)
@@ -213,33 +261,324 @@ func (s *Service) install(ctx context.Context, req Request, versionsDir, staging
 	}
 
 	finalDir := filepath.Join(versionsDir, "go"+req.Version)
-	backupDir, commitErr := s.commit(stagingDir, finalDir)
-	if commitErr != nil {
-		var stageErr *Error
-		if errors.As(commitErr, &stageErr) {
-			// Already a fully formed stage error (e.g. a preserved
-			// recovery backup); surface it unchanged.
-			return Result{}, stageErr
-		}
-		return Result{}, &Error{Stage: StageCommit, Err: commitErr}
+	marker := state.Marker{
+		SchemaVersion: state.SchemaVersion,
+		Operation:     state.OperationInstall,
+		Phase:         "prepared",
+		Version:       req.Version,
+		Artifacts: map[string]string{
+			"staging":  filepath.Base(stagingDir),
+			"download": filepath.Base(partPath),
+			"target":   filepath.Base(finalDir),
+		},
 	}
 
-	// Post-commit cleanup is best-effort: failures are surfaced as
-	// warnings rather than failing an otherwise successful install.
-	var cleanupErrs []error
-	for _, p := range []string{backupDir, stagingDir, partPath} {
-		if p == "" {
-			continue
+	var committedWarnings []Warning
+	stateResult, mutateErr := s.state.Mutate(ctx, func(ctx context.Context, store *state.MarkerStore) error {
+		if err := requireRealInstallDirectory(versionsDir); err != nil {
+			return &Error{Stage: StageCommit, Err: err}
 		}
-		if rmErr := s.cleanup(p); rmErr != nil {
-			cleanupErrs = append(cleanupErrs, rmErr)
+		if err := requireRealInstallDirectory(downloadsDir); err != nil {
+			return &Error{Stage: StageCommit, Err: err}
 		}
-	}
-	if len(cleanupErrs) > 0 {
-		warnings = append(warnings, Warning{Kind: WarningCleanup, Err: errors.Join(cleanupErrs...)})
-	}
+		orphanWarnings := cleanOrphans(ctx, versionsDir, downloadsDir, map[string]struct{}{
+			filepath.Base(stagingDir): {},
+			filepath.Base(partPath):   {},
+		})
+		committedWarnings = append(committedWarnings, orphanWarnings...)
+		if err := ctx.Err(); err != nil {
+			return &Error{Stage: StageCommit, Err: err}
+		}
+		if err := validatePreparedToolchain(stagingDir); err != nil {
+			return &Error{Stage: StageCommit, Err: fmt.Errorf("prepared toolchain is no longer available: %w", err)}
+		}
+		if !finalExisted {
+			if _, err := os.Lstat(finalDir); err == nil {
+				// Another installer won the race while this request was
+				// preparing. Keep its complete installation.
+				if err := validateInstalledToolchain(finalDir); err != nil {
+					return &Error{Stage: StageCommit, Err: fmt.Errorf("revalidate winning install: %w", err)}
+				}
+				var cleanupErrs []error
+				for _, path := range []string{stagingDir, partPath} {
+					if cleanupErr := s.cleanup(path); cleanupErr != nil {
+						cleanupErrs = append(cleanupErrs, cleanupErr)
+					}
+				}
+				if len(cleanupErrs) > 0 {
+					committedWarnings = append(committedWarnings, Warning{
+						Kind: WarningCleanup,
+						Err:  errors.Join(cleanupErrs...),
+					})
+				}
+				return nil
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return &Error{Stage: StageCommit, Err: fmt.Errorf("revalidate target: %w", err)}
+			}
+		}
 
+		marker.Phase = "committing"
+		backupDir := ""
+		if _, err := os.Lstat(finalDir); err == nil {
+			if err := validateInstalledToolchain(finalDir); err != nil {
+				return &Error{Stage: StageCommit, Err: fmt.Errorf("revalidate target: %w", err)}
+			}
+			backupDir = filepath.Join(versionsDir, backupPrefix+uniqueID())
+			marker.Artifacts["backup"] = filepath.Base(backupDir)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return &Error{Stage: StageCommit, Err: fmt.Errorf("revalidate target: %w", err)}
+		}
+		if err := store.Write(marker); err != nil {
+			return &Error{Stage: StageCommit, Err: err}
+		}
+		backupDir, commitErr := s.commitWithBackup(stagingDir, finalDir, backupDir)
+		if commitErr != nil {
+			var stageErr *Error
+			if errors.As(commitErr, &stageErr) {
+				return stageErr
+			}
+			return &Error{Stage: StageCommit, Err: commitErr}
+		}
+		if err := syncInstallDirectory(versionsDir); err != nil {
+			committedWarnings = append(committedWarnings, Warning{Kind: WarningCleanup, Err: err})
+			return nil
+		}
+
+		var cleanupErrs []error
+		for _, p := range []string{backupDir, stagingDir, partPath} {
+			if p != "" {
+				if rmErr := s.cleanup(p); rmErr != nil {
+					cleanupErrs = append(cleanupErrs, rmErr)
+				}
+			}
+		}
+		if len(cleanupErrs) > 0 {
+			committedWarnings = append(committedWarnings, Warning{Kind: WarningCleanup, Err: errors.Join(cleanupErrs...)})
+			return nil
+		}
+		if err := syncInstallDirectory(versionsDir); err != nil {
+			committedWarnings = append(committedWarnings, Warning{Kind: WarningCleanup, Err: err})
+			return nil
+		}
+		if err := store.Delete(); err != nil {
+			committedWarnings = append(committedWarnings, Warning{Kind: WarningCleanup, Err: err})
+		}
+		return nil
+	})
+	if mutateErr != nil {
+		return Result{}, installCoordinatorError(mutateErr)
+	}
+	for _, warning := range stateResult.RecoveryWarnings {
+		warnings = append(warnings, Warning{Kind: WarningCleanup, Err: errors.New(warning.Error())})
+	}
+	warnings = append(warnings, committedWarnings...)
 	return Result{Version: req.Version, Path: finalDir, Warnings: warnings}, nil
+}
+
+type installRecoveryHandler struct {
+	service *Service
+}
+
+func (h installRecoveryHandler) Recover(ctx context.Context, marker state.Marker) (state.RecoveryResult, error) {
+	s := h.service
+	if err := validateInstallMarker(marker); err != nil {
+		return state.RecoveryResult{}, err
+	}
+	versionsDir, err := s.resolver.VersionsDir()
+	if err != nil {
+		return state.RecoveryResult{}, err
+	}
+	downloadsDir, err := s.resolver.DownloadsDir()
+	if err != nil {
+		return state.RecoveryResult{}, err
+	}
+	pathFor := func(dir, name string) string {
+		if name == "" {
+			return ""
+		}
+		return filepath.Join(dir, name)
+	}
+	staging := pathFor(versionsDir, marker.Artifacts["staging"])
+	download := pathFor(downloadsDir, marker.Artifacts["download"])
+	target := pathFor(versionsDir, marker.Artifacts["target"])
+	backup := ""
+	if name := marker.Artifacts["backup"]; name != "" {
+		backup = pathFor(versionsDir, name)
+	}
+	remove := func(path string) error {
+		if path == "" {
+			return nil
+		}
+		if err := s.cleanup(path); err != nil {
+			return err
+		}
+		return nil
+	}
+	switch marker.Phase {
+	case "prepared":
+		if err := ctx.Err(); err != nil {
+			return state.RecoveryResult{}, err
+		}
+		for _, path := range []string{staging, download} {
+			if removeErr := remove(path); removeErr != nil {
+				return state.RecoveryResult{}, removeErr
+			}
+		}
+	case "committing":
+		targetPresent, targetErr := realInstallDirectoryPresent(target)
+		if targetErr != nil {
+			return state.RecoveryResult{}, fmt.Errorf("inspect install target: %w", targetErr)
+		}
+		backupPresent := false
+		if backup != "" {
+			backupPresent, err = realInstallDirectoryPresent(backup)
+			if err != nil {
+				return state.RecoveryResult{}, fmt.Errorf("inspect install backup: %w", err)
+			}
+		}
+		switch {
+		case !targetPresent && backupPresent:
+			if err := os.Rename(backup, target); err != nil {
+				return state.RecoveryResult{}, fmt.Errorf("restore install backup: %w", err)
+			}
+		case !targetPresent && !backupPresent:
+			return state.RecoveryResult{}, errors.New("install marker has neither target nor backup")
+		case targetPresent && backupPresent:
+			// The new target committed; backup cleanup remains.
+		case targetPresent:
+			// Either a first install committed or the old target remained.
+		}
+		for _, path := range []string{staging, download, backup} {
+			if err := remove(path); err != nil {
+				return state.RecoveryResult{Warnings: []state.Warning{{
+					Message: "install recovery cleanup failed",
+					Err:     err,
+				}}}, nil
+			}
+		}
+	default:
+		return state.RecoveryResult{}, fmt.Errorf("unsupported install recovery phase %q", marker.Phase)
+	}
+	storeRoot, err := s.resolver.RootDir()
+	if err != nil {
+		return state.RecoveryResult{}, err
+	}
+	if err := state.NewMarkerStore(storeRoot).Delete(); err != nil {
+		return state.RecoveryResult{}, err
+	}
+	return state.RecoveryResult{}, nil
+}
+
+func realInstallDirectoryPresent(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false, fmt.Errorf("path is not a real directory: %q", path)
+	}
+	return true, nil
+}
+
+func validateInstallMarker(marker state.Marker) error {
+	switch marker.Phase {
+	case "prepared":
+		if len(marker.Artifacts) != 3 {
+			return fmt.Errorf("prepared install marker has unexpected artifacts")
+		}
+	case "committing":
+		if len(marker.Artifacts) != 3 && len(marker.Artifacts) != 4 {
+			return fmt.Errorf("committing install marker has unexpected artifacts")
+		}
+	default:
+		return fmt.Errorf("unsupported install recovery phase %q", marker.Phase)
+	}
+	if staging := marker.Artifacts["staging"]; !strings.HasPrefix(staging, stagingPrefix) || len(staging) == len(stagingPrefix) {
+		return fmt.Errorf("missing or unexpected install staging artifact %q", staging)
+	}
+	if download := marker.Artifacts["download"]; !strings.HasPrefix(download, partPrefix) ||
+		!strings.HasSuffix(download, partSuffix) ||
+		len(download) == len(partPrefix)+len(partSuffix) {
+		return fmt.Errorf("missing or unexpected install download artifact %q", download)
+	}
+	if target := marker.Artifacts["target"]; target != "go"+marker.Version {
+		return fmt.Errorf("unexpected install target artifact %q", target)
+	}
+	backup, hasBackup := marker.Artifacts["backup"]
+	if marker.Phase == "prepared" && hasBackup {
+		return fmt.Errorf("prepared install marker unexpectedly contains backup %q", backup)
+	}
+	if hasBackup && (!strings.HasPrefix(backup, backupPrefix) || len(backup) == len(backupPrefix)) {
+		return fmt.Errorf("unexpected install backup artifact %q", backup)
+	}
+	return nil
+}
+
+func requireRealInstallDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect install directory %q: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("install path is not a real directory: %q", path)
+	}
+	return nil
+}
+
+func validatePreparedToolchain(stagingDir string) error {
+	if err := requireRealInstallDirectory(stagingDir); err != nil {
+		return err
+	}
+	return validateInstalledToolchain(filepath.Join(stagingDir, "go"))
+}
+
+func validateInstalledToolchain(toolchainDir string) error {
+	if err := requireRealInstallDirectory(toolchainDir); err != nil {
+		return err
+	}
+	binDir := filepath.Join(toolchainDir, "bin")
+	if err := requireRealInstallDirectory(binDir); err != nil {
+		return err
+	}
+	binaryPath := filepath.Join(binDir, binaryName())
+	info, err := os.Lstat(binaryPath)
+	if err != nil {
+		return fmt.Errorf("inspect Go binary %q: %w", binaryPath, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("Go binary is not a regular file: %q", binaryPath)
+	}
+	return nil
+}
+
+func syncInstallDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open install directory for sync: %w", err)
+	}
+	defer dir.Close()
+	if err := dir.Sync(); err != nil {
+		return fmt.Errorf("sync install directory: %w", err)
+	}
+	return nil
+}
+
+func installCoordinatorError(err error) error {
+	var busy *state.BusyError
+	if errors.As(err, &busy) {
+		return &Error{Stage: StageLock, Err: errors.New("another installation is in progress")}
+	}
+	var stageErr *Error
+	if errors.As(err, &stageErr) {
+		return stageErr
+	}
+	return &Error{Stage: StageCommit, Err: err}
 }
 
 // download streams the archive into partPath exactly once. It returns
@@ -294,9 +633,17 @@ func (s *Service) download(ctx context.Context, req Request, partPath string) (i
 // backup is preserved under a .recovery-* path and the returned *Error
 // carries RecoveryPath.
 func (s *Service) commit(stagingDir, finalDir string) (backupDir string, err error) {
+	return s.commitWithBackup(stagingDir, finalDir, "")
+}
+
+func (s *Service) commitWithBackup(stagingDir, finalDir, backupDir string) (string, error) {
 	goDir := filepath.Join(stagingDir, "go")
-	if _, statErr := os.Stat(finalDir); statErr == nil {
-		backupDir = filepath.Join(filepath.Dir(finalDir), backupPrefix+uniqueID())
+	if backupDir == "" {
+		if _, statErr := os.Stat(finalDir); statErr == nil {
+			backupDir = filepath.Join(filepath.Dir(finalDir), backupPrefix+uniqueID())
+		}
+	}
+	if backupDir != "" {
 		if mvErr := s.rename(finalDir, backupDir); mvErr != nil {
 			return "", fmt.Errorf("back up existing install: %w", mvErr)
 		}
@@ -398,7 +745,7 @@ func validateRequest(req Request) error {
 	if req.Version == "" {
 		return errors.New("version is required")
 	}
-	if !versionRe.MatchString(req.Version) {
+	if err := version.Validate(req.Version); err != nil {
 		return fmt.Errorf("malformed version %q", req.Version)
 	}
 	expectedExt := "tar.gz"
@@ -463,7 +810,7 @@ func validateURL(raw, filename string) error {
 // cleanOrphans removes recognisable in-progress artefacts left by
 // previously crashed installs and preserves interrupted commit backups
 // under recovery names. Recovery backups are never removed.
-func cleanOrphans(ctx context.Context, versionsDir, downloadsDir string) []Warning {
+func cleanOrphans(ctx context.Context, versionsDir, downloadsDir string, owned map[string]struct{}) []Warning {
 	var warnings []Warning
 	if err := ctx.Err(); err != nil {
 		return warnings
@@ -477,6 +824,9 @@ func cleanOrphans(ctx context.Context, versionsDir, downloadsDir string) []Warni
 			}
 			switch {
 			case strings.HasPrefix(name, stagingPrefix):
+				if _, ok := owned[name]; ok {
+					continue
+				}
 				if err := os.RemoveAll(full); err != nil {
 					warnings = append(warnings, Warning{
 						Kind: WarningCleanup,
@@ -507,6 +857,9 @@ func cleanOrphans(ctx context.Context, versionsDir, downloadsDir string) []Warni
 			}
 			full := filepath.Join(downloadsDir, name)
 			if !paths.IsDirectChild(downloadsDir, full) {
+				continue
+			}
+			if _, ok := owned[name]; ok {
 				continue
 			}
 			if err := os.RemoveAll(full); err != nil {

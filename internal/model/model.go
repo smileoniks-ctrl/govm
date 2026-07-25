@@ -6,7 +6,6 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
-	"github.com/smileoniks-ctrl/govm/internal/install"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -79,12 +78,10 @@ type Model struct {
 	Deps     DepsState
 	Settings SettingsState
 
-	// installGo is the injected install function, bound to an
-	// install.Service method in New. It is the seam between the TUI
-	// and the install core: installVersionCmd calls it with a
-	// deadline-bound context. Tests override it with a fake to assert
-	// request mapping and result handling without touching disk.
-	installGo installFunc
+	installGo  installFunc
+	activateGo activateFunc
+	deleteGo   deleteFunc
+	shimInPath func() bool
 }
 
 // Theme returns the Model's current immutable theme snapshot. It is
@@ -143,11 +140,25 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 		Deps:            NewDepsState(moduleDir, depTable),
 		Settings:        NewSettingsState(settingsPath, settings),
 		ShimPathWarning: shimPathWarning,
-		// Bind the install core through the value-type function field so
-		// the TUI never depends on the concrete install.Service type at
-		// call sites. install.NewService is provided by the core package.
-		installGo: install.NewService().Install,
 	}
+}
+
+// VersionOperations contains the narrow process-composed seams used by the
+// TUI for installed-version mutations and PATH presentation.
+type VersionOperations struct {
+	Install    installFunc
+	Activate   activateFunc
+	Delete     deleteFunc
+	ShimInPath func() bool
+}
+
+// BindVersionOperations returns a copy of m bound to process-wide services.
+func (m Model) BindVersionOperations(operations VersionOperations) Model {
+	m.installGo = operations.Install
+	m.activateGo = operations.Activate
+	m.deleteGo = operations.Delete
+	m.shimInPath = operations.ShimInPath
+	return m
 }
 
 func (m Model) Init() tea.Cmd {

@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
+	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -364,12 +365,15 @@ func TestVersionHandlersKeepCachesConsistent(t *testing.T) {
 			msg:  installSuccessMsg{Version: "1.25.0", Path: "/new/1.25"},
 		},
 		{
-			name: "SwitchCompletedMsg changes active",
-			msg:  utils.SwitchCompletedMsg{Version: "1.26.0", ShimInPath: true},
+			name: "activationSuccessMsg changes active",
+			msg: activationSuccessMsg{
+				Result:     lifecycle.ActivationResult{Version: "1.26.0"},
+				ShimInPath: true,
+			},
 		},
 		{
-			name: "DeleteCompleteMsg marks uninstalled",
-			msg:  utils.DeleteCompleteMsg{Version: "1.24.4"},
+			name: "deletionSuccessMsg marks uninstalled",
+			msg:  deletionSuccessMsg(lifecycle.DeletionResult{Version: "1.24.4"}),
 		},
 	}
 

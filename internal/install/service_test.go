@@ -18,6 +18,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"github.com/smileoniks-ctrl/govm/internal/state"
 )
 
 // --- test doubles -----------------------------------------------------------
@@ -598,6 +599,89 @@ func TestInstall_CleanupWarningAfterCommit(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected cleanup warning, got %v", res.Warnings)
+	}
+}
+
+func TestInstall_PostcommitCleanupFailurePreservesMarker(t *testing.T) {
+	s, tmp := newTestService(t, "1.22.0")
+	cleanupErr := errors.New("cleanup boom")
+	s.cleanup = func(path string) error {
+		if strings.HasPrefix(filepath.Base(path), partPrefix) {
+			return cleanupErr
+		}
+		return os.RemoveAll(path)
+	}
+
+	res, err := s.Install(context.Background(), makeRequest("1.22.0"))
+	must(t, err)
+	if len(res.Warnings) == 0 {
+		t.Fatal("Install() warnings are empty")
+	}
+	marker, present, err := state.NewMarkerStore(filepath.Join(tmp, ".govm")).Read()
+	if err != nil || !present {
+		t.Fatalf("preserved marker = %#v, present %t, error %v", marker, present, err)
+	}
+	if marker.Operation != state.OperationInstall || marker.Phase != "committing" {
+		t.Fatalf("preserved marker = %#v", marker)
+	}
+}
+
+func TestInstallRecoveryRejectsMarkerPathRoleMismatch(t *testing.T) {
+	s, tmp := newTestService(t, "1.22.0")
+	root := filepath.Join(tmp, ".govm")
+	must(t, os.MkdirAll(root, 0o700))
+	marker := state.Marker{
+		SchemaVersion: state.SchemaVersion,
+		Operation:     state.OperationInstall,
+		Phase:         "prepared",
+		Version:       "1.22.0",
+		Artifacts: map[string]string{
+			"staging":  "go1.22.0",
+			"download": ".govm-install-test.part",
+			"target":   ".install-victim",
+		},
+	}
+	victim := filepath.Join(versionsDirFor(tmp), ".install-victim")
+	must(t, os.MkdirAll(victim, 0o700))
+
+	if _, err := s.RecoveryHandler().Recover(t.Context(), marker); err == nil {
+		t.Fatal("Recover() error = nil for role-mismatched marker")
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("victim changed by invalid recovery marker: %v", err)
+	}
+}
+
+func TestInstallRejectsSymlinkVersionsDirectory(t *testing.T) {
+	s, tmp := newTestService(t, "1.22.0")
+	root := filepath.Join(tmp, ".govm")
+	must(t, os.MkdirAll(root, 0o700))
+	outside := t.TempDir()
+	must(t, os.Symlink(outside, filepath.Join(root, "versions")))
+
+	_, err := s.Install(t.Context(), makeRequest("1.22.0"))
+	assertStage(t, err, StagePrepare)
+}
+
+func TestInstallRejectsSymlinkPreparedBinaryBeforeCommit(t *testing.T) {
+	s, tmp := newTestService(t, "1.22.0")
+	outside := filepath.Join(t.TempDir(), "go")
+	must(t, os.WriteFile(outside, []byte("outside"), 0o700))
+	s.extract = func(_ context.Context, _ string, destination string) error {
+		binDir := filepath.Join(destination, "go", "bin")
+		if err := os.MkdirAll(binDir, 0o700); err != nil {
+			return err
+		}
+		return os.Symlink(outside, filepath.Join(binDir, binaryName()))
+	}
+	s.verify = func(context.Context, string) ([]byte, error) {
+		return versionOutput("1.22.0"), nil
+	}
+
+	_, err := s.Install(t.Context(), makeRequest("1.22.0"))
+	assertStage(t, err, StageCommit)
+	if _, statErr := os.Stat(filepath.Join(versionsDirFor(tmp), "go1.22.0")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unsafe toolchain committed: %v", statErr)
 	}
 }
 

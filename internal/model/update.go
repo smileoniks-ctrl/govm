@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
+	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -142,11 +143,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case installFailureMsg:
 		return m.handleInstallFailure(msg)
 
-	case utils.SwitchCompletedMsg:
-		return m.handleSwitchCompleted(msg)
+	case activationSuccessMsg:
+		return m.handleActivationSuccess(msg)
 
-	case utils.DeleteCompleteMsg:
-		return m.handleDeleteComplete(msg)
+	case deletionSuccessMsg:
+		return m.handleDeletionSuccess(msg)
+
+	case lifecycleFailureMsg:
+		m.Loading = false
+		m.reconcile = reconcileContext{}
+		m.Status.SetGlobal(fmt.Sprintf("Failed to %s Go %s: %v", msg.Operation, msg.Version, msg.Err), "error")
+		return m, nil
 	}
 
 	newListModel, cmd := m.list.Update(msg)
@@ -238,10 +245,10 @@ func (m Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd) 
 	if err != nil {
 		m.Loading = true
 		m.reconcile = reconcileContext{
-			active:    true,
-			operation: reconcileInstall,
-			version:   msg.Version,
-			warnings:  msg.Warnings,
+			active:          true,
+			operation:       reconcileInstall,
+			version:         msg.Version,
+			installWarnings: msg.Warnings,
 		}
 		m.Status.SetGlobal(fmt.Sprintf("Installed Go %s; verifying catalog...", msg.Version), "warning")
 		return m, tea.Batch(cmd, utils.FetchGoVersions)
@@ -263,37 +270,57 @@ func (m Model) handleInstallFailure(msg installFailureMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-// handleSwitchCompleted activates the version via the catalog, or
+// handleActivationSuccess activates the version via the catalog, or
 // reconciles on a catalog error. The success status stays tab-scoped
 // to mirror the direct completion path.
-func (m Model) handleSwitchCompleted(msg utils.SwitchCompletedMsg) (tea.Model, tea.Cmd) {
-	_, cmd, err := m.activateVersion(msg.Version)
+func (m Model) handleActivationSuccess(msg activationSuccessMsg) (tea.Model, tea.Cmd) {
+	_, cmd, err := m.activateVersion(msg.Result.Version)
 	if err != nil {
 		m.Loading = true
-		m.reconcile = reconcileContext{active: true, operation: reconcileSwitch, version: msg.Version, shimInPath: msg.ShimInPath}
-		m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s; verifying catalog...", msg.Version), "warning")
+		m.reconcile = reconcileContext{
+			active:            true,
+			operation:         reconcileSwitch,
+			version:           msg.Result.Version,
+			shimInPath:        msg.ShimInPath,
+			lifecycleWarnings: msg.Result.Warnings,
+		}
+		m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s; verifying catalog...", msg.Result.Version), "warning")
 		return m, tea.Batch(cmd, utils.FetchGoVersions)
 	}
 	m.Loading = false
+	if len(msg.Result.Warnings) > 0 {
+		m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s with warnings: %s", msg.Result.Version, joinLifecycleWarnings(msg.Result.Warnings)), "warning")
+		return m, cmd
+	}
 	if msg.ShimInPath {
-		m.Status.SetTab(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", msg.Version), "success")
+		m.Status.SetTab(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", msg.Result.Version), "success")
 	} else {
-		m.Status.SetTab(fmt.Sprintf("Switched to Go %s!\n\n%s", msg.Version, utils.GetShimPathInstructions()), "success")
+		m.Status.SetTab(fmt.Sprintf("Switched to Go %s!\n\n%s", msg.Result.Version, utils.GetShimPathInstructions()), "success")
 	}
 	return m, cmd
 }
 
-// handleDeleteComplete marks the version deleted via the catalog, or
+// handleDeletionSuccess marks the version deleted via the catalog, or
 // reconciles on a catalog error.
-func (m Model) handleDeleteComplete(msg utils.DeleteCompleteMsg) (tea.Model, tea.Cmd) {
-	_, cmd, err := m.markVersionDeleted(msg.Version)
+func (m Model) handleDeletionSuccess(msg deletionSuccessMsg) (tea.Model, tea.Cmd) {
+	result := lifecycle.DeletionResult(msg)
+	_, cmd, err := m.markVersionDeleted(result.Version)
 	if err != nil {
 		m.Loading = true
-		m.reconcile = reconcileContext{active: true, operation: reconcileDelete, version: msg.Version}
-		m.Status.SetGlobal(fmt.Sprintf("Deleted Go %s; verifying catalog...", msg.Version), "warning")
+		m.reconcile = reconcileContext{
+			active:            true,
+			operation:         reconcileDelete,
+			version:           result.Version,
+			lifecycleWarnings: result.Warnings,
+		}
+		m.Status.SetGlobal(fmt.Sprintf("Deleted Go %s; verifying catalog...", result.Version), "warning")
 		return m, tea.Batch(cmd, utils.FetchGoVersions)
 	}
 	m.Loading = false
-	m.Status.SetGlobal(fmt.Sprintf("Successfully deleted Go %s", msg.Version), "success")
+	if len(result.Warnings) > 0 {
+		m.Status.SetGlobal(fmt.Sprintf("Deleted Go %s with warnings: %s", result.Version, joinLifecycleWarnings(result.Warnings)), "warning")
+		return m, cmd
+	}
+	m.Status.SetGlobal(fmt.Sprintf("Successfully deleted Go %s", result.Version), "success")
 	return m, cmd
 }

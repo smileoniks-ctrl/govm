@@ -21,6 +21,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -175,7 +176,10 @@ func TestReconciliationConfirmsPendingCompletion(t *testing.T) {
 
 func TestSwitchReconciliationConfirmsActiveVersion(t *testing.T) {
 	m := newVersionCacheTestModel(t)
-	updated, _ := m.Update(utils.SwitchCompletedMsg{Version: "1.30.0", ShimInPath: true})
+	updated, _ := m.Update(activationSuccessMsg{
+		Result:     lifecycle.ActivationResult{Version: "1.30.0"},
+		ShimInPath: true,
+	})
 	m = updated.(Model)
 
 	fresh := projectionVersions(m)
@@ -202,7 +206,7 @@ func TestSwitchReconciliationConfirmsActiveVersion(t *testing.T) {
 
 func TestDeleteReconciliationAcceptsAbsentVersion(t *testing.T) {
 	m := newVersionCacheTestModel(t)
-	updated, _ := m.Update(utils.DeleteCompleteMsg{Version: "1.30.0"})
+	updated, _ := m.Update(deletionSuccessMsg(lifecycle.DeletionResult{Version: "1.30.0"}))
 	m = updated.(Model)
 
 	updated, _ = m.Update(projectionVersions(m))
@@ -505,7 +509,7 @@ func TestStaleProjectionRefilterTextIsIgnored(t *testing.T) {
 // the user presses Y to confirm a delete whose target version is no
 // longer in the catalog, the handler must NOT enter the Loading state
 // and must NOT issue a deletion command. The handler must short-circuit
-// via catalog lookup before dispatching utils.DeleteVersion.
+// via catalog lookup before dispatching the delete operation.
 func TestMissingDeleteConfirmLookupNeverInvokesDeletion(t *testing.T) {
 	m := newTestModel(t)
 	m.CurrentTab = AvailableTab

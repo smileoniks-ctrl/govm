@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -58,7 +59,10 @@ func TestTabSwitchClearsSwitchedToGoStatus(t *testing.T) {
 	})
 	// Simulate the switch completing with the shim already on PATH,
 	// which is the branch that produces "Switched to Go X! Run ...".
-	updated, _ := m.Update(utils.SwitchCompletedMsg{Version: "1.26.5", ShimInPath: true})
+	updated, _ := m.Update(activationSuccessMsg{
+		Result:     lifecycle.ActivationResult{Version: "1.26.5"},
+		ShimInPath: true,
+	})
 	m = updated.(Model)
 
 	if got, want := m.Status.Text(), "Switched to Go 1.26.5! Run 'go version' to verify."; got != want {

@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/install"
+	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -29,11 +30,12 @@ const (
 // so they survive the reconciliation fetch and surface in the final
 // status.
 type reconcileContext struct {
-	active     bool
-	operation  reconcileOperation
-	version    string
-	shimInPath bool
-	warnings   []install.Warning
+	active            bool
+	operation         reconcileOperation
+	version           string
+	shimInPath        bool
+	installWarnings   []install.Warning
+	lifecycleWarnings []lifecycle.Warning
 }
 
 // pendingListRestore captures the Available-list selection that must be
@@ -286,15 +288,23 @@ func (m *Model) applyReconciliationSuccess(rc reconcileContext) {
 	m.Loading = false
 	switch rc.operation {
 	case reconcileInstall:
-		text, kind := installSuccessStatus(rc.version, rc.warnings)
+		text, kind := installSuccessStatus(rc.version, rc.installWarnings)
 		m.Status.SetGlobal(text, kind)
 	case reconcileSwitch:
+		if len(rc.lifecycleWarnings) > 0 {
+			m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s with warnings: %s", rc.version, joinLifecycleWarnings(rc.lifecycleWarnings)), "warning")
+			return
+		}
 		if rc.shimInPath {
 			m.Status.SetTab(fmt.Sprintf("Switched to Go %s! Run 'go version' to verify.", rc.version), "success")
 		} else {
 			m.Status.SetTab(fmt.Sprintf("Switched to Go %s!\n\n%s", rc.version, utils.GetShimPathInstructions()), "success")
 		}
 	case reconcileDelete:
+		if len(rc.lifecycleWarnings) > 0 {
+			m.Status.SetGlobal(fmt.Sprintf("Deleted Go %s with warnings: %s", rc.version, joinLifecycleWarnings(rc.lifecycleWarnings)), "warning")
+			return
+		}
 		m.Status.SetGlobal(fmt.Sprintf("Successfully deleted Go %s", rc.version), "success")
 	}
 }

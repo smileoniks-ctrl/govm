@@ -6,7 +6,7 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/cli"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/model"
-	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/setup"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
@@ -24,14 +24,26 @@ func main() {
 	if err := utils.SetupShimDirectory(); err != nil {
 		fmt.Printf("Warning: Failed to set up shim directory: %v\n", err)
 	}
+	runtime, err := services.NewRuntime()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing services: %v\n", err)
+		return
+	}
+	app := cli.NewApp(cli.Operations{
+		Install:    runtime.Install.Install,
+		Activate:   runtime.Lifecycle.Activate,
+		Delete:     runtime.Lifecycle.Delete,
+		Resolver:   runtime.Resolver,
+		ShimInPath: utils.IsShimInPath,
+	}, os.Stdin, os.Stdout, os.Stderr)
 	if len(os.Args) > 1 {
-		handleCommandLine()
+		handleCommandLine(app)
 		return
 	}
 	// handleCommandLine and TUI should never throw at the same time
-	launchTUI()
+	launchTUI(runtime)
 }
-func handleCommandLine() {
+func handleCommandLine(app *cli.App) {
 	if len(os.Args) < 2 {
 		printUsage()
 		return
@@ -47,7 +59,7 @@ func handleCommandLine() {
 		}
 		version := os.Args[2]
 		version = strings.TrimPrefix(version, "go")
-		cli.InstallVersion(version)
+		app.InstallVersion(version)
 	case "use":
 		if len(os.Args) < 3 {
 			fmt.Println("Error: 'use' requires a version argument")
@@ -57,7 +69,7 @@ func handleCommandLine() {
 		}
 		version := os.Args[2]
 		version = strings.TrimPrefix(version, "go")
-		cli.UseVersion(version)
+		app.UseVersion(version)
 	case "delete":
 		if len(os.Args) < 3 {
 			fmt.Println("Error: 'delete' requires a version argument")
@@ -67,15 +79,15 @@ func handleCommandLine() {
 		}
 		version := os.Args[2]
 		version = strings.TrimPrefix(version, "go")
-		cli.DeleteVersion(version)
+		app.DeleteVersion(version)
 	case "list":
-		cli.ListVersions()
+		app.ListVersions()
 	case "deps":
 		if len(os.Args) < 3 {
-			cli.DepsCommand("help")
+			app.DepsCommand("help")
 			return
 		}
-		cli.DepsCommand(os.Args[2:]...)
+		app.DepsCommand(os.Args[2:]...)
 	case "help":
 		printUsage()
 	default:
@@ -112,7 +124,7 @@ func loadTUISettings(stderr io.Writer, load func() (string, config.Settings, err
 	return settingsPath, settings
 }
 
-func launchTUI() {
+func launchTUI(runtime *services.Runtime) {
 	shimInPath := utils.IsShimInPath()
 	if !shimInPath {
 		setupModel, err := setup.New()
@@ -145,13 +157,18 @@ func launchTUI() {
 		fmt.Println("Error getting working directory:", err)
 		os.Exit(1)
 	}
-	resolver := paths.New()
-	if _, err := resolver.VersionsDir(); err != nil {
+	if _, err := runtime.Resolver.VersionsDir(); err != nil {
 		fmt.Println("Error resolving versions directory:", err)
 		os.Exit(1)
 	}
 
-	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning, theme)
+	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning, theme).
+		BindVersionOperations(model.VersionOperations{
+			Install:    runtime.Install.Install,
+			Activate:   runtime.Lifecycle.Activate,
+			Delete:     runtime.Lifecycle.Delete,
+			ShimInPath: utils.IsShimInPath,
+		})
 	p := tea.NewProgram(initialModel)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)

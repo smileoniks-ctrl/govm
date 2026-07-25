@@ -133,7 +133,7 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 			if ok && v.Installed {
 				m.Loading = true
 				m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
-				return m, utils.SwitchVersion(v)
+				return m, m.activateVersionCmd(v.Version)
 			}
 		}
 		m.Status.SetTab("You need to install this version first. Press 'i' to install.", "error")
@@ -154,7 +154,7 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 		}
 		m.Loading = true
 		m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
-		return m, utils.SwitchVersion(v)
+		return m, m.activateVersionCmd(v.Version)
 	}
 	if m.CurrentTab == DepsTab && m.Deps.Loaded {
 		return m.startUpdateCycle()
@@ -407,7 +407,7 @@ func (m Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
 	m.DeleteVersion = ""
 	m.Loading = true
 	m.Status.SetGlobal(fmt.Sprintf("Deleting Go %s...", target.Version), "info")
-	return m, utils.DeleteVersion(target)
+	return m, m.deleteVersionCmd(target.Version)
 }
 
 func (m Model) handleDeleteConfirmNo() (tea.Model, tea.Cmd) {
