@@ -30,10 +30,11 @@ func main() {
 		return
 	}
 	app := cli.NewApp(cli.Operations{
+		Runtime:    runtime,
 		Install:    runtime.Install.Install,
 		Activate:   runtime.Lifecycle.Activate,
 		Delete:     runtime.Lifecycle.Delete,
-		Resolver:   runtime.Resolver,
+		Resolver:   runtime.Paths,
 		ShimInPath: utils.IsShimInPath,
 	}, os.Stdin, os.Stdout, os.Stderr)
 	if len(os.Args) > 1 {
@@ -157,13 +158,14 @@ func launchTUI(runtime *services.Runtime) {
 		fmt.Println("Error getting working directory:", err)
 		os.Exit(1)
 	}
-	if _, err := runtime.Resolver.VersionsDir(); err != nil {
+	if _, err := runtime.Paths.VersionsDir(); err != nil {
 		fmt.Println("Error resolving versions directory:", err)
 		os.Exit(1)
 	}
 
 	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning, theme).
 		BindVersionOperations(model.VersionOperations{
+			Runtime:    runtime,
 			Install:    runtime.Install.Install,
 			Activate:   runtime.Lifecycle.Activate,
 			Delete:     runtime.Lifecycle.Delete,

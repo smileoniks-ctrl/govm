@@ -8,7 +8,6 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
 // handleKey processes a key press in the main TUI surface.
@@ -191,7 +190,7 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 	}
 	m.Loading = true
 	m.Status.SetGlobal("", "")
-	return m, utils.FetchGoVersions
+	return m, LoadVersionsCmd(m.runtime)
 }
 
 func (m Model) handleBackupsKey() (tea.Model, tea.Cmd) {

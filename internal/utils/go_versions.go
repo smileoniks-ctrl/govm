@@ -19,9 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
@@ -197,10 +195,12 @@ type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-// goDevFile mirrors the per-file entry in go.dev's /dl/?mode=json
-// payload. SHA256 and Size are propagated into GoVersion so the
-// install core can verify archive integrity.
-type goDevFile struct {
+
+
+// GoDevFile mirrors the per-file entry in go.dev's /dl/?mode=json
+// payload. SHA256 and Size are propagated so the install core can
+// verify archive integrity. Exported for use by adapters.
+type GoDevFile struct {
 	Filename string `json:"filename"`
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
@@ -209,26 +209,24 @@ type goDevFile struct {
 	Size     int64  `json:"size"`
 }
 
-// goDevRelease mirrors a release entry in go.dev's /dl/?mode=json
+// GoDevRelease mirrors a release entry in go.dev's /dl/?mode=json
 // payload. Version is normalised at the fetch boundary: the "go"
-// prefix sent by go.dev is stripped in fetchGoDevReleases, so
-// downstream code works with bare version strings ("1.22.0",
-// not "go1.22.0").
-type goDevRelease struct {
-	Version string      `json:"version"`
-	Stable  bool        `json:"stable"`
-	Files   []goDevFile `json:"files"`
+// prefix sent by go.dev is stripped, so downstream code works with
+// bare version strings ("1.22.0", not "go1.22.0"). Exported for use
+// by adapters.
+type GoDevRelease struct {
+	Version string       `json:"version"`
+	Stable  bool         `json:"stable"`
+	Files   []GoDevFile `json:"files"`
 }
 
-// fetchGoDevReleases downloads and decodes the go.dev release
-// catalog. The caller owns the client (and its timeout). The
+// FetchGoDevReleasesWithRequest downloads and decodes the go.dev
+// release catalog using a pre-built request. The caller owns the
+// client (and its timeout) and the request (including context). The
 // returned releases carry versions with the leading "go" prefix
-// already stripped.
-func fetchGoDevReleases(client Doer, url string) ([]goDevRelease, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
-	}
+// already stripped. Exported for use by adapters that need to attach
+// context to the request.
+func FetchGoDevReleasesWithRequest(client Doer, req *http.Request) ([]GoDevRelease, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
@@ -238,7 +236,7 @@ func fetchGoDevReleases(client Doer, url string) ([]goDevRelease, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
 	}
-	var releases []goDevRelease
+	var releases []GoDevRelease
 	if err := json.Unmarshal(body, &releases); err != nil {
 		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
 	}
@@ -246,6 +244,18 @@ func fetchGoDevReleases(client Doer, url string) ([]goDevRelease, error) {
 		releases[i].Version = strings.TrimPrefix(releases[i].Version, "go")
 	}
 	return releases, nil
+}
+
+// fetchGoDevReleases downloads and decodes the go.dev release
+// catalog. The caller owns the client (and its timeout). The
+// returned releases carry versions with the leading "go" prefix
+// already stripped.
+func fetchGoDevReleases(client Doer, url string) ([]GoDevRelease, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
+	}
+	return FetchGoDevReleasesWithRequest(client, req)
 }
 
 // buildVersionCatalog builds the user-facing version list by joining
@@ -258,7 +268,7 @@ func fetchGoDevReleases(client Doer, url string) ([]goDevRelease, error) {
 // makes the merge logic (release selection, installed/active flags,
 // URL construction) independently testable.
 func buildVersionCatalog(
-	releases []goDevRelease,
+	releases []GoDevRelease,
 	currentOS, arch string,
 	installed map[string]string,
 	activeVersion string,
@@ -289,48 +299,6 @@ func buildVersionCatalog(
 		}
 	}
 	return versions
-}
-
-func FetchGoVersions() tea.Msg {
-	client := &http.Client{Timeout: 10 * time.Second}
-	releases, err := fetchGoDevReleases(client, "https://go.dev/dl/?mode=json&include=all")
-	if err != nil {
-		return ErrMsg(err)
-	}
-
-	resolver := paths.New()
-	goVersionsDir, err := resolver.VersionsDir()
-	if err != nil {
-		return ErrMsg(err)
-	}
-	if err := ensureVersionsDir(goVersionsDir); err != nil {
-		return ErrMsg(err)
-	}
-	installed, err := ScanInstalledVersions(goVersionsDir)
-	if err != nil {
-		return ErrMsg(err)
-	}
-
-	activeVersionFile, err := resolver.ActiveVersionFile()
-	if err != nil {
-		return ErrMsg(err)
-	}
-	activeVersion, err := readActiveVersion(activeVersionFile)
-	if err != nil {
-		return ErrMsg(err)
-	}
-	if activeVersion == "" {
-		// Fresh install or no active version recorded yet: fall back
-		// to whatever go is on PATH so the catalog can still mark the
-		// active toolchain. The exec-fallback stays in the orchestrator
-		// (decision ii) so readActiveVersion remains a pure disk
-		// function.
-		activeVersion = GetCurrentGoVersion()
-	}
-
-	versions := buildVersionCatalog(releases, runtime.GOOS, runtime.GOARCH, installed, activeVersion)
-	sortGoVersionRecordsDesc(versions)
-	return VersionsMsg(versions)
 }
 
 // ensureVersionsDir guarantees that the govm versions directory
@@ -386,7 +354,7 @@ func ScanInstalledVersions(goVersionsDir string) (map[string]string, error) {
 	return installed, nil
 }
 
-// readActiveVersion reads the govm active-version file. It returns:
+// ReadActiveVersion reads the govm active-version file. It returns:
 //   - ("", nil) when the file does not exist (fresh install). The
 //     orchestrator decides what to do, typically falling back to the
 //     go binary found on PATH.
@@ -397,7 +365,7 @@ func ScanInstalledVersions(goVersionsDir string) (map[string]string, error) {
 //     back to a possibly-unrelated system go.
 //   - (version, nil) on success. The version string is the raw file
 //     contents; no normalisation is applied.
-func readActiveVersion(path string) (string, error) {
+func ReadActiveVersion(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

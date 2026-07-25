@@ -4,12 +4,12 @@ import (
 	"testing"
 )
 
-func releasesForCatalog() []goDevRelease {
-	return []goDevRelease{
+func releasesForCatalog() []GoDevRelease {
+	return []GoDevRelease{
 		{
 			Version: "1.22.0",
 			Stable:  true,
-			Files: []goDevFile{
+			Files: []GoDevFile{
 				{Filename: "go1.22.0.darwin-arm64.tar.gz", OS: "darwin", Arch: "arm64"},
 				{Filename: "go1.22.0.linux-amd64.tar.gz", OS: "linux", Arch: "amd64"},
 			},
@@ -17,14 +17,14 @@ func releasesForCatalog() []goDevRelease {
 		{
 			Version: "1.21.5",
 			Stable:  true,
-			Files: []goDevFile{
+			Files: []GoDevFile{
 				{Filename: "go1.21.5.darwin-arm64.tar.gz", OS: "darwin", Arch: "arm64"},
 			},
 		},
 		{
 			Version: "1.21.0",
 			Stable:  false,
-			Files: []goDevFile{
+			Files: []GoDevFile{
 				// darwin/arm64 build exists for an unstable release so we
 				// can assert the Stable flag is propagated end-to-end.
 				{Filename: "go1.21.0.darwin-arm64.tar.gz", OS: "darwin", Arch: "arm64"},
@@ -60,11 +60,11 @@ func TestBuildVersionCatalog_SelectsMatchingOSArch(t *testing.T) {
 
 func TestBuildVersionCatalog_SkipsReleasesWithoutMatchingOSArch(t *testing.T) {
 	// Linux-only release must be skipped when currentOS=darwin.
-	releases := []goDevRelease{
+	releases := []GoDevRelease{
 		{
 			Version: "1.22.0",
 			Stable:  true,
-			Files: []goDevFile{
+			Files: []GoDevFile{
 				{Filename: "go1.22.0.linux-amd64.tar.gz", OS: "linux", Arch: "amd64"},
 			},
 		},
@@ -119,18 +119,18 @@ func TestBuildVersionCatalog_EmptyInputsYieldEmptyResult(t *testing.T) {
 		t.Errorf("nil releases should yield nil, got %v", got)
 	}
 
-	got = buildVersionCatalog([]goDevRelease{}, "darwin", "arm64", nil, "")
+	got = buildVersionCatalog([]GoDevRelease{}, "darwin", "arm64", nil, "")
 	if len(got) != 0 {
 		t.Errorf("empty releases should yield empty slice, got %v", got)
 	}
 }
 
 func TestBuildVersionCatalog_FirstMatchingFileWins(t *testing.T) {
-	releases := []goDevRelease{
+	releases := []GoDevRelease{
 		{
 			Version: "1.22.0",
 			Stable:  true,
-			Files: []goDevFile{
+			Files: []GoDevFile{
 				{Filename: "go1.22.0.darwin-arm64.first.tar.gz", OS: "darwin", Arch: "arm64"},
 				{Filename: "go1.22.0.darwin-arm64.second.tar.gz", OS: "darwin", Arch: "arm64"},
 			},
@@ -157,11 +157,11 @@ func TestBuildVersionCatalog_NoOSArchMatchYieldsNothing(t *testing.T) {
 // decoded release payload into the GoVersion handed to the install
 // core, so the adapter can build an integrity-checked install.Request.
 func TestBuildVersionCatalog_PropagatesMetadata(t *testing.T) {
-	releases := []goDevRelease{
+	releases := []GoDevRelease{
 		{
 			Version: "1.22.0",
 			Stable:  true,
-			Files: []goDevFile{
+			Files: []GoDevFile{
 				{
 					Filename: "go1.22.0.darwin-arm64.pkg",
 					OS:       "darwin",

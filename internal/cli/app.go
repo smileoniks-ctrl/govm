@@ -10,6 +10,7 @@ import (
 
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -24,7 +25,7 @@ type pathResolver interface {
 // InstallVersion resolves and installs a Go version from go.dev.
 func (a *App) InstallVersion(version string) {
 	fmt.Fprintf(a.out, "🔍 Looking for Go version matching %s...\n", version)
-	matchedVersion, err := findMatchingVersion(version)
+	matchedVersion, err := findMatchingVersion(a.operations.Runtime, version)
 	if err != nil {
 		fmt.Fprintf(a.out, "❌ %s\n", err)
 		return
@@ -38,6 +39,7 @@ func (a *App) InstallVersion(version string) {
 
 // Operations contains the narrow core seams used by App.
 type Operations struct {
+	Runtime    *services.Runtime
 	Install    installFunc
 	Activate   activateFunc
 	Delete     deleteFunc

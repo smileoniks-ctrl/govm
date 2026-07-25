@@ -10,6 +10,7 @@ import (
 
 	"github.com/smileoniks-ctrl/govm/internal/install"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -132,26 +133,25 @@ func (a *installAdapter) finish(o installOutcome) {
 // findMatchingVersion looks up a Go version available on go.dev.
 // It first checks for an exact match, then falls back to the highest
 // version that starts with query (with or without a separating dot).
-func findMatchingVersion(version string) (utils.GoVersion, error) {
-	msg := utils.FetchGoVersions()
-	versions, ok := msg.(utils.VersionsMsg)
-	if !ok {
-		if errMsg, isErr := msg.(utils.ErrMsg); isErr {
-			return utils.GoVersion{}, fmt.Errorf("failed to fetch versions: %v", errMsg)
-		}
-		return utils.GoVersion{}, fmt.Errorf("failed to fetch versions")
+func findMatchingVersion(rt *services.Runtime, version string) (utils.GoVersion, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	catalog, err := rt.Loader.Load(ctx)
+	if err != nil {
+		return utils.GoVersion{}, fmt.Errorf("failed to load version catalog: %w", err)
 	}
 
 	query := utils.NormalizeGoVersionQuery(version)
-	versionStrings := make([]string, len(versions))
-	for i, v := range versions {
+	versionStrings := make([]string, len(catalog.Versions))
+	for i, v := range catalog.Versions {
 		versionStrings[i] = v.Version
 	}
 	matched, ok := utils.FindLatestGoVersion(versionStrings, query)
 	if !ok {
 		return utils.GoVersion{}, fmt.Errorf("no version matching '%s' found", version)
 	}
-	for _, v := range versions {
+	for _, v := range catalog.Versions {
 		if v.Version == matched {
 			return v, nil
 		}

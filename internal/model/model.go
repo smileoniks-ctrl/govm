@@ -6,8 +6,8 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
-	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
 // defaultConstructionWidth is the initial column budget passed to the
@@ -78,6 +78,7 @@ type Model struct {
 	Deps     DepsState
 	Settings SettingsState
 
+	runtime    *services.Runtime
 	installGo  installFunc
 	activateGo activateFunc
 	deleteGo   deleteFunc
@@ -146,6 +147,7 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 // VersionOperations contains the narrow process-composed seams used by the
 // TUI for installed-version mutations and PATH presentation.
 type VersionOperations struct {
+	Runtime    *services.Runtime
 	Install    installFunc
 	Activate   activateFunc
 	Delete     deleteFunc
@@ -154,6 +156,7 @@ type VersionOperations struct {
 
 // BindVersionOperations returns a copy of m bound to process-wide services.
 func (m Model) BindVersionOperations(operations VersionOperations) Model {
+	m.runtime = operations.Runtime
 	m.installGo = operations.Install
 	m.activateGo = operations.Activate
 	m.deleteGo = operations.Delete
@@ -163,7 +166,7 @@ func (m Model) BindVersionOperations(operations VersionOperations) Model {
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
-		utils.FetchGoVersions,
+		LoadVersionsCmd(m.runtime),
 		m.Spinner.Tick,
 	)
 }

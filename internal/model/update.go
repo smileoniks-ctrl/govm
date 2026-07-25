@@ -251,7 +251,7 @@ func (m Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd) 
 			installWarnings: msg.Warnings,
 		}
 		m.Status.SetGlobal(fmt.Sprintf("Installed Go %s; verifying catalog...", msg.Version), "warning")
-		return m, tea.Batch(cmd, utils.FetchGoVersions)
+		return m, tea.Batch(cmd, LoadVersionsCmd(m.runtime))
 	}
 	m.Loading = false
 	text, kind := installSuccessStatus(msg.Version, msg.Warnings)
@@ -285,7 +285,7 @@ func (m Model) handleActivationSuccess(msg activationSuccessMsg) (tea.Model, tea
 			lifecycleWarnings: msg.Result.Warnings,
 		}
 		m.Status.SetGlobal(fmt.Sprintf("Switched to Go %s; verifying catalog...", msg.Result.Version), "warning")
-		return m, tea.Batch(cmd, utils.FetchGoVersions)
+		return m, tea.Batch(cmd, LoadVersionsCmd(m.runtime))
 	}
 	m.Loading = false
 	if len(msg.Result.Warnings) > 0 {
@@ -314,7 +314,7 @@ func (m Model) handleDeletionSuccess(msg deletionSuccessMsg) (tea.Model, tea.Cmd
 			lifecycleWarnings: result.Warnings,
 		}
 		m.Status.SetGlobal(fmt.Sprintf("Deleted Go %s; verifying catalog...", result.Version), "warning")
-		return m, tea.Batch(cmd, utils.FetchGoVersions)
+		return m, tea.Batch(cmd, LoadVersionsCmd(m.runtime))
 	}
 	m.Loading = false
 	if len(result.Warnings) > 0 {
