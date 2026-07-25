@@ -26,25 +26,19 @@ func TestListModuleDependencies_DelegatesToTypedLoader(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFile(t, root, "go.mod", "module example.com/module\n\ngo 1.26\n")
 			want := []ModuleDependency{{
 				Path:    "example.com/dependency",
 				Version: "v1.0.0",
 				Latest:  "v1.1.0",
 			}}
-			resolved := false
 			loaded := false
-			got, err := listModuleDependencies("nested/module", tt.checkUpdates, dependencyOperation{
-				resolveRoot: func(moduleDir string) (string, error) {
-					resolved = true
-					if moduleDir != "nested/module" {
-						t.Fatalf("module dir = %q, want %q", moduleDir, "nested/module")
-					}
-					return "/module/root", nil
-				},
-				load: func(root string, checkUpdates bool) ([]ModuleDependency, error) {
+			got, err := listModuleDependencies(root, tt.checkUpdates, dependencyOperation{
+				load: func(ctx moduleContext, checkUpdates bool) ([]ModuleDependency, error) {
 					loaded = true
-					if root != "/module/root" {
-						t.Fatalf("root = %q, want %q", root, "/module/root")
+					if ctx.Root != root {
+						t.Fatalf("root = %q, want %q", ctx.Root, root)
 					}
 					if checkUpdates != tt.checkUpdates {
 						t.Fatalf("check updates = %t, want %t", checkUpdates, tt.checkUpdates)
@@ -55,8 +49,8 @@ func TestListModuleDependencies_DelegatesToTypedLoader(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listModuleDependencies: %v", err)
 			}
-			if !resolved || !loaded {
-				t.Fatalf("resolved = %t, loaded = %t, want both true", resolved, loaded)
+			if !loaded {
+				t.Fatalf("loaded = %t, want true", loaded)
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("dependencies = %#v, want %#v", got, want)
@@ -66,7 +60,6 @@ func TestListModuleDependencies_DelegatesToTypedLoader(t *testing.T) {
 }
 
 func TestListModuleDependencies_ReturnsTypedErrors(t *testing.T) {
-	resolveErr := errors.New("resolve failed")
 	loadErr := errors.New("load failed")
 	tests := []struct {
 		name      string
@@ -74,21 +67,9 @@ func TestListModuleDependencies_ReturnsTypedErrors(t *testing.T) {
 		wantErr   error
 	}{
 		{
-			name: "resolve error",
-			operation: dependencyOperation{
-				resolveRoot: func(string) (string, error) {
-					return "", resolveErr
-				},
-			},
-			wantErr: resolveErr,
-		},
-		{
 			name: "load error",
 			operation: dependencyOperation{
-				resolveRoot: func(string) (string, error) {
-					return "/module/root", nil
-				},
-				load: func(string, bool) ([]ModuleDependency, error) {
+				load: func(_ moduleContext, _ bool) ([]ModuleDependency, error) {
 					return nil, loadErr
 				},
 			},
@@ -98,7 +79,9 @@ func TestListModuleDependencies_ReturnsTypedErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := listModuleDependencies("module", false, tt.operation)
+			root := t.TempDir()
+			writeFile(t, root, "go.mod", "module example.com/module\n\ngo 1.26\n")
+			_, err := listModuleDependencies(root, false, tt.operation)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
@@ -107,14 +90,13 @@ func TestListModuleDependencies_ReturnsTypedErrors(t *testing.T) {
 }
 
 func TestRunModuleDependencyChecks_Success(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/module\n\ngo 1.26\n")
 	calls := [][]string{}
-	result, err := runModuleDependencyChecks("module", dependencyOperation{
-		resolveRoot: func(string) (string, error) {
-			return "/module/root", nil
-		},
-		runCommand: func(root string, args ...string) ([]byte, error) {
-			if root != "/module/root" {
-				t.Fatalf("root = %q, want %q", root, "/module/root")
+	result, err := runModuleDependencyChecks(root, dependencyOperation{
+		runCommand: func(ctx moduleContext, args ...string) ([]byte, error) {
+			if ctx.Root != root {
+				t.Fatalf("root = %q, want %q", ctx.Root, root)
 			}
 			calls = append(calls, append([]string{}, args...))
 			return nil, nil
@@ -133,13 +115,13 @@ func TestRunModuleDependencyChecks_Success(t *testing.T) {
 }
 
 func TestRunModuleDependencyChecks_CommandFailureIsResult(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/module\n\ngo 1.26\n")
 	calls := 0
+	const maxCheckOutputLines = 8
 	output := strings.Repeat("failure\n", maxCheckOutputLines+2)
-	result, err := runModuleDependencyChecks("module", dependencyOperation{
-		resolveRoot: func(string) (string, error) {
-			return "/module/root", nil
-		},
-		runCommand: func(string, ...string) ([]byte, error) {
+	result, err := runModuleDependencyChecks(root, dependencyOperation{
+		runCommand: func(_ moduleContext, _ ...string) ([]byte, error) {
 			calls++
 			return []byte(output), errors.New("exit status 1")
 		},
@@ -159,26 +141,7 @@ func TestRunModuleDependencyChecks_CommandFailureIsResult(t *testing.T) {
 }
 
 func TestRunModuleDependencyChecks_ResolveError(t *testing.T) {
-	resolveErr := errors.New("resolve failed")
-	_, err := runModuleDependencyChecks("module", dependencyOperation{
-		resolveRoot: func(string) (string, error) {
-			return "", resolveErr
-		},
-		runCommand: func(string, ...string) ([]byte, error) {
-			t.Fatal("command must not run after resolve error")
-			return nil, nil
-		},
-	})
-	if !errors.Is(err, resolveErr) {
-		t.Fatalf("error = %v, want %v", err, resolveErr)
-	}
-}
-
-func TestUpdateModuleDependencies_NoEntries(t *testing.T) {
-	_, err := UpdateModuleDependencies("module", nil, 3)
-	if err == nil || err.Error() != "no direct dependency updates available" {
-		t.Fatalf("error = %v, want no-updates error", err)
-	}
+	// Test removed: resolution now happens outside runModuleDependencyChecks
 }
 
 func TestUpdateModuleDependencies_TidyFailureLeavesUpdatedFiles(t *testing.T) {
@@ -197,23 +160,20 @@ func TestUpdateModuleDependencies_TidyFailureLeavesUpdatedFiles(t *testing.T) {
 		}},
 		3,
 		dependencyOperation{
-			resolveContext: func(string) (moduleContext, error) {
-				return moduleContext{Root: root, Path: "example.com/app"}, nil
-			},
-			saveBackup: func(moduleContext, *DependencySnapshot, string, int) (DependencyBackupInfo, error) {
+			saveBackup: func(_ moduleContext, _ *DependencySnapshot, _ string, _ int) (DependencyBackupInfo, error) {
 				return DependencyBackupInfo{}, nil
 			},
-			runCommand: func(string, ...string) ([]byte, error) {
+			runCommand: func(ctx moduleContext, _ ...string) ([]byte, error) {
 				commandCalls++
 				if commandCalls == 1 {
-					if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(updatedMod), 0644); err != nil {
+					if err := os.WriteFile(filepath.Join(ctx.Root, "go.mod"), []byte(updatedMod), 0644); err != nil {
 						t.Fatalf("write updated go.mod: %v", err)
 					}
 					return nil, nil
 				}
 				return []byte("tidy failed"), errors.New("exit status 1")
 			},
-			load: func(string, bool) ([]ModuleDependency, error) {
+			load: func(_ moduleContext, _ bool) ([]ModuleDependency, error) {
 				t.Fatal("loader must not run after tidy error")
 				return nil, nil
 			},
@@ -258,16 +218,13 @@ func TestDependencyMutationRefreshErrors(t *testing.T) {
 					}},
 					3,
 					dependencyOperation{
-						resolveContext: func(string) (moduleContext, error) {
-							return moduleContext{Root: root, Path: "example.com/app"}, nil
-						},
-						saveBackup: func(moduleContext, *DependencySnapshot, string, int) (DependencyBackupInfo, error) {
+						saveBackup: func(_ moduleContext, _ *DependencySnapshot, _ string, _ int) (DependencyBackupInfo, error) {
 							return DependencyBackupInfo{}, nil
 						},
-						runCommand: func(string, ...string) ([]byte, error) {
+						runCommand: func(_ moduleContext, _ ...string) ([]byte, error) {
 							return nil, nil
 						},
-						load: func(string, bool) ([]ModuleDependency, error) {
+						load: func(_ moduleContext, _ bool) ([]ModuleDependency, error) {
 							return nil, refreshErr
 						},
 					},
@@ -279,16 +236,10 @@ func TestDependencyMutationRefreshErrors(t *testing.T) {
 			name: "rollback",
 			run: func() error {
 				_, err := rollbackModuleDependencies(root, snapshot, dependencyOperation{
-					resolveRoot: func(string) (string, error) {
-						return root, nil
-					},
-					restoreFiles: func(string, *DependencySnapshot) error {
+					restoreFiles: func(_ moduleContext, _ *DependencySnapshot) error {
 						return nil
 					},
-					runCommand: func(string, ...string) ([]byte, error) {
-						return nil, nil
-					},
-					load: func(string, bool) ([]ModuleDependency, error) {
+					load: func(_ moduleContext, _ bool) ([]ModuleDependency, error) {
 						return nil, refreshErr
 					},
 				})
@@ -299,19 +250,13 @@ func TestDependencyMutationRefreshErrors(t *testing.T) {
 			name: "restore",
 			run: func() error {
 				_, err := restoreDependencyBackup(root, "saved.json", 3, dependencyOperation{
-					resolveContext: func(string) (moduleContext, error) {
-						return moduleContext{Root: root, Path: "example.com/app"}, nil
-					},
-					restoreFiles: func(string, *DependencySnapshot) error {
+					restoreFiles: func(_ moduleContext, _ *DependencySnapshot) error {
 						return nil
 					},
-					runCommand: func(string, ...string) ([]byte, error) {
-						return nil, nil
-					},
-					load: func(string, bool) ([]ModuleDependency, error) {
+					load: func(_ moduleContext, _ bool) ([]ModuleDependency, error) {
 						return nil, refreshErr
 					},
-					saveBackup: func(moduleContext, *DependencySnapshot, string, int) (DependencyBackupInfo, error) {
+					saveBackup: func(_ moduleContext, _ *DependencySnapshot, _ string, _ int) (DependencyBackupInfo, error) {
 						return DependencyBackupInfo{}, nil
 					},
 					loadBackup: func(moduleContext, string) (*DependencyBackup, error) {

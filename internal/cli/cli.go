@@ -194,7 +194,11 @@ func findInstalledVersion(version string) (utils.GoVersion, error) {
 
 // DepsList prints the current dependencies of moduleDir.
 func DepsList(moduleDir string) {
-	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err != nil {
+		fmt.Printf("❌ %s\n", err)
+		return
+	}
 	if err := svc.RunList(); err != nil {
 		fmt.Printf("❌ %s\n", err)
 	}
@@ -202,7 +206,11 @@ func DepsList(moduleDir string) {
 
 // DepsCheck prints the dependencies along with any available updates.
 func DepsCheck(moduleDir string) {
-	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err != nil {
+		fmt.Printf("❌ %s\n", err)
+		return
+	}
 	if err := svc.RunCheck(); err != nil {
 		fmt.Printf("❌ %s\n", err)
 	}
@@ -210,7 +218,11 @@ func DepsCheck(moduleDir string) {
 
 // DepsUpdate runs the interactive update workflow.
 func DepsUpdate(moduleDir string) {
-	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err != nil {
+		fmt.Printf("❌ %s\n", err)
+		return
+	}
 	if err := svc.RunUpdate(); err != nil {
 		fmt.Printf("❌ %s\n", err)
 	}
@@ -218,7 +230,11 @@ func DepsUpdate(moduleDir string) {
 
 // DepsBackups lists saved dependency backups.
 func DepsBackups(moduleDir string) {
-	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err != nil {
+		fmt.Printf("❌ %s\n", err)
+		return
+	}
 	if err := svc.RunBackups(); err != nil {
 		fmt.Printf("❌ %s\n", err)
 	}
@@ -226,7 +242,11 @@ func DepsBackups(moduleDir string) {
 
 // DepsRestore restores a saved dependency backup.
 func DepsRestore(moduleDir, name string) {
-	svc := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
+	if err != nil {
+		fmt.Printf("❌ %s\n", err)
+		return
+	}
 	if err := svc.RunRestore(name); err != nil {
 		fmt.Printf("❌ %s\n", err)
 	}

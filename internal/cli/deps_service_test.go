@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,6 +13,17 @@ import (
 
 	"github.com/smileoniks-ctrl/govm/internal/deps"
 )
+
+func writeFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
 
 // fakeExecutor is the ExecuteIntent seam substitute. Each operational
 // intent is routed to a configurable function field that returns the
@@ -658,7 +671,12 @@ func TestDefaultConfirmReadsBufferedAnswersAcrossPrompts(t *testing.T) {
 }
 
 func TestNewDepsServiceWiresDefaults(t *testing.T) {
-	svc := NewDepsService("/tmp/m", &bytes.Buffer{}, &bytes.Buffer{})
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/test\n\ngo 1.26\n")
+	svc, err := NewDepsService(root, &bytes.Buffer{}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("NewDepsService: %v", err)
+	}
 	if svc.ExecuteIntent == nil {
 		t.Fatal("ExecuteIntent should be wired to a deps.Executor")
 	}
@@ -668,7 +686,7 @@ func TestNewDepsServiceWiresDefaults(t *testing.T) {
 	if svc.Confirm == nil {
 		t.Fatal("Confirm should be wired")
 	}
-	if svc.ModuleDir != "/tmp/m" {
-		t.Fatalf("ModuleDir = %q", svc.ModuleDir)
+	if svc.ModuleDir != root {
+		t.Fatalf("ModuleDir = %q, want %q", svc.ModuleDir, root)
 	}
 }

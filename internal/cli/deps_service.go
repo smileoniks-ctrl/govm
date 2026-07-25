@@ -52,7 +52,7 @@ type DepsService struct {
 // NewDepsService builds a service wired to the production helpers.
 // The deps.Executor is constructed with the configured dependency
 // backup limit so retention policy is honoured for every apply.
-func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) *DepsService {
+func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) (*DepsService, error) {
 	if stdout == nil {
 		stdout = os.Stdout
 	}
@@ -63,7 +63,10 @@ func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) *DepsSe
 	if err != nil {
 		settings = config.DefaultSettings()
 	}
-	executor := deps.NewExecutor(nil, settings.DepsBackupLimit)
+	executor, err := deps.NewExecutor(moduleDir, nil, settings.DepsBackupLimit)
+	if err != nil {
+		return nil, fmt.Errorf("resolve module context: %w", err)
+	}
 	return &DepsService{
 		ModuleDir:     moduleDir,
 		Stdout:        stdout,
@@ -75,7 +78,7 @@ func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) *DepsSe
 		RestoreBackup: func(moduleDir, name string) (deps.DependencyRestoreResult, error) {
 			return deps.RestoreDependencyBackup(moduleDir, name, settings.DepsBackupLimit)
 		},
-	}
+	}, nil
 }
 
 // defaultConfirm returns a Confirm implementation that prompts on
@@ -153,7 +156,7 @@ func (s *DepsService) RunList() error {
 // check is performed through the ExecuteIntent seam so RunCheck and
 // RunUpdate share the same deps.Executor.
 func (s *DepsService) RunCheck() error {
-	event, err := s.ExecuteIntent(deps.IntentCheckUpdates{ModuleDir: s.ModuleDir})
+	event, err := s.ExecuteIntent(deps.IntentCheckUpdates{})
 	if err != nil {
 		return fmt.Errorf("failed to check dependencies: %w", err)
 	}

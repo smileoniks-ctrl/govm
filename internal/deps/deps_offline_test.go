@@ -40,12 +40,18 @@ func TestRestoreDependencyBackup_RestoresOfflineWithoutTidy(t *testing.T) {
 	var offline bool
 	tidyCalled := false
 	restored, err := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
-		resolveRoot: func(string) (string, error) { return root, nil },
-		runCommand: func(_ string, _ ...string) ([]byte, error) {
+		runCommand: func(_ moduleContext, _ ...string) ([]byte, error) {
 			tidyCalled = true
 			return nil, nil
 		},
-		load: func(_ string, checkUpdates bool) ([]ModuleDependency, error) {
+		loadBackup: func(ctx moduleContext, name string) (*DependencyBackup, error) {
+			return loadDependencyBackupResolved(ctx, name)
+		},
+		saveBackup: saveDependencyBackupResolvedWithRetention,
+		restoreFiles: func(ctx moduleContext, snap *DependencySnapshot) error {
+			return RestoreModuleFiles(ctx.Root, snap)
+		},
+		load: func(_ moduleContext, checkUpdates bool) ([]ModuleDependency, error) {
 			if checkUpdates {
 				t.Fatal("restore refresh must not check updates online")
 			}
@@ -117,12 +123,14 @@ func TestRollbackModuleDependencies_RefreshesOffline(t *testing.T) {
 	var offline bool
 	tidyCalled := false
 	_, err = rollbackModuleDependencies(root, snap, dependencyOperation{
-		resolveRoot: func(string) (string, error) { return root, nil },
-		runCommand: func(_ string, _ ...string) ([]byte, error) {
+		runCommand: func(_ moduleContext, _ ...string) ([]byte, error) {
 			tidyCalled = true
 			return nil, nil
 		},
-		load: func(_ string, checkUpdates bool) ([]ModuleDependency, error) {
+		restoreFiles: func(ctx moduleContext, snap *DependencySnapshot) error {
+			return RestoreModuleFiles(ctx.Root, snap)
+		},
+		load: func(_ moduleContext, checkUpdates bool) ([]ModuleDependency, error) {
 			if checkUpdates {
 				t.Fatal("rollback refresh must not check updates online")
 			}
@@ -169,21 +177,24 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 
 	restoreCalls := 0
 	_, err = restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
-		resolveRoot: func(string) (string, error) { return root, nil },
-		restoreFiles: func(moduleDir string, snap *DependencySnapshot) error {
+		loadBackup: func(ctx moduleContext, name string) (*DependencyBackup, error) {
+			return loadDependencyBackupResolved(ctx, name)
+		},
+		saveBackup: saveDependencyBackupResolvedWithRetention,
+		restoreFiles: func(ctx moduleContext, snap *DependencySnapshot) error {
 			restoreCalls++
 			if restoreCalls == 1 {
-				writeFile(t, moduleDir, "go.mod", snap.ModFile.Content)
-				writeFile(t, moduleDir, "go.sum", "partial restore result\n")
+				writeFile(t, ctx.Root, "go.mod", snap.ModFile.Content)
+				writeFile(t, ctx.Root, "go.sum", "partial restore result\n")
 				return errors.New("restore failed")
 			}
-			return RestoreModuleFiles(moduleDir, snap)
+			return RestoreModuleFiles(ctx.Root, snap)
 		},
-		runCommand: func(string, ...string) ([]byte, error) {
+		runCommand: func(_ moduleContext, _ ...string) ([]byte, error) {
 			t.Fatal("command must not run after restore error")
 			return nil, nil
 		},
-		load: func(string, bool) ([]ModuleDependency, error) {
+		load: func(_ moduleContext, _ bool) ([]ModuleDependency, error) {
 			t.Fatal("loader must not run after restore error")
 			return nil, nil
 		},

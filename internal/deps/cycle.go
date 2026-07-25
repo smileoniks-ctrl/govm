@@ -210,7 +210,6 @@ func (NoIntent) isIntent()          {}
 func (NoIntent) intentName() string { return "none" }
 
 type IntentCheckUpdates struct {
-	ModuleDir string
 }
 
 func (IntentCheckUpdates) isIntent()          {}
@@ -227,16 +226,14 @@ func (IntentConfirmApply) isIntent()          {}
 func (IntentConfirmApply) intentName() string { return "confirm-apply" }
 
 type IntentApplyUpdates struct {
-	ModuleDir string
-	Entries   []DependencyUpdateEntry
+	Entries []DependencyUpdateEntry
 }
 
 func (IntentApplyUpdates) isIntent()          {}
 func (IntentApplyUpdates) intentName() string { return "apply-updates" }
 
 type IntentCompensate struct {
-	ModuleDir string
-	Snapshot  *DependencySnapshot
+	Snapshot *DependencySnapshot
 }
 
 func (IntentCompensate) isIntent()          {}
@@ -254,7 +251,6 @@ func (IntentConfirmChecks) isIntent()          {}
 func (IntentConfirmChecks) intentName() string { return "confirm-checks" }
 
 type IntentRunChecks struct {
-	ModuleDir string
 }
 
 func (IntentRunChecks) isIntent()          {}
@@ -274,8 +270,7 @@ func (IntentConfirmRollback) isIntent()          {}
 func (IntentConfirmRollback) intentName() string { return "confirm-rollback" }
 
 type IntentRollback struct {
-	ModuleDir string
-	Snapshot  *DependencySnapshot
+	Snapshot *DependencySnapshot
 }
 
 func (IntentRollback) isIntent()          {}
@@ -308,7 +303,6 @@ type UpdateCycle struct {
 	phase        Phase
 	outcome      Outcome
 	failure      error
-	moduleDir    string
 	dependencies []ModuleDependency
 	entries      []DependencyUpdateEntry
 	snapshot     *DependencySnapshot
@@ -325,8 +319,6 @@ func (c UpdateCycle) Phase() Phase { return c.phase }
 func (c UpdateCycle) Outcome() Outcome { return c.outcome }
 
 func (c UpdateCycle) IsTerminal() bool { return c.phase == PhaseTerminal }
-
-func (c UpdateCycle) ModuleDir() string { return c.moduleDir }
 
 // Failure returns the operational error preserved for terminal failure
 // outcomes (OutcomeFailed, OutcomeUpdateFailedRestored,
@@ -402,8 +394,7 @@ func (c UpdateCycle) handleStart(e StartEvent) (UpdateCycle, Intent, error) {
 	}
 	next := c
 	next.phase = PhaseChecking
-	next.moduleDir = e.ModuleDir
-	return next, IntentCheckUpdates{ModuleDir: e.ModuleDir}, nil
+	return next, IntentCheckUpdates{}, nil
 }
 
 func (c UpdateCycle) handleCheckUpdatesDone(e CheckUpdatesDoneEvent) (UpdateCycle, Intent, error) {
@@ -439,8 +430,7 @@ func (c UpdateCycle) handleConfirmApply(e ConfirmApplyEvent) (UpdateCycle, Inten
 	next := c
 	next.phase = PhaseApplying
 	return next, IntentApplyUpdates{
-		ModuleDir: c.moduleDir,
-		Entries:   cloneEntries(c.entries),
+		Entries: cloneEntries(c.entries),
 	}, nil
 }
 
@@ -462,8 +452,7 @@ func (c UpdateCycle) handleApplyUpdatesDone(e ApplyUpdatesDoneEvent) (UpdateCycl
 		next.snapshot = cloneSnapshot(e.Snapshot)
 		next.backup = cloneBackupPtr(e.Backup)
 		return next, IntentCompensate{
-			ModuleDir: c.moduleDir,
-			Snapshot:  cloneSnapshot(e.Snapshot),
+			Snapshot: cloneSnapshot(e.Snapshot),
 		}, nil
 	}
 	// Success without snapshot: rollback guarantee absent.
@@ -515,7 +504,7 @@ func (c UpdateCycle) handleConfirmChecks(e ConfirmChecksEvent) (UpdateCycle, Int
 	}
 	next := c
 	next.phase = PhaseRunningChecks
-	return next, IntentRunChecks{ModuleDir: c.moduleDir}, nil
+	return next, IntentRunChecks{}, nil
 }
 
 func (c UpdateCycle) handleChecksDone(e ChecksDoneEvent) (UpdateCycle, Intent, error) {
@@ -553,8 +542,7 @@ func (c UpdateCycle) handleConfirmRollback(e ConfirmRollbackEvent) (UpdateCycle,
 	next := c
 	next.phase = PhaseRollingBack
 	return next, IntentRollback{
-		ModuleDir: c.moduleDir,
-		Snapshot:  cloneSnapshot(c.snapshot),
+		Snapshot: cloneSnapshot(c.snapshot),
 	}, nil
 }
 

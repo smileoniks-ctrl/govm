@@ -553,14 +553,16 @@ func TestRollbackModuleDependencies_RestoresExactlyWithoutTidy(t *testing.T) {
 
 	tidyCalls := 0
 	rolled, err := rollbackModuleDependencies(root, snap, dependencyOperation{
-		resolveRoot: func(string) (string, error) { return root, nil },
 		// restoreFiles left nil so the real RestoreModuleFiles runs an
 		// exact byte restore.
-		runCommand: func(string, ...string) ([]byte, error) {
+		restoreFiles: func(ctx moduleContext, snap *DependencySnapshot) error {
+			return RestoreModuleFiles(ctx.Root, snap)
+		},
+		runCommand: func(_ moduleContext, _ ...string) ([]byte, error) {
 			tidyCalls++
 			return nil, nil
 		},
-		load: func(_ string, checkUpdates bool) ([]ModuleDependency, error) {
+		load: func(_ moduleContext, checkUpdates bool) ([]ModuleDependency, error) {
 			if checkUpdates {
 				t.Fatal("rollback refresh must not check updates online")
 			}

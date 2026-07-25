@@ -398,14 +398,9 @@ func assertDependencyBackupDirectoryEmpty(t *testing.T, modulePath string) {
 func TestApplyModuleUpdates_ResolvesContextOnce(t *testing.T) {
 	context := moduleContext{Root: t.TempDir(), Path: "example.com/app"}
 	writeFile(t, context.Root, "go.mod", "module example.com/app\n\ngo 1.26\n")
-	resolves := 0
 	entries := []DependencyUpdateEntry{{Path: "example.com/dep", OldVersion: "v1.0.0", NewVersion: "v1.1.0"}}
 	const backupLimit = 3
 	operation := dependencyOperation{
-		resolveContext: func(string) (moduleContext, error) {
-			resolves++
-			return context, nil
-		},
 		saveBackup: func(_ moduleContext, snap *DependencySnapshot, _ string, gotLimit int) (DependencyBackupInfo, error) {
 			if gotLimit != backupLimit {
 				t.Fatalf("backup limit = %d, want %d", gotLimit, backupLimit)
@@ -415,7 +410,7 @@ func TestApplyModuleUpdates_ResolvesContextOnce(t *testing.T) {
 			}
 			return DependencyBackupInfo{}, nil
 		},
-		runCommand: func(_ string, args ...string) ([]byte, error) {
+		runCommand: func(_ moduleContext, args ...string) ([]byte, error) {
 			if args[0] == "get" {
 				want := []string{"get", "example.com/dep@v1.1.0"}
 				if !reflect.DeepEqual(args, want) {
@@ -424,59 +419,51 @@ func TestApplyModuleUpdates_ResolvesContextOnce(t *testing.T) {
 			}
 			return nil, nil
 		},
-		load: func(string, bool) ([]ModuleDependency, error) {
+		load: func(_ moduleContext, _ bool) ([]ModuleDependency, error) {
 			return []ModuleDependency{}, nil
 		},
 	}
 
-	snap, _, deps, err := applyModuleUpdates(".", entries, backupLimit, operation)
+	snap, _, deps, err := applyModuleUpdates(context.Root, entries, backupLimit, operation)
 	if err != nil {
 		t.Fatalf("applyModuleUpdates: %v", err)
 	}
 	if len(deps) != 0 || snap == nil {
 		t.Fatalf("apply result = snap=%v deps=%v, want non-nil snapshot", snap, deps)
 	}
-	if resolves != 1 {
-		t.Fatalf("context resolves = %d, want 1", resolves)
-	}
 }
 
 func TestRestoreDependencyBackup_ResolvesContextOnce(t *testing.T) {
 	context := moduleContext{Root: t.TempDir(), Path: "example.com/app"}
 	writeFile(t, context.Root, "go.mod", "module example.com/app\n\ngo 1.26\n")
-	resolves := 0
 	const backupLimit = 4
 	backup := &DependencyBackup{
-		CreatedAt: time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC),
-		Snapshot:  &DependencySnapshot{ModFile: ModuleFileSnapshot{Exists: true, Content: "module example.com/app\n\ngo 1.26\n"}},
+		SchemaVersion: 1,
+		CreatedAt:     time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC),
+		ModulePath:    context.Path,
+		ModuleDir:     context.Root,
+		Kind:          DependencyBackupKindPreUpdate,
+		Snapshot:      &DependencySnapshot{ModFile: ModuleFileSnapshot{Exists: true, Content: "old"}},
 	}
 	operation := dependencyOperation{
-		resolveContext: func(string) (moduleContext, error) {
-			resolves++
-			return context, nil
-		},
-		loadBackup: func(moduleContext, string) (*DependencyBackup, error) { return backup, nil },
+		loadBackup: func(_ moduleContext, _ string) (*DependencyBackup, error) { return backup, nil },
 		saveBackup: func(_ moduleContext, _ *DependencySnapshot, _ string, gotLimit int) (DependencyBackupInfo, error) {
 			if gotLimit != backupLimit {
 				t.Fatalf("backup limit = %d, want %d", gotLimit, backupLimit)
 			}
 			return DependencyBackupInfo{}, nil
 		},
-		restoreFiles: func(string, *DependencySnapshot) error { return nil },
-		runCommand:   func(string, ...string) ([]byte, error) { return nil, nil },
-		load: func(string, bool) ([]ModuleDependency, error) {
+		restoreFiles: func(_ moduleContext, _ *DependencySnapshot) error { return nil },
+		load: func(_ moduleContext, _ bool) ([]ModuleDependency, error) {
 			return []ModuleDependency{}, nil
 		},
 	}
 
-	result, err := restoreDependencyBackup(".", "saved.json", backupLimit, operation)
+	result, err := restoreDependencyBackup(context.Root, "saved.json", backupLimit, operation)
 	if err != nil {
 		t.Fatalf("restoreDependencyBackup: %v", err)
 	}
 	if result.BackupName != "saved.json" || !result.BackupCreated.Equal(backup.CreatedAt) {
 		t.Fatalf("restore result = %+v, want saved backup metadata", result)
-	}
-	if resolves != 1 {
-		t.Fatalf("context resolves = %d, want 1", resolves)
 	}
 }

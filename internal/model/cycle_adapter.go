@@ -151,9 +151,13 @@ func (m Model) cycleExecuteCmd(intent deps.Intent) tea.Cmd {
 	if fn := m.Deps.ExecuteIntent; fn != nil {
 		return fn(intent)
 	}
+	moduleDir := m.Deps.ModuleDir
 	limit := m.Settings.Values.DepsBackupLimit
-	exec := deps.NewExecutor(nil, limit)
 	return func() tea.Msg {
+		exec, err := deps.NewExecutor(moduleDir, nil, limit)
+		if err != nil {
+			return dependencyExecutionErrMsg{Err: err}
+		}
 		event, err := exec.Execute(intent)
 		if err != nil {
 			return dependencyExecutionErrMsg{Err: err}

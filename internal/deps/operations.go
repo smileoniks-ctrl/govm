@@ -10,45 +10,35 @@ import (
 )
 
 // dependencyOperation is the testable seam through which the
-// dependency operations perform all side-effecting work (module
-// resolution, command execution, loading, backup save/load, file
-// restore). Production code uses defaultDependencyOperation; tests
-// inject fakes.
+// dependency operations perform all side-effecting work (command
+// execution, loading, backup save/load, file restore). Production
+// code uses defaultDependencyOperation; tests inject fakes.
+// Resolution happens outside this seam; operations receive a
+// resolved moduleContext.
 type dependencyOperation struct {
-	resolveContext func(string) (moduleContext, error)
-	resolveRoot    func(string) (string, error)
-	restoreFiles   func(string, *DependencySnapshot) error
-	runCommand     func(string, ...string) ([]byte, error)
-	load           func(string, bool) ([]ModuleDependency, error)
-	saveBackup     func(moduleContext, *DependencySnapshot, string, int) (DependencyBackupInfo, error)
-	loadBackup     func(moduleContext, string) (*DependencyBackup, error)
+	restoreFiles func(moduleContext, *DependencySnapshot) error
+	runCommand   func(moduleContext, ...string) ([]byte, error)
+	load         func(moduleContext, bool) ([]ModuleDependency, error)
+	saveBackup   func(moduleContext, *DependencySnapshot, string, int) (DependencyBackupInfo, error)
+	loadBackup   func(moduleContext, string) (*DependencyBackup, error)
 }
 
 func defaultDependencyOperation() dependencyOperation {
 	return dependencyOperation{
-		resolveContext: resolveModuleContext,
-		resolveRoot:    ResolveModuleRoot,
-		restoreFiles:   RestoreModuleFiles,
-		runCommand: func(moduleDir string, args ...string) ([]byte, error) {
+		restoreFiles: func(context moduleContext, snap *DependencySnapshot) error {
+			return RestoreModuleFiles(context.Root, snap)
+		},
+		runCommand: func(context moduleContext, args ...string) ([]byte, error) {
 			cmd := exec.Command("go", args...)
-			cmd.Dir = moduleDir
+			cmd.Dir = context.Root
 			return cmd.CombinedOutput()
 		},
-		load:       loadDependencies,
+		load: func(context moduleContext, checkUpdates bool) ([]ModuleDependency, error) {
+			return loadDependencies(context.Root, checkUpdates)
+		},
 		saveBackup: saveDependencyBackupResolvedWithRetention,
 		loadBackup: loadDependencyBackupResolved,
 	}
-}
-
-func (operation dependencyOperation) resolve(moduleDir string) (moduleContext, error) {
-	if operation.resolveContext != nil {
-		return operation.resolveContext(moduleDir)
-	}
-	root, err := operation.resolveRoot(moduleDir)
-	if err != nil {
-		return moduleContext{}, err
-	}
-	return resolveModuleContext(root)
 }
 
 func (operation dependencyOperation) save(context moduleContext, snap *DependencySnapshot, kind string, backupLimit int) (DependencyBackupInfo, error) {
@@ -65,11 +55,11 @@ func (operation dependencyOperation) loadBackupResolved(context moduleContext, n
 	return operation.loadBackup(context, name)
 }
 
-func (operation dependencyOperation) restore(moduleDir string, snap *DependencySnapshot) error {
+func (operation dependencyOperation) restore(context moduleContext, snap *DependencySnapshot) error {
 	if operation.restoreFiles == nil {
-		return RestoreModuleFiles(moduleDir, snap)
+		return RestoreModuleFiles(context.Root, snap)
 	}
-	return operation.restoreFiles(moduleDir, snap)
+	return operation.restoreFiles(context, snap)
 }
 
 // ListModuleDependencies lists current module dependencies without
@@ -91,24 +81,20 @@ func listModuleDependencies(
 	checkUpdates bool,
 	operation dependencyOperation,
 ) ([]ModuleDependency, error) {
-	root, err := operation.resolveRoot(moduleDir)
+	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
 		return nil, err
 	}
-	return operation.load(root, checkUpdates)
+	return operation.load(context, checkUpdates)
 }
 
-// RunModuleDependencyChecks runs `go test ./...` followed by
+// runModuleDependencyChecks runs `go test ./...` followed by
 // `go vet ./...` in the module that contains moduleDir.
-func RunModuleDependencyChecks(moduleDir string) (DependencyCheckResult, error) {
-	return runModuleDependencyChecks(moduleDir, defaultDependencyOperation())
-}
-
 func runModuleDependencyChecks(
 	moduleDir string,
 	operation dependencyOperation,
 ) (DependencyCheckResult, error) {
-	root, err := operation.resolveRoot(moduleDir)
+	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
 		return DependencyCheckResult{}, err
 	}
@@ -128,7 +114,7 @@ func runModuleDependencyChecks(
 	}
 
 	for _, check := range checks {
-		out, err := operation.runCommand(root, check.args...)
+		out, err := operation.runCommand(context, check.args...)
 		if err != nil {
 			return DependencyCheckResult{
 				OK:      false,
@@ -141,34 +127,12 @@ func runModuleDependencyChecks(
 	return DependencyCheckResult{OK: true}, nil
 }
 
-// UpdateModuleDependencies runs `go get` for each update entry, then
-// `go mod tidy`, and finally re-checks available updates. It takes a
-// snapshot of go.mod and go.sum before running go get so the caller
-// can roll back on check failure. The cycle/executor performs
-// compensation when this returns an error.
-func UpdateModuleDependencies(
-	moduleDir string,
-	entries []DependencyUpdateEntry,
-	backupLimit int,
-) (DependencyUpdateResult, error) {
-	snap, _, deps, err := applyModuleUpdates(moduleDir, entries, backupLimit, defaultDependencyOperation())
-	if err != nil {
-		return DependencyUpdateResult{}, err
-	}
-	return DependencyUpdateResult{
-		Updated:      len(entries),
-		Dependencies: deps,
-		Snapshot:     snap,
-	}, nil
-}
-
 // applyModuleUpdates is the single orchestration for applying direct
-// dependency updates, shared by UpdateModuleDependencies and the
-// default executor Operations. It snapshots the module files, saves a
-// persistent pre-update backup, runs `go get` and `go mod tidy`, then
-// refreshes the dependency list. On a `go get`/`tidy` failure the
-// snapshot and backup are returned alongside the error so the caller
-// (cycle/executor) can compensate.
+// dependency updates, used by the default executor Operations. It
+// snapshots the module files, saves a persistent pre-update backup,
+// runs `go get` and `go mod tidy`, then refreshes the dependency list.
+// On a `go get`/`tidy` failure the snapshot and backup are returned
+// alongside the error so the caller (cycle/executor) can compensate.
 func applyModuleUpdates(
 	moduleDir string,
 	entries []DependencyUpdateEntry,
@@ -179,7 +143,7 @@ func applyModuleUpdates(
 		return nil, nil, nil, fmt.Errorf("no direct dependency updates available")
 	}
 
-	context, err := operation.resolve(moduleDir)
+	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -198,15 +162,15 @@ func applyModuleUpdates(
 		args = append(args, fmt.Sprintf("%s@%s", entry.Path, entry.NewVersion))
 	}
 
-	if out, err := operation.runCommand(context.Root, args...); err != nil {
+	if out, err := operation.runCommand(context, args...); err != nil {
 		return snap, &backup, nil, fmt.Errorf("go get failed: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	if out, err := operation.runCommand(context.Root, "mod", "tidy"); err != nil {
+	if out, err := operation.runCommand(context, "mod", "tidy"); err != nil {
 		return snap, &backup, nil, fmt.Errorf("go mod tidy failed: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	dependencies, err := operation.load(context.Root, true)
+	dependencies, err := operation.load(context, true)
 	if err != nil {
 		return snap, &backup, nil, err
 	}
@@ -214,32 +178,24 @@ func applyModuleUpdates(
 	return snap, &backup, dependencies, nil
 }
 
-// RollbackModuleDependencies restores go.mod and go.sum verbatim from
+// rollbackModuleDependencies restores go.mod and go.sum verbatim from
 // snap (exact byte restore, no `go mod tidy`) and refreshes the
-// dependency list offline. The persistent pre-update backup captured
-// during apply is retained on disk so the user can recover manually.
-func RollbackModuleDependencies(
-	moduleDir string,
-	snap *DependencySnapshot,
-) (DependencyRollbackResult, error) {
-	return rollbackModuleDependencies(moduleDir, snap, defaultDependencyOperation())
-}
-
+// dependency list offline. Used by the default executor Operations.
 func rollbackModuleDependencies(
 	moduleDir string,
 	snap *DependencySnapshot,
 	operation dependencyOperation,
 ) (DependencyRollbackResult, error) {
-	root, err := operation.resolveRoot(moduleDir)
+	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
 		return DependencyRollbackResult{}, err
 	}
 
-	if err := operation.restore(root, snap); err != nil {
+	if err := operation.restore(context, snap); err != nil {
 		return DependencyRollbackResult{}, err
 	}
 
-	dependencies, err := operation.load(root, false)
+	dependencies, err := operation.load(context, false)
 	if err != nil {
 		return DependencyRollbackResult{}, err
 	}
@@ -269,7 +225,7 @@ func restoreDependencyBackup(
 	backupLimit int,
 	operation dependencyOperation,
 ) (DependencyRestoreResult, error) {
-	context, err := operation.resolve(moduleDir)
+	context, err := resolveModuleContext(moduleDir)
 	if err != nil {
 		return DependencyRestoreResult{}, err
 	}
@@ -284,9 +240,9 @@ func restoreDependencyBackup(
 	if _, err := operation.save(context, current, DependencyBackupKindPreRestore, backupLimit); err != nil {
 		return DependencyRestoreResult{}, err
 	}
-	if err := operation.restore(context.Root, backup.Snapshot); err != nil {
+	if err := operation.restore(context, backup.Snapshot); err != nil {
 		restoreErr := fmt.Errorf("restore backup module files: %w", err)
-		if compensationErr := operation.restore(context.Root, current); compensationErr != nil {
+		if compensationErr := operation.restore(context, current); compensationErr != nil {
 			return DependencyRestoreResult{}, errors.Join(
 				restoreErr,
 				fmt.Errorf("restore original module files after backup restore failure: %w", compensationErr),
@@ -295,7 +251,7 @@ func restoreDependencyBackup(
 		return DependencyRestoreResult{}, restoreErr
 	}
 
-	dependencies, err := operation.load(context.Root, false)
+	dependencies, err := operation.load(context, false)
 	if err != nil {
 		return DependencyRestoreResult{}, err
 	}
@@ -305,16 +261,6 @@ func restoreDependencyBackup(
 		BackupCreated: backup.CreatedAt,
 		Dependencies:  dependencies,
 	}, nil
-}
-
-const maxCheckOutputLines = 8
-
-func trimOutput(out string) string {
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) > maxCheckOutputLines {
-		lines = append(lines[:maxCheckOutputLines], fmt.Sprintf("… (%d more lines)", len(lines)-maxCheckOutputLines))
-	}
-	return strings.Join(lines, "\n")
 }
 
 func loadDependencies(moduleDir string, checkUpdates bool) ([]ModuleDependency, error) {

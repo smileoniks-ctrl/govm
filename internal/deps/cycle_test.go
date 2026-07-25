@@ -66,10 +66,7 @@ func TestHappyPath_UpdatedVerified(t *testing.T) {
 	c, intent, err := c.Handle(StartEvent{ModuleDir: "/mod"})
 	assertNoErr(t, err)
 	assertPhase(t, c, PhaseChecking)
-	checkUpdatesIntent := assertIntent[IntentCheckUpdates](t, intent)
-	if checkUpdatesIntent.ModuleDir != "/mod" {
-		t.Fatalf("ModuleDir = %q", checkUpdatesIntent.ModuleDir)
-	}
+	assertIntent[IntentCheckUpdates](t, intent)
 
 	c, intent, err = c.Handle(CheckUpdatesDoneEvent{Dependencies: updatableDeps()})
 	assertNoErr(t, err)

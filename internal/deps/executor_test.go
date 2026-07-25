@@ -9,12 +9,12 @@ import (
 // Executor. Each function field defaults to a no-op or zero return;
 // tests set the fields they need and optionally inspect recorded calls.
 type mockOps struct {
-	checkUpdatesFn func(string) ([]ModuleDependency, error)
-	applyUpdatesFn func(string, []DependencyUpdateEntry, int) (
+	checkUpdatesFn func(moduleContext) ([]ModuleDependency, error)
+	applyUpdatesFn func(moduleContext, []DependencyUpdateEntry, int) (
 		*DependencySnapshot, *DependencyBackupInfo, []ModuleDependency, error,
 	)
-	restoreExactFn func(string, *DependencySnapshot) ([]ModuleDependency, error)
-	runChecksFn    func(string) (DependencyCheckResult, error)
+	restoreExactFn func(moduleContext, *DependencySnapshot) ([]ModuleDependency, error)
+	runChecksFn    func(moduleContext) (DependencyCheckResult, error)
 
 	checkUpdatesCalls []string
 	applyEntries      []DependencyUpdateEntry
@@ -28,42 +28,42 @@ type restoreCall struct {
 	snapshot  *DependencySnapshot
 }
 
-func (m *mockOps) CheckUpdates(moduleDir string) ([]ModuleDependency, error) {
-	m.checkUpdatesCalls = append(m.checkUpdatesCalls, moduleDir)
+func (m *mockOps) CheckUpdates(context moduleContext) ([]ModuleDependency, error) {
+	m.checkUpdatesCalls = append(m.checkUpdatesCalls, context.Root)
 	if m.checkUpdatesFn != nil {
-		return m.checkUpdatesFn(moduleDir)
+		return m.checkUpdatesFn(context)
 	}
 	return nil, nil
 }
 
 func (m *mockOps) ApplyUpdates(
-	moduleDir string,
+	context moduleContext,
 	entries []DependencyUpdateEntry,
 	backupLimit int,
 ) (*DependencySnapshot, *DependencyBackupInfo, []ModuleDependency, error) {
 	m.applyEntries = entries
 	m.applyLimits = append(m.applyLimits, backupLimit)
 	if m.applyUpdatesFn != nil {
-		return m.applyUpdatesFn(moduleDir, entries, backupLimit)
+		return m.applyUpdatesFn(context, entries, backupLimit)
 	}
 	return nil, nil, nil, nil
 }
 
 func (m *mockOps) RestoreExact(
-	moduleDir string,
+	context moduleContext,
 	snapshot *DependencySnapshot,
 ) ([]ModuleDependency, error) {
-	m.restoreCalls = append(m.restoreCalls, restoreCall{moduleDir: moduleDir, snapshot: snapshot})
+	m.restoreCalls = append(m.restoreCalls, restoreCall{moduleDir: context.Root, snapshot: snapshot})
 	if m.restoreExactFn != nil {
-		return m.restoreExactFn(moduleDir, snapshot)
+		return m.restoreExactFn(context, snapshot)
 	}
 	return nil, nil
 }
 
-func (m *mockOps) RunChecks(moduleDir string) (DependencyCheckResult, error) {
-	m.checksCalls = append(m.checksCalls, moduleDir)
+func (m *mockOps) RunChecks(context moduleContext) (DependencyCheckResult, error) {
+	m.checksCalls = append(m.checksCalls, context.Root)
 	if m.runChecksFn != nil {
-		return m.runChecksFn(moduleDir)
+		return m.runChecksFn(context)
 	}
 	return DependencyCheckResult{}, nil
 }
@@ -80,13 +80,14 @@ func mustExecute(t *testing.T, exec *Executor, intent Intent) Event {
 
 func TestExecutor_CheckUpdates(t *testing.T) {
 	ops := &mockOps{
-		checkUpdatesFn: func(string) ([]ModuleDependency, error) {
+		checkUpdatesFn: func(moduleContext) ([]ModuleDependency, error) {
 			return updatableDeps(), nil
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
-	done, ok := mustExecute(t, exec, IntentCheckUpdates{ModuleDir: "/mod"}).(CheckUpdatesDoneEvent)
+	done, ok := mustExecute(t, exec, IntentCheckUpdates{}).(CheckUpdatesDoneEvent)
 	if !ok {
 		t.Fatalf("event type mismatch")
 	}
@@ -96,21 +97,22 @@ func TestExecutor_CheckUpdates(t *testing.T) {
 	if len(done.Dependencies) != 3 {
 		t.Fatalf("Dependencies = %d, want 3", len(done.Dependencies))
 	}
-	if len(ops.checkUpdatesCalls) != 1 || ops.checkUpdatesCalls[0] != "/mod" {
-		t.Fatalf("checkUpdatesCalls = %v, want [/mod]", ops.checkUpdatesCalls)
+	if len(ops.checkUpdatesCalls) != 1 || ops.checkUpdatesCalls[0] != "/test/root" {
+		t.Fatalf("checkUpdatesCalls = %v, want [/test/root]", ops.checkUpdatesCalls)
 	}
 }
 
 func TestExecutor_CheckUpdates_PropagatesError(t *testing.T) {
 	checkErr := errors.New("network down")
 	ops := &mockOps{
-		checkUpdatesFn: func(string) ([]ModuleDependency, error) {
+		checkUpdatesFn: func(moduleContext) ([]ModuleDependency, error) {
 			return nil, checkErr
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
-	done, ok := mustExecute(t, exec, IntentCheckUpdates{ModuleDir: "/mod"}).(CheckUpdatesDoneEvent)
+	done, ok := mustExecute(t, exec, IntentCheckUpdates{}).(CheckUpdatesDoneEvent)
 	if !ok {
 		t.Fatalf("event type mismatch")
 	}
@@ -128,15 +130,16 @@ func TestExecutor_ApplyUpdates_Success(t *testing.T) {
 	refreshed := []ModuleDependency{{Path: "example.com/dep", Version: "v1.1.0"}}
 
 	ops := &mockOps{
-		applyUpdatesFn: func(_ string, _ []DependencyUpdateEntry, _ int) (
+		applyUpdatesFn: func(_ moduleContext, _ []DependencyUpdateEntry, _ int) (
 			*DependencySnapshot, *DependencyBackupInfo, []ModuleDependency, error,
 		) {
 			return snap, &backup, refreshed, nil
 		},
 	}
-	exec := NewExecutor(ops, 7)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 7)
 
-	done, ok := mustExecute(t, exec, IntentApplyUpdates{ModuleDir: "/mod", Entries: entries}).(ApplyUpdatesDoneEvent)
+	done, ok := mustExecute(t, exec, IntentApplyUpdates{Entries: entries}).(ApplyUpdatesDoneEvent)
 	if !ok {
 		t.Fatalf("event type mismatch")
 	}
@@ -169,15 +172,16 @@ func TestExecutor_ApplyUpdates_Failure_StillReturnsSnapshotAndBackup(t *testing.
 	applyErr := errors.New("go get failed")
 
 	ops := &mockOps{
-		applyUpdatesFn: func(string, []DependencyUpdateEntry, int) (
+		applyUpdatesFn: func(moduleContext, []DependencyUpdateEntry, int) (
 			*DependencySnapshot, *DependencyBackupInfo, []ModuleDependency, error,
 		) {
 			return snap, &backup, nil, applyErr
 		},
 	}
-	exec := NewExecutor(ops, 3)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 3)
 
-	done, ok := mustExecute(t, exec, IntentApplyUpdates{ModuleDir: "/mod", Entries: entries}).(ApplyUpdatesDoneEvent)
+	done, ok := mustExecute(t, exec, IntentApplyUpdates{Entries: entries}).(ApplyUpdatesDoneEvent)
 	if !ok {
 		t.Fatalf("event type mismatch")
 	}
@@ -196,13 +200,14 @@ func TestExecutor_Compensate(t *testing.T) {
 	snap := testSnapshot()
 	restored := []ModuleDependency{{Path: "example.com/dep", Version: "v1.0.0"}}
 	ops := &mockOps{
-		restoreExactFn: func(_ string, _ *DependencySnapshot) ([]ModuleDependency, error) {
+		restoreExactFn: func(_ moduleContext, _ *DependencySnapshot) ([]ModuleDependency, error) {
 			return restored, nil
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
-	done, ok := mustExecute(t, exec, IntentCompensate{ModuleDir: "/mod", Snapshot: snap}).(CompensateDoneEvent)
+	done, ok := mustExecute(t, exec, IntentCompensate{Snapshot: snap}).(CompensateDoneEvent)
 	if !ok {
 		t.Fatalf("event type mismatch")
 	}
@@ -222,13 +227,14 @@ func TestExecutor_Compensate(t *testing.T) {
 
 func TestExecutor_RunChecks(t *testing.T) {
 	ops := &mockOps{
-		runChecksFn: func(string) (DependencyCheckResult, error) {
+		runChecksFn: func(moduleContext) (DependencyCheckResult, error) {
 			return DependencyCheckResult{OK: true}, nil
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
-	done, ok := mustExecute(t, exec, IntentRunChecks{ModuleDir: "/mod"}).(ChecksDoneEvent)
+	done, ok := mustExecute(t, exec, IntentRunChecks{}).(ChecksDoneEvent)
 	if !ok {
 		t.Fatalf("event type mismatch")
 	}
@@ -244,13 +250,14 @@ func TestExecutor_Rollback(t *testing.T) {
 	snap := testSnapshot()
 	restored := []ModuleDependency{{Path: "example.com/dep", Version: "v1.0.0"}}
 	ops := &mockOps{
-		restoreExactFn: func(_ string, _ *DependencySnapshot) ([]ModuleDependency, error) {
+		restoreExactFn: func(_ moduleContext, _ *DependencySnapshot) ([]ModuleDependency, error) {
 			return restored, nil
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
-	done, ok := mustExecute(t, exec, IntentRollback{ModuleDir: "/mod", Snapshot: snap}).(RollbackDoneEvent)
+	done, ok := mustExecute(t, exec, IntentRollback{Snapshot: snap}).(RollbackDoneEvent)
 	if !ok {
 		t.Fatalf("event type mismatch")
 	}
@@ -266,13 +273,14 @@ func TestExecutor_Rollback_PropagatesError(t *testing.T) {
 	snap := testSnapshot()
 	restoreErr := errors.New("restore failed")
 	ops := &mockOps{
-		restoreExactFn: func(string, *DependencySnapshot) ([]ModuleDependency, error) {
+		restoreExactFn: func(moduleContext, *DependencySnapshot) ([]ModuleDependency, error) {
 			return nil, restoreErr
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
-	done, ok := mustExecute(t, exec, IntentRollback{ModuleDir: "/mod", Snapshot: snap}).(RollbackDoneEvent)
+	done, ok := mustExecute(t, exec, IntentRollback{Snapshot: snap}).(RollbackDoneEvent)
 	if !ok {
 		t.Fatalf("event type mismatch")
 	}
@@ -282,7 +290,8 @@ func TestExecutor_Rollback_PropagatesError(t *testing.T) {
 }
 
 func TestExecutor_NonOperationalIntentReturnsError(t *testing.T) {
-	exec := NewExecutor(nil, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, nil, 5)
 
 	tests := []Intent{
 		nil,
@@ -308,7 +317,12 @@ func TestExecutor_NonOperationalIntentReturnsError(t *testing.T) {
 }
 
 func TestNewExecutor_NilOpsUsesDefault(t *testing.T) {
-	exec := NewExecutor(nil, 0)
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module example.com/test\n\ngo 1.26\n")
+	exec, err := NewExecutor(root, nil, 0)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
 	if exec.ops == nil {
 		t.Fatal("ops should be defaultOperations, not nil")
 	}
@@ -319,7 +333,8 @@ func TestNewExecutor_NilOpsUsesDefault(t *testing.T) {
 
 func TestNewExecutor_RespectsBackupLimit(t *testing.T) {
 	ops := &mockOps{}
-	exec := NewExecutor(ops, 42)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 42)
 	if exec.backupLimit != 42 {
 		t.Fatalf("backupLimit = %d, want 42", exec.backupLimit)
 	}
@@ -356,10 +371,10 @@ func TestIsOperational(t *testing.T) {
 
 func TestEndToEnd_UpdatedVerified(t *testing.T) {
 	ops := &mockOps{
-		checkUpdatesFn: func(string) ([]ModuleDependency, error) {
+		checkUpdatesFn: func(moduleContext) ([]ModuleDependency, error) {
 			return updatableDeps(), nil
 		},
-		applyUpdatesFn: func(_ string, entries []DependencyUpdateEntry, _ int) (
+		applyUpdatesFn: func(_ moduleContext, entries []DependencyUpdateEntry, _ int) (
 			*DependencySnapshot, *DependencyBackupInfo, []ModuleDependency, error,
 		) {
 			snap := testSnapshot()
@@ -368,11 +383,12 @@ func TestEndToEnd_UpdatedVerified(t *testing.T) {
 			refreshed := []ModuleDependency{{Path: "example.com/updatable", Version: "v1.1.0"}}
 			return snap, &backup, refreshed, nil
 		},
-		runChecksFn: func(string) (DependencyCheckResult, error) {
+		runChecksFn: func(moduleContext) (DependencyCheckResult, error) {
 			return DependencyCheckResult{OK: true}, nil
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
 	c := NewUpdateCycle()
 	c, intent, _ := c.Handle(StartEvent{ModuleDir: "/mod"})
@@ -401,10 +417,10 @@ func TestEndToEnd_UpdatedVerified(t *testing.T) {
 func TestEndToEnd_RolledBack(t *testing.T) {
 	restoredDeps := []ModuleDependency{{Path: "example.com/updatable", Version: "v1.0.0"}}
 	ops := &mockOps{
-		checkUpdatesFn: func(string) ([]ModuleDependency, error) {
+		checkUpdatesFn: func(moduleContext) ([]ModuleDependency, error) {
 			return updatableDeps(), nil
 		},
-		applyUpdatesFn: func(_ string, entries []DependencyUpdateEntry, _ int) (
+		applyUpdatesFn: func(_ moduleContext, entries []DependencyUpdateEntry, _ int) (
 			*DependencySnapshot, *DependencyBackupInfo, []ModuleDependency, error,
 		) {
 			snap := testSnapshot()
@@ -412,14 +428,15 @@ func TestEndToEnd_RolledBack(t *testing.T) {
 			backup := DependencyBackupInfo{Name: "b.json", Path: "/b.json"}
 			return snap, &backup, updatableDeps(), nil
 		},
-		runChecksFn: func(string) (DependencyCheckResult, error) {
+		runChecksFn: func(moduleContext) (DependencyCheckResult, error) {
 			return DependencyCheckResult{OK: false, Command: "go test ./..."}, nil
 		},
-		restoreExactFn: func(string, *DependencySnapshot) ([]ModuleDependency, error) {
+		restoreExactFn: func(moduleContext, *DependencySnapshot) ([]ModuleDependency, error) {
 			return restoredDeps, nil
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
 	c := NewUpdateCycle()
 	c, intent, _ := c.Handle(StartEvent{ModuleDir: "/mod"})
@@ -446,10 +463,10 @@ func TestEndToEnd_RolledBack(t *testing.T) {
 func TestEndToEnd_UpdateFailedRestored(t *testing.T) {
 	restoredDeps := []ModuleDependency{{Path: "example.com/updatable", Version: "v1.0.0"}}
 	ops := &mockOps{
-		checkUpdatesFn: func(string) ([]ModuleDependency, error) {
+		checkUpdatesFn: func(moduleContext) ([]ModuleDependency, error) {
 			return updatableDeps(), nil
 		},
-		applyUpdatesFn: func(_ string, entries []DependencyUpdateEntry, _ int) (
+		applyUpdatesFn: func(_ moduleContext, entries []DependencyUpdateEntry, _ int) (
 			*DependencySnapshot, *DependencyBackupInfo, []ModuleDependency, error,
 		) {
 			snap := testSnapshot()
@@ -457,11 +474,12 @@ func TestEndToEnd_UpdateFailedRestored(t *testing.T) {
 			backup := DependencyBackupInfo{Name: "b.json", Path: "/b.json"}
 			return snap, &backup, nil, errors.New("go get failed: exit 1")
 		},
-		restoreExactFn: func(string, *DependencySnapshot) ([]ModuleDependency, error) {
+		restoreExactFn: func(moduleContext, *DependencySnapshot) ([]ModuleDependency, error) {
 			return restoredDeps, nil
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
 	c := NewUpdateCycle()
 	c, intent, _ := c.Handle(StartEvent{ModuleDir: "/mod"})
@@ -481,10 +499,10 @@ func TestEndToEnd_UpdateFailedRestored(t *testing.T) {
 
 func TestEndToEnd_RecoveryRequired_CompensationFailed(t *testing.T) {
 	ops := &mockOps{
-		checkUpdatesFn: func(string) ([]ModuleDependency, error) {
+		checkUpdatesFn: func(moduleContext) ([]ModuleDependency, error) {
 			return updatableDeps(), nil
 		},
-		applyUpdatesFn: func(_ string, entries []DependencyUpdateEntry, _ int) (
+		applyUpdatesFn: func(_ moduleContext, entries []DependencyUpdateEntry, _ int) (
 			*DependencySnapshot, *DependencyBackupInfo, []ModuleDependency, error,
 		) {
 			snap := testSnapshot()
@@ -492,11 +510,12 @@ func TestEndToEnd_RecoveryRequired_CompensationFailed(t *testing.T) {
 			backup := DependencyBackupInfo{Name: "b.json", Path: "/b.json"}
 			return snap, &backup, nil, errors.New("go get failed")
 		},
-		restoreExactFn: func(string, *DependencySnapshot) ([]ModuleDependency, error) {
+		restoreExactFn: func(moduleContext, *DependencySnapshot) ([]ModuleDependency, error) {
 			return nil, errors.New("restore failed")
 		},
 	}
-	exec := NewExecutor(ops, 5)
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops, 5)
 
 	c := NewUpdateCycle()
 	c, intent, _ := c.Handle(StartEvent{ModuleDir: "/mod"})
@@ -535,10 +554,10 @@ func step(t *testing.T, exec *Executor, c UpdateCycle, intent Intent) (UpdateCyc
 
 func stepApply(t *testing.T, exec *Executor, c UpdateCycle) (UpdateCycle, Intent) {
 	t.Helper()
-	return step(t, exec, c, IntentApplyUpdates{ModuleDir: c.ModuleDir(), Entries: c.Entries()})
+	return step(t, exec, c, IntentApplyUpdates{Entries: c.Entries()})
 }
 
 func stepChecks(t *testing.T, exec *Executor, c UpdateCycle) (UpdateCycle, Intent) {
 	t.Helper()
-	return step(t, exec, c, IntentRunChecks{ModuleDir: c.ModuleDir()})
+	return step(t, exec, c, IntentRunChecks{})
 }

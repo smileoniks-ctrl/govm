@@ -210,7 +210,11 @@ func (a *App) DepsCommand(args ...string) {
 	if len(args) > 0 {
 		subcommand = args[0]
 	}
-	service := NewDepsService(cwd, a.out, a.in)
+	service, err := NewDepsService(cwd, a.out, a.in)
+	if err != nil {
+		fmt.Fprintf(a.out, "❌ Error: %v\n", err)
+		return
+	}
 	switch subcommand {
 	case "list":
 		err = service.RunList()
