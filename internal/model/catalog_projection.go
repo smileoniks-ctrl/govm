@@ -157,6 +157,8 @@ func (a *catalogProjectionAdapter) startLoad(purpose catalogLoadPurpose) catalog
 	if a.reconciliation.active {
 		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
 	}
+	a.refilterPending = false
+	a.pendingRestore = catalogProjectionPendingRestore{}
 	request := a.registerLoad(purpose)
 	if !a.hasActiveMutation() {
 		a.phase = catalogOperationPhaseLoading
