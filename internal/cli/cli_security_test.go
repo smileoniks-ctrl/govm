@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
+	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
-func TestFindInstalledVersionRejectsTraversalQueries(t *testing.T) {
+func TestRegistryFindRejectsTraversalQueries(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
@@ -21,8 +25,11 @@ func TestFindInstalledVersionRejectsTraversalQueries(t *testing.T) {
 		"go../../../..",
 	} {
 		t.Run(query, func(t *testing.T) {
-			if _, err := findInstalledVersion(query); err == nil {
-				t.Fatalf("findInstalledVersion(%q) resolved a traversal query", query)
+			registry := local.NewRegistry(&paths.Resolver{HomeDir: func() (string, error) {
+				return home, nil
+			}})
+			if _, err := registry.Find(context.Background(), query); err == nil {
+				t.Fatalf("registry.Find(%q) resolved a traversal query", query)
 			}
 		})
 	}

@@ -335,8 +335,7 @@ func TestLoadVersionCatalog_WithRealLocalAdapters(t *testing.T) {
 				},
 			},
 		},
-		LocalVersions: local.NewVersionScanner(resolver),
-		ActiveVersion: local.NewActiveReader(resolver),
+		LocalRegistry: local.NewRegistry(resolver),
 		Platform:      Platform{OS: "linux", Arch: "amd64"},
 	}
 

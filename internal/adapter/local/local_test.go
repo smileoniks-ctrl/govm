@@ -83,9 +83,12 @@ func TestVersionScanner_ScanInstalled(t *testing.T) {
 		}
 		scanner2 := NewVersionScanner(resolver2)
 
-		_, err := scanner2.ScanInstalled(context.Background())
-		if err == nil {
-			t.Error("expected error for missing directory, got nil")
+		installed, err := scanner2.ScanInstalled(context.Background())
+		if err != nil {
+			t.Fatalf("ScanInstalled failed: %v", err)
+		}
+		if len(installed) != 0 {
+			t.Fatalf("expected no installed versions, got %d", len(installed))
 		}
 	})
 

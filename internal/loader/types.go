@@ -3,6 +3,7 @@ package loader
 import (
 	"context"
 
+	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -25,6 +26,7 @@ type Platform struct {
 // needs. Each dependency is substitutable for testing.
 type Dependencies struct {
 	ReleaseSource      ReleaseSource
+	LocalRegistry      local.Registry
 	LocalVersions      LocalVersions
 	ActiveVersion      ActiveVersion
 	Platform           Platform
@@ -36,19 +38,17 @@ type ReleaseSource interface {
 	FetchReleases(ctx context.Context) ([]Release, error)
 }
 
-// LocalVersions scans the local govm versions directory for installed
-// Go toolchains.
+// LocalVersions is the legacy split local-state seam retained for
+// compatibility with older tests. Production wiring uses LocalRegistry.
 type LocalVersions interface {
-	ScanInstalled(ctx context.Context) (map[string]string, error)
+	ScanInstalled(context.Context) (map[string]string, error)
 }
 
-// ActiveVersion reads the currently active Go version. ReadActive
-// returns ("", nil) when no active version is recorded (fresh install).
-// GetFromPath provides an exec-based fallback when the active version
-// file is absent or empty.
+// ActiveVersion is the legacy split active-state seam retained for
+// compatibility with older tests. Production wiring uses LocalRegistry.
 type ActiveVersion interface {
-	ReadActive(ctx context.Context) (string, error)
-	GetFromPath(ctx context.Context) string
+	ReadActive(context.Context) (string, error)
+	GetFromPath(context.Context) string
 }
 
 // Release mirrors a single go.dev release entry. The Version field

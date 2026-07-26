@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
@@ -27,7 +28,7 @@ func TestAppDeleteReadsInjectedConfirmation(t *testing.T) {
 
 	var out bytes.Buffer
 	app := NewApp(Operations{
-		Resolver: paths.New(),
+		Registry: local.NewRegistry(paths.New()),
 		Delete: func(context.Context, string) (lifecycle.DeletionResult, error) {
 			return lifecycle.DeletionResult{Version: "1.24.0"}, nil
 		},

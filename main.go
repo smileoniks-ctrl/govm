@@ -40,7 +40,7 @@ func main() {
 		Delete:       runtime.Lifecycle.Delete,
 		PreviewPrune: runtime.Prune.Preview,
 		Prune:        runtime.Prune.Prune,
-		Resolver:     runtime.Paths,
+		Registry:     runtime.Registry,
 		ShimInPath:   utils.IsShimInPath,
 	}, os.Stdin, os.Stdout, os.Stderr)
 	if len(os.Args) > 1 {

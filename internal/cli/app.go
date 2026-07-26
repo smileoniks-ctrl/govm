@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
@@ -20,11 +21,6 @@ type activateFunc func(context.Context, string) (lifecycle.ActivationResult, err
 type deleteFunc func(context.Context, string) (lifecycle.DeletionResult, error)
 type prunePreviewFunc func(context.Context) (prune.Result, error)
 type pruneFunc func(context.Context) (prune.Result, error)
-
-type pathResolver interface {
-	ActiveVersionFile() (string, error)
-	VersionsDir() (string, error)
-}
 
 // InstallVersion resolves and installs a Go version from the configured
 // distribution source.
@@ -50,7 +46,7 @@ type Operations struct {
 	Delete       deleteFunc
 	PreviewPrune prunePreviewFunc
 	Prune        pruneFunc
-	Resolver     pathResolver
+	Registry     local.Registry
 	ShimInPath   func() bool
 }
 
@@ -73,8 +69,8 @@ func NewApp(operations Operations, in io.Reader, out, errOut io.Writer) *App {
 	if errOut == nil {
 		errOut = io.Discard
 	}
-	if operations.Resolver == nil {
-		operations.Resolver = paths.New()
+	if operations.Registry == nil {
+		operations.Registry = local.NewRegistry(paths.New())
 	}
 	if operations.ShimInPath == nil {
 		operations.ShimInPath = utils.IsShimInPath
@@ -85,11 +81,16 @@ func NewApp(operations Operations, in io.Reader, out, errOut io.Writer) *App {
 // UseVersion resolves and activates an installed Go version.
 func (a *App) UseVersion(version string) {
 	fmt.Fprintf(a.out, "🔍 Looking for installed Go version matching %s...\n", version)
-	matchedVersion, err := findInstalledVersion(version)
+	matchedToolchain, err := a.operations.Registry.Find(context.Background(), version)
 	if err != nil {
-		fmt.Fprintf(a.out, "❌ %s\n", err)
+		if errors.Is(err, local.ErrNotFound) {
+			fmt.Fprintf(a.out, "❌ no installed version matching '%s' found\n", version)
+		} else {
+			fmt.Fprintf(a.out, "❌ failed to read installed versions: %v\n", err)
+		}
 		return
 	}
+	matchedVersion := utils.GoVersion{Version: matchedToolchain.Version, Path: matchedToolchain.Path, Installed: true}
 	fmt.Fprintf(a.out, "🔄 Switching to Go %s...\n", matchedVersion.Version)
 	if a.operations.Activate == nil {
 		fmt.Fprintln(a.out, "❌ Failed to switch version: no lifecycle activator configured")
@@ -115,42 +116,25 @@ func (a *App) UseVersion(version string) {
 // ListVersions prints installed Go versions.
 func (a *App) ListVersions() {
 	fmt.Fprintln(a.out, "📋 Installed Go Versions:")
-	activeVersionFile, err := a.operations.Resolver.ActiveVersionFile()
+	toolchains, err := a.operations.Registry.List(context.Background())
 	if err != nil {
-		fmt.Fprintf(a.out, "❌ Error resolving active version path: %v\n", err)
+		fmt.Fprintf(a.out, "❌ Error reading installed versions: %v\n", err)
 		return
 	}
-	activeVersion := ""
-	if versionBytes, err := os.ReadFile(activeVersionFile); err == nil {
-		activeVersion = string(versionBytes)
-	}
-	goVersionsDir, err := a.operations.Resolver.VersionsDir()
+	activeVersion, err := a.operations.Registry.Active(context.Background())
 	if err != nil {
-		fmt.Fprintf(a.out, "❌ Error resolving versions directory: %v\n", err)
+		fmt.Fprintf(a.out, "❌ Error reading active version: %v\n", err)
 		return
 	}
-	entries, err := os.ReadDir(goVersionsDir)
-	if os.IsNotExist(err) {
+	if len(toolchains) == 0 {
 		fmt.Fprintln(a.out, "  No versions installed yet")
 		return
 	}
-	if err != nil {
-		fmt.Fprintf(a.out, "❌ Error reading versions directory: %v\n", err)
-		return
-	}
-	if len(entries) == 0 {
-		fmt.Fprintln(a.out, "  No versions installed yet")
-		return
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "go") {
-			continue
-		}
-		version := strings.TrimPrefix(entry.Name(), "go")
-		if version == activeVersion {
-			fmt.Fprintf(a.out, "  %s ✓ (active)\n", version)
+	for _, toolchain := range toolchains {
+		if toolchain.Version == activeVersion {
+			fmt.Fprintf(a.out, "  %s ✓ (active)\n", toolchain.Version)
 		} else {
-			fmt.Fprintf(a.out, "  %s\n", version)
+			fmt.Fprintf(a.out, "  %s\n", toolchain.Version)
 		}
 	}
 	fmt.Fprintln(a.out, "\nTo install a new version: govm install <version>")
@@ -160,20 +144,21 @@ func (a *App) ListVersions() {
 // DeleteVersion confirms and deletes an installed Go version.
 func (a *App) DeleteVersion(version string) {
 	fmt.Fprintf(a.out, "🔍 Looking for installed Go version matching %s...\n", version)
-	matchedVersion, err := findInstalledVersion(version)
+	matchedToolchain, err := a.operations.Registry.Find(context.Background(), version)
 	if err != nil {
-		fmt.Fprintf(a.out, "❌ %s\n", err)
+		if errors.Is(err, local.ErrNotFound) {
+			fmt.Fprintf(a.out, "❌ no installed version matching '%s' found\n", version)
+		} else {
+			fmt.Fprintf(a.out, "❌ failed to read installed versions: %v\n", err)
+		}
 		return
 	}
+	matchedVersion := utils.GoVersion{Version: matchedToolchain.Version, Path: matchedToolchain.Path, Installed: true}
 
-	activeVersionFile, err := a.operations.Resolver.ActiveVersionFile()
+	activeVersion, err := a.operations.Registry.Active(context.Background())
 	if err != nil {
-		fmt.Fprintf(a.out, "❌ Failed to get home directory: %v\n", err)
+		fmt.Fprintf(a.out, "❌ Failed to read active version: %v\n", err)
 		return
-	}
-	activeVersion := ""
-	if versionBytes, err := os.ReadFile(activeVersionFile); err == nil {
-		activeVersion = string(versionBytes)
 	}
 	if matchedVersion.Version == activeVersion {
 		fmt.Fprintln(a.out, "❌ Cannot delete active version. Switch to another version first using 'govm use'.")

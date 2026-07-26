@@ -8,29 +8,22 @@ import (
 )
 
 type ActiveReader struct {
-	resolver *paths.Resolver
+	registry *FilesystemRegistry
 }
 
 func NewActiveReader(resolver *paths.Resolver) *ActiveReader {
-	return &ActiveReader{resolver: resolver}
+	return &ActiveReader{registry: NewRegistry(resolver)}
 }
 
 func (r *ActiveReader) ReadActive(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-
-	path, err := r.resolver.ActiveVersionFile()
+	path, err := r.registry.resolver.ActiveVersionFile()
 	if err != nil {
 		return "", err
 	}
-
-	version, err := utils.ReadActiveVersion(path)
-	if err != nil {
-		return "", err
-	}
-
-	return version, nil
+	return utils.ReadActiveVersion(path)
 }
 
 func (r *ActiveReader) GetFromPath(ctx context.Context) string {

@@ -26,6 +26,7 @@ import (
 // passes it to CLI and TUI adapters.
 type Runtime struct {
 	Loader    *Loader
+	Registry  local.Registry
 	Lifecycle *lifecycle.Service
 	Install   *install.Service
 	Prune     *prune.Service
@@ -95,14 +96,12 @@ func NewRuntime(settings config.Settings) (*Runtime, error) {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	source := config.Normalize(settings).DistributionSource
 	releaseSource := godev.NewClientForSource(httpClient, source)
-	versionScanner := local.NewVersionScanner(resolver)
-	activeReader := local.NewActiveReader(resolver)
+	localRegistry := local.NewRegistry(resolver)
 	platform := loader.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}
 
 	loaderDeps := loader.Dependencies{
 		ReleaseSource:      releaseSource,
-		LocalVersions:      versionScanner,
-		ActiveVersion:      activeReader,
+		LocalRegistry:      localRegistry,
 		Platform:           platform,
 		DistributionSource: source,
 	}
@@ -121,6 +120,7 @@ func NewRuntime(settings config.Settings) (*Runtime, error) {
 
 	return &Runtime{
 		Loader:    &Loader{deps: loaderDeps, httpClient: httpClient},
+		Registry:  localRegistry,
 		Lifecycle: lifecycleSvc,
 		Install:   installSvc,
 		Prune:     pruneSvc,
