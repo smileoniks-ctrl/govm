@@ -165,6 +165,16 @@ func TestFetchReleases_NetworkError(t *testing.T) {
 	}
 }
 
+// TestFetchReleases_UnparseableURL pins that a source govm cannot turn
+// into a request fails before any transport work rather than panicking.
+func TestFetchReleases_UnparseableURL(t *testing.T) {
+	client := NewClient(&fakeDoer{}, "http://[::1]:namedhost")
+
+	if _, err := client.FetchReleases(context.Background()); err == nil {
+		t.Fatal("expected an error for an unparseable source URL")
+	}
+}
+
 func TestFetchReleases_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)

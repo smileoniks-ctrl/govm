@@ -23,6 +23,17 @@ type goDevPayload []struct {
 	} `json:"files"`
 }
 
+// fetchReleases exercises the production fetch path with a plain GET
+// request, the way the godev adapter builds it.
+func fetchReleases(t *testing.T, client Doer, url string) ([]GoDevRelease, error) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	return FetchGoDevReleasesWithRequest(client, req)
+}
+
 func TestFetchGoDevReleases_Success(t *testing.T) {
 	payload := goDevPayload{
 		{
@@ -60,7 +71,7 @@ func TestFetchGoDevReleases_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	releases, err := fetchGoDevReleases(server.Client(), server.URL)
+	releases, err := fetchReleases(t, server.Client(), server.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -102,7 +113,7 @@ func TestFetchGoDevReleases_MalformedJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	releases, err := fetchGoDevReleases(server.Client(), server.URL)
+	releases, err := fetchReleases(t, server.Client(), server.URL)
 	if err == nil {
 		t.Fatalf("expected error for malformed JSON, got nil with %d releases", len(releases))
 	}
@@ -115,20 +126,9 @@ func TestFetchGoDevReleases_ConnectionFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	server.Close() // force a connection error on the next call
 
-	releases, err := fetchGoDevReleases(server.Client(), server.URL)
+	releases, err := fetchReleases(t, server.Client(), server.URL)
 	if err == nil {
 		t.Fatalf("expected error for closed server, got %d releases", len(releases))
-	}
-	if !strings.Contains(err.Error(), "fetch go.dev releases") {
-		t.Errorf("error should carry the function prefix, got: %v", err)
-	}
-}
-
-func TestFetchGoDevReleases_BadURL(t *testing.T) {
-	// An unparseable URL surfaces the prefix via http.NewRequest.
-	_, err := fetchGoDevReleases(http.DefaultClient, "http://[::1]:namedhost")
-	if err == nil {
-		t.Fatalf("expected error for bad URL")
 	}
 	if !strings.Contains(err.Error(), "fetch go.dev releases") {
 		t.Errorf("error should carry the function prefix, got: %v", err)

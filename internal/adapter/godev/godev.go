@@ -32,7 +32,7 @@ func NewClientForSource(httpClient utils.Doer, source string) *Client {
 
 // FetchReleases fetches the go.dev release catalog and maps it to
 // loader.Release entries. The Version field is normalized (no "go"
-// prefix) by the underlying utils.fetchGoDevReleases helper.
+// prefix) by utils.FetchGoDevReleasesWithRequest.
 func (c *Client) FetchReleases(ctx context.Context) ([]loader.Release, error) {
 	req, err := http.NewRequest(http.MethodGet, c.url, nil)
 	if err != nil {

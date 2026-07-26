@@ -45,29 +45,6 @@ func TestSortGoVersionsDesc(t *testing.T) {
 	}
 }
 
-func TestGoVersionStableSortDescPreservesComparatorEqualOrder(t *testing.T) {
-	records := []GoVersion{
-		{Version: "1.23.0", Filename: "first-1.23.0"},
-		{Version: "1.22", Filename: "first-1.22"},
-		{Version: "1.22.0.0", Filename: "equivalent-1.22"},
-		{Version: "1.22.0", Filename: "second-1.22"},
-		{Version: "1.21.9", Filename: "1.21.9"},
-	}
-	want := []GoVersion{
-		{Version: "1.23.0", Filename: "first-1.23.0"},
-		{Version: "1.22", Filename: "first-1.22"},
-		{Version: "1.22.0.0", Filename: "equivalent-1.22"},
-		{Version: "1.22.0", Filename: "second-1.22"},
-		{Version: "1.21.9", Filename: "1.21.9"},
-	}
-
-	sortGoVersionRecordsDesc(records)
-
-	if !reflect.DeepEqual(records, want) {
-		t.Fatalf("stable GoVersion sort mismatch:\n got: %#v\nwant: %#v", records, want)
-	}
-}
-
 func TestFindLatestGoVersion(t *testing.T) {
 	versions := []string{"1.21.5", "1.22.0", "1.21.10", "1.22.1", "1.20.0", "1.22"}
 

@@ -58,22 +58,12 @@ func LoadVersionCatalog(ctx context.Context, deps Dependencies) (VersionCatalog,
 	}, nil
 }
 
-// buildVersionCatalog merges go.dev releases with the local view of
-// installed and active versions. For each release, the first file
-// matching the target OS/Arch wins. The returned slice is sorted
-// highest-version-first.
+// buildVersionCatalogWithSource merges go.dev releases with the local
+// view of installed and active versions. For each release, the first
+// archive matching the target OS/Arch wins, and its URL is resolved
+// against source. The returned slice is sorted highest-version-first.
 //
-// This is the same pure merge logic previously in utils, extracted
-// here as a private implementation detail of the loader.
-func buildVersionCatalog(
-	releases []Release,
-	targetOS, arch string,
-	installed map[string]string,
-	activeVersion string,
-) []utils.GoVersion {
-	return buildVersionCatalogWithSource(releases, targetOS, arch, installed, activeVersion, config.DefaultDistributionSource)
-}
-
+// An empty source resolves to the official distribution source.
 func buildVersionCatalogWithSource(
 	releases []Release,
 	targetOS, arch string,

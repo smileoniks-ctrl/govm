@@ -20,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
@@ -83,12 +82,6 @@ func CompareGoVersions(v1, v2 string) int {
 func SortGoVersionsDesc(versions []string) {
 	sort.Slice(versions, func(i, j int) bool {
 		return CompareGoVersions(versions[i], versions[j]) > 0
-	})
-}
-
-func sortGoVersionRecordsDesc(records []GoVersion) {
-	sort.SliceStable(records, func(i, j int) bool {
-		return CompareGoVersions(records[i].Version, records[j].Version) > 0
 	})
 }
 
@@ -244,73 +237,6 @@ func FetchGoDevReleasesWithRequest(client Doer, req *http.Request) ([]GoDevRelea
 		releases[i].Version = strings.TrimPrefix(releases[i].Version, "go")
 	}
 	return releases, nil
-}
-
-// fetchGoDevReleases downloads and decodes the go.dev release
-// catalog. The caller owns the client (and its timeout). The
-// returned releases carry versions with the leading "go" prefix
-// already stripped.
-func fetchGoDevReleases(client Doer, url string) ([]GoDevRelease, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
-	}
-	return FetchGoDevReleasesWithRequest(client, req)
-}
-
-// buildVersionCatalog builds the user-facing version list by joining
-// the go.dev release catalog with the local view of installed and
-// active versions. For each release, the first file matching the
-// current OS/Arch wins (consistent with the original behaviour). The
-// returned slice is sorted highest-version-first by the caller.
-//
-// The function is pure: no I/O, no clocks, no global state. That
-// makes the merge logic (release selection, installed/active flags,
-// URL construction) independently testable.
-func buildVersionCatalog(
-	releases []GoDevRelease,
-	currentOS, arch string,
-	installed map[string]string,
-	activeVersion string,
-) []GoVersion {
-	var versions []GoVersion
-	for _, release := range releases {
-		for _, file := range release.Files {
-			if file.OS != currentOS || file.Arch != arch || (file.Kind != "" && file.Kind != "archive") {
-				continue
-			}
-			v := GoVersion{
-				Version:  release.Version,
-				Filename: file.Filename,
-				URL:      strings.TrimRight(config.DefaultDistributionSource, "/") + "/" + file.Filename,
-				SHA256:   file.SHA256,
-				Size:     file.Size,
-				Stable:   release.Stable,
-			}
-			if path, ok := installed[release.Version]; ok {
-				v.Installed = true
-				v.Path = path
-			}
-			if activeVersion == release.Version {
-				v.Active = true
-			}
-			versions = append(versions, v)
-			break
-		}
-	}
-	return versions
-}
-
-// ensureVersionsDir guarantees that the govm versions directory
-// exists. ScanInstalledVersions treats a missing directory as an
-// error rather than as an empty result, so callers must create the
-// directory first. Extracted from FetchGoVersions so the write
-// side-effect is named rather than buried in the read path.
-func ensureVersionsDir(goVersionsDir string) error {
-	if err := os.MkdirAll(goVersionsDir, 0755); err != nil {
-		return fmt.Errorf("ensure govm versions dir: %w", err)
-	}
-	return nil
 }
 
 // ScanInstalledVersions walks the govm versions directory and returns
