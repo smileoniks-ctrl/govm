@@ -7,7 +7,15 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
-	"github.com/smileoniks-ctrl/govm/internal/services"
+)
+
+// Wall-clock budgets granted to a single prune operation. Preview and
+// disk usage only walk the managed directories, while a prune waits for
+// the shared mutation lock and then removes toolchains.
+const (
+	prunePreviewTimeout = 30 * time.Second
+	pruneTimeout        = 30 * time.Minute
+	diskUsageTimeout    = 30 * time.Second
 )
 
 type previewPruneFunc func(context.Context) (prune.Result, error)
@@ -29,48 +37,14 @@ type diskUsageMsg struct {
 	Err     error
 }
 
-func PreviewPruneCmd(rt *services.Runtime) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if rt == nil || rt.Prune == nil {
-			return prunePreviewMsg{Err: errors.New("no prune service configured")}
-		}
-		result, err := rt.Prune.Preview(ctx)
-		return prunePreviewMsg{Result: result, Err: err}
-	}
-}
-
-func PruneCmd(rt *services.Runtime) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-		defer cancel()
-		if rt == nil || rt.Prune == nil {
-			return pruneDoneMsg{Err: errors.New("no prune service configured")}
-		}
-		result, err := rt.Prune.Prune(ctx)
-		return pruneDoneMsg{Result: result, Err: err}
-	}
-}
-
-func DiskUsageCmd(rt *services.Runtime) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if rt == nil || rt.Prune == nil {
-			return diskUsageMsg{Err: errors.New("no prune service configured")}
-		}
-		summary, err := rt.Prune.DiskUsage(ctx)
-		return diskUsageMsg{Summary: summary, Err: err}
-	}
-}
-
 func (m Model) previewPruneCmd() tea.Cmd {
 	return func() tea.Msg {
 		if m.previewPrune == nil {
 			return prunePreviewMsg{Err: errors.New("no prune service configured")}
 		}
-		result, err := m.previewPrune(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), prunePreviewTimeout)
+		defer cancel()
+		result, err := m.previewPrune(ctx)
 		return prunePreviewMsg{Result: result, Err: err}
 	}
 }
@@ -80,7 +54,21 @@ func (m Model) pruneCmd() tea.Cmd {
 		if m.prune == nil {
 			return pruneDoneMsg{Err: errors.New("no prune service configured")}
 		}
-		result, err := m.prune(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), pruneTimeout)
+		defer cancel()
+		result, err := m.prune(ctx)
 		return pruneDoneMsg{Result: result, Err: err}
+	}
+}
+
+func (m Model) diskUsageCmd() tea.Cmd {
+	if m.diskUsage == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), diskUsageTimeout)
+		defer cancel()
+		summary, err := m.diskUsage(ctx)
+		return diskUsageMsg{Summary: summary, Err: err}
 	}
 }

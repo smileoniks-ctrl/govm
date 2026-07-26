@@ -220,16 +220,6 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
-func (m Model) diskUsageCmd() tea.Cmd {
-	if m.diskUsage == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		summary, err := m.diskUsage(nil)
-		return diskUsageMsg{Summary: summary, Err: err}
-	}
-}
-
 func (m Model) viewHeight() int {
 	if m.Height > 0 {
 		return m.Height

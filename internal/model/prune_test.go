@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
@@ -56,6 +57,51 @@ func TestInstalledPrunePreviewAndConfirmation(t *testing.T) {
 	if m.Status.Kind() != "success" {
 		t.Fatalf("status kind = %q, want success", m.Status.Kind())
 	}
+}
+
+func TestPruneCommandsApplyOperationDeadlines(t *testing.T) {
+	m := newTestModel(t)
+
+	var preview, run, usage time.Duration
+	m.previewPrune = func(ctx context.Context) (prune.Result, error) {
+		preview = budget(t, ctx)
+		return prune.Result{}, nil
+	}
+	m.prune = func(ctx context.Context) (prune.Result, error) {
+		run = budget(t, ctx)
+		return prune.Result{}, nil
+	}
+	m.diskUsage = func(ctx context.Context) (prune.Summary, error) {
+		usage = budget(t, ctx)
+		return prune.Summary{}, nil
+	}
+
+	m.previewPruneCmd()()
+	m.pruneCmd()()
+	m.diskUsageCmd()()
+
+	for _, tc := range []struct {
+		name string
+		got  time.Duration
+		want time.Duration
+	}{
+		{"preview", preview, prunePreviewTimeout},
+		{"prune", run, pruneTimeout},
+		{"disk usage", usage, diskUsageTimeout},
+	} {
+		if tc.got <= 0 || tc.got > tc.want {
+			t.Errorf("%s budget = %v, want within %v", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func budget(t *testing.T, ctx context.Context) time.Duration {
+	t.Helper()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("prune operation received a context without a deadline")
+	}
+	return time.Until(deadline)
 }
 
 func TestDiskUsageUpdatesInstalledSizeColumn(t *testing.T) {
