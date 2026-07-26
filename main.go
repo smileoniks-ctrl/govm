@@ -171,7 +171,10 @@ func launchTUI(runtime *services.Runtime) {
 			Delete:     runtime.Lifecycle.Delete,
 			ShimInPath: utils.IsShimInPath,
 		})
-	p := tea.NewProgram(initialModel)
+	p := tea.NewProgram(
+		model.NewProgramModel(initialModel),
+		tea.WithFilter(model.FilterProgramMessage),
+	)
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)
 		os.Exit(1)

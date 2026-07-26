@@ -16,7 +16,7 @@ type dependencyExecutionErrMsg struct {
 // intent. Operational intents become a tea.Cmd that runs the executor;
 // confirmation intents open the matching dialog; a terminal outcome
 // (NoIntent) is rendered as a status message.
-func (m Model) handleCycleEvent(event deps.Event) (tea.Model, tea.Cmd) {
+func (m *Model) handleCycleEvent(event deps.Event) (tea.Model, tea.Cmd) {
 	next, intent, err := m.Deps.Cycle.Handle(event)
 	if err != nil {
 		m.Deps.Cycle = deps.NewUpdateCycle()
@@ -28,7 +28,7 @@ func (m Model) handleCycleEvent(event deps.Event) (tea.Model, tea.Cmd) {
 }
 
 // applyCycleIntent maps a Cycle intent to its TUI side effect.
-func (m Model) applyCycleIntent(intent deps.Intent) (tea.Model, tea.Cmd) {
+func (m *Model) applyCycleIntent(intent deps.Intent) (tea.Model, tea.Cmd) {
 	switch i := intent.(type) {
 	case deps.NoIntent:
 		return m.applyCycleTerminal()
@@ -72,7 +72,7 @@ func (m Model) applyCycleIntent(intent deps.Intent) (tea.Model, tea.Cmd) {
 
 // applyCycleOperational sets the progress status and returns the tea.Cmd
 // that runs the operational intent through the execution seam.
-func (m Model) applyCycleOperational(intent deps.Intent) (tea.Model, tea.Cmd) {
+func (m *Model) applyCycleOperational(intent deps.Intent) (tea.Model, tea.Cmd) {
 	switch intent.(type) {
 	case deps.IntentApplyUpdates:
 		m.Status.SetGlobal("Updating dependencies...", "info")
@@ -88,7 +88,7 @@ func (m Model) applyCycleOperational(intent deps.Intent) (tea.Model, tea.Cmd) {
 
 // applyCycleTerminal renders the terminal outcome as a status message,
 // syncs the dependency table, and resets the Cycle to idle.
-func (m Model) applyCycleTerminal() (tea.Model, tea.Cmd) {
+func (m *Model) applyCycleTerminal() (tea.Model, tea.Cmd) {
 	c := m.Deps.Cycle
 	if c.Outcome() != deps.OutcomeRecoveryRequired && c.Outcome() != deps.OutcomeFailed {
 		m.syncDepsFromCycle()

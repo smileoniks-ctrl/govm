@@ -1,6 +1,8 @@
 package model
 
 import (
+	"time"
+
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
@@ -61,6 +63,53 @@ type Model struct {
 	activateGo activateFunc
 	deleteGo   deleteFunc
 	shimInPath func() bool
+}
+
+type programModel struct {
+	model          Model
+	lastRefreshKey time.Time
+}
+
+const refreshKeyRepeatWindow = 750 * time.Millisecond
+
+func NewProgramModel(model Model) tea.Model {
+	return newProgramModel(model)
+}
+
+func FilterProgramMessage(current tea.Model, msg tea.Msg) tea.Msg {
+	program, ok := current.(*programModel)
+	if !ok {
+		return msg
+	}
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok || key.String() != "r" {
+		return msg
+	}
+	now := time.Now()
+	repeated := key.IsRepeat ||
+		(!program.lastRefreshKey.IsZero() && now.Sub(program.lastRefreshKey) < refreshKeyRepeatWindow)
+	program.lastRefreshKey = now
+	if repeated || program.model.refreshInFlight() {
+		return nil
+	}
+	return msg
+}
+
+func newProgramModel(model Model) *programModel {
+	return &programModel{model: model}
+}
+
+func (m *programModel) Init() tea.Cmd {
+	return m.model.Init()
+}
+
+func (m *programModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	_, cmd := m.model.update(msg)
+	return m, cmd
+}
+
+func (m *programModel) View() tea.View {
+	return m.model.View()
 }
 
 // Theme returns the Model's current immutable theme snapshot. It is

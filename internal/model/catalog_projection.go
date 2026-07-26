@@ -119,6 +119,7 @@ type catalogProjectionAdapter struct {
 	activity        catalogActivity
 	phase           catalogOperationPhase
 	reconciliation  catalogProjectionReconciliation
+	refilterPending bool
 	operation       catalogOperation
 	operationActive bool
 	load            catalogLoadRequest
@@ -524,6 +525,7 @@ func (a *catalogProjectionAdapter) publish(projection versionProjection) tea.Cmd
 	if a.list.FilterState() == list.Unfiltered {
 		a.restoreAvailableSelection(oldVersion, oldIndex)
 		a.pendingRestore = catalogProjectionPendingRestore{}
+		a.refilterPending = false
 		return cmd
 	}
 
@@ -534,6 +536,7 @@ func (a *catalogProjectionAdapter) publish(projection versionProjection) tea.Cmd
 		version:    oldVersion,
 		index:      oldIndex,
 	}
+	a.refilterPending = cmd != nil
 	return wrapCatalogProjectionRefilter(cmd, a.generation, a.pendingRestore.filterText)
 }
 
@@ -556,6 +559,7 @@ func wrapCatalogProjectionRefilter(cmd tea.Cmd, generation uint64, filterText st
 }
 
 func (a *catalogProjectionAdapter) settleRefilter(msg catalogProjectionRefilterMsg) tea.Cmd {
+	a.refilterPending = false
 	if msg.generation != a.generation || msg.filterText != a.list.FilterInput.Value() {
 		if a.pendingRestore.active &&
 			a.pendingRestore.generation == msg.generation &&

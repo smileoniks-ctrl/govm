@@ -87,7 +87,7 @@ func TestTabSwitchCancelsPendingDelete(t *testing.T) {
 	m.DeleteVersion = "1.24.4"
 
 	updated, _ := m.handleTabKey()
-	got := updated.(Model)
+	got := *updated.(*Model)
 
 	if got.CurrentTab != InstalledTab {
 		t.Fatalf("current tab = %d, want %d", got.CurrentTab, InstalledTab)

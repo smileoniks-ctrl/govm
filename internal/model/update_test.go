@@ -77,7 +77,7 @@ func TestUnknownCycleIntentReportsError(t *testing.T) {
 	m.Deps.Cycle = mustCycleEvent(t, deps.NewUpdateCycle(), deps.StartEvent{ModuleDir: "/tmp/module"})
 
 	updated, _ := m.applyCycleIntent(nil)
-	got := updated.(Model)
+	got := *updated.(*Model)
 	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
 		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
 	}

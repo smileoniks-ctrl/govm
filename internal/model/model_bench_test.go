@@ -207,6 +207,16 @@ func BenchmarkUpdate_KeyPressMsg(b *testing.B) {
 	}
 }
 
+func BenchmarkProgramModelUpdate_KeyPressMsg(b *testing.B) {
+	m := newProgramModel(benchModel(b))
+	msg := tea.KeyPressMsg{Code: 'r'}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		benchModelSink, _ = m.Update(msg)
+	}
+}
+
 func BenchmarkDependencyTableColumns(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()

@@ -25,7 +25,7 @@ func (m *Model) setUpdatedDependencies(modules []deps.ModuleDependency) {
 // toggle, list navigation for restore) lives in ConfirmDialog.Handle;
 // this method enacts the returned DialogAction by delegating to the
 // per-kind apply* helpers.
-func (m Model) handleDialogKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleDialogKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
@@ -44,7 +44,7 @@ func (m Model) handleDialogKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // applyDialogConfirm dispatches the confirm action. Update/checks/
 // rollback confirmations feed the user's choice to the Cycle as a
 // decision event; restore runs its own standalone command.
-func (m Model) applyDialogConfirm() (tea.Model, tea.Cmd) {
+func (m *Model) applyDialogConfirm() (tea.Model, tea.Cmd) {
 	switch m.Deps.Dialog.Kind {
 	case DialogUpdate:
 		return m.feedCycleDecision(deps.ConfirmApplyEvent{Yes: m.Deps.Dialog.ChoiceYes})
@@ -62,7 +62,7 @@ func (m Model) applyDialogConfirm() (tea.Model, tea.Cmd) {
 // applyDialogCancel dispatches the cancel action. Update/checks/
 // rollback cancel feed a No decision to the Cycle; restore is torn
 // down locally.
-func (m Model) applyDialogCancel() (tea.Model, tea.Cmd) {
+func (m *Model) applyDialogCancel() (tea.Model, tea.Cmd) {
 	switch m.Deps.Dialog.Kind {
 	case DialogUpdate:
 		return m.feedCycleDecision(deps.ConfirmApplyEvent{Yes: false})
@@ -81,12 +81,12 @@ func (m Model) applyDialogCancel() (tea.Model, tea.Cmd) {
 
 // feedCycleDecision closes the dialog and feeds a decision event into
 // the Cycle through the central adapter.
-func (m Model) feedCycleDecision(event deps.Event) (tea.Model, tea.Cmd) {
+func (m *Model) feedCycleDecision(event deps.Event) (tea.Model, tea.Cmd) {
 	m.resetDialog()
 	return m.handleCycleEvent(event)
 }
 
-func (m Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
+func (m *Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
 	if !m.Deps.Dialog.ChoiceYes {
 		m.resetDialog()
 		m.Status.SetTab("Restore canceled.", "info")

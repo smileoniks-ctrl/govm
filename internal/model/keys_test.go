@@ -3,6 +3,7 @@ package model
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	coredeps "github.com/smileoniks-ctrl/govm/internal/deps"
@@ -46,7 +47,7 @@ func TestHandleTabKeyClearsScreenWhenSwitchingToSettings(t *testing.T) {
 	m.CurrentTab = DepsTab
 
 	updated, cmd := m.handleTabKey()
-	if got := updated.(Model).CurrentTab; got != SettingsTab {
+	if got := updated.(*Model).CurrentTab; got != SettingsTab {
 		t.Fatalf("current tab = %d, want %d", got, SettingsTab)
 	}
 	if cmd == nil {
@@ -105,7 +106,7 @@ func TestHandleShiftTabKeyClearsScreenWhenSwitchingToSettings(t *testing.T) {
 	m.CurrentTab = AvailableTab
 
 	updated, cmd := m.handleShiftTabKey()
-	if got := updated.(Model).CurrentTab; got != SettingsTab {
+	if got := updated.(*Model).CurrentTab; got != SettingsTab {
 		t.Fatalf("current tab = %d, want %d", got, SettingsTab)
 	}
 	if cmd == nil {
@@ -126,7 +127,7 @@ func TestShiftTabCancelsPendingDelete(t *testing.T) {
 	m.DeleteVersion = "1.24.4"
 
 	updated, _ := m.handleShiftTabKey()
-	m = updated.(Model)
+	m = *updated.(*Model)
 
 	if m.ConfirmingDelete {
 		t.Fatal("expected pending delete confirmation to be cancelled on reverse tab switch")
@@ -244,6 +245,106 @@ func TestRefreshOnDepsTabTriggersCheckCmd(t *testing.T) {
 
 	if cmd == nil {
 		t.Fatal("expected a command to be returned")
+	}
+}
+
+func TestRefreshWhileCatalogLoadIsInFlightIsIgnored(t *testing.T) {
+	m := newTestModel(t)
+
+	updated, firstCmd := m.Update(tea.KeyPressMsg{Code: 'r'})
+	m = updated.(Model)
+	if firstCmd == nil {
+		t.Fatal("expected the first refresh to start a load")
+	}
+	firstRequest := m.projection.load
+
+	updated, secondCmd := m.Update(tea.KeyPressMsg{Code: 'r'})
+	m = updated.(Model)
+
+	if secondCmd != nil {
+		t.Fatal("expected repeated refresh to be ignored while the catalog is loading")
+	}
+	if got := m.projection.load; got != firstRequest {
+		t.Fatalf("load request after repeated refresh = %+v, want %+v", got, firstRequest)
+	}
+	if got := m.projection.nextLoadID; got != firstRequest.ID {
+		t.Fatalf("next load id = %d, want %d", got, firstRequest.ID)
+	}
+}
+
+func TestRefreshWhileCatalogRefilterIsInFlightIsIgnored(t *testing.T) {
+	m := newTestModel(t)
+	m.projection.setAvailableFilteringEnabled(true)
+	m.projection.setAvailableFilterText("1.24")
+
+	updated, firstCmd := m.Update(tea.KeyPressMsg{Code: 'r'})
+	m = updated.(Model)
+	if firstCmd == nil {
+		t.Fatal("expected the first refresh to start a load")
+	}
+
+	updated, refilterCmd := m.Update(catalogLoadedMsg{
+		RequestID: m.projection.load.ID,
+		Versions: []utils.GoVersion{
+			{Version: "1.25.0"},
+			{Version: "1.24.4"},
+		},
+	})
+	m = updated.(Model)
+	if refilterCmd == nil {
+		t.Fatal("expected catalog publication to start a refilter")
+	}
+
+	updated, secondCmd := m.Update(tea.KeyPressMsg{Code: 'r'})
+	m = updated.(Model)
+	if secondCmd != nil {
+		t.Fatal("expected repeated refresh to be ignored while refilter is pending")
+	}
+
+	updated, _ = m.Update(refilterCmd())
+	m = updated.(Model)
+	if m.projection.refilterPending {
+		t.Fatal("expected refilter to be settled")
+	}
+}
+
+func TestFilterProgramMessageDropsRepeatedRefresh(t *testing.T) {
+	m := newTestModel(t)
+	program := newProgramModel(m)
+
+	if got := FilterProgramMessage(program, tea.KeyPressMsg{Code: 'r'}); got == nil {
+		t.Fatal("expected idle refresh to reach Update")
+	}
+	program.model.projection.failLoad(program.model.projection.load.ID, nil)
+	if got := FilterProgramMessage(program, tea.KeyPressMsg{Code: 'r'}); got != nil {
+		t.Fatalf("rapid repeated message = %T, want nil", got)
+	}
+
+	program.lastRefreshKey = time.Time{}
+	program.model.projection.startLoad(catalogLoadPurposeRefresh)
+	if got := FilterProgramMessage(program, tea.KeyPressMsg{Code: 'r'}); got != nil {
+		t.Fatalf("filtered message = %T, want nil while refresh is active", got)
+	}
+	program.model.projection.failLoad(program.model.projection.load.ID, nil)
+	program.lastRefreshKey = time.Time{}
+	if got := FilterProgramMessage(program, tea.KeyPressMsg{Code: 'r', IsRepeat: true}); got != nil {
+		t.Fatalf("key repeat message = %T, want nil", got)
+	}
+	if got := FilterProgramMessage(program, tea.KeyPressMsg{Code: tea.KeyDown}); got == nil {
+		t.Fatal("expected non-refresh key to reach Update")
+	}
+}
+
+func TestProgramModelUpdateMutatesInPlace(t *testing.T) {
+	program := newProgramModel(newTestModel(t))
+
+	updated, _ := program.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	if updated != program {
+		t.Fatal("expected the program model identity to remain stable")
+	}
+	if program.model.CurrentTab != InstalledTab {
+		t.Fatalf("current tab = %d, want %d", program.model.CurrentTab, InstalledTab)
 	}
 }
 

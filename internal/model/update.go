@@ -12,6 +12,14 @@ import (
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	updated, cmd := (&m).update(msg)
+	if next, ok := updated.(*Model); ok {
+		return *next, cmd
+	}
+	return updated, cmd
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	if m.Settings.EditingDepsBackupLimit {
 		if key, ok := msg.(tea.KeyPressMsg); ok {
@@ -150,7 +158,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) handleCatalogOutcome(outcome catalogProjectionOutcome) (tea.Model, tea.Cmd) {
+func (m *Model) handleCatalogOutcome(outcome catalogProjectionOutcome) (tea.Model, tea.Cmd) {
 	switch outcome.kind {
 	case catalogProjectionOutcomeStale, catalogProjectionOutcomeSuppressed:
 		return m, nil
@@ -186,7 +194,7 @@ func (m Model) handleCatalogOutcome(outcome catalogProjectionOutcome) (tea.Model
 	}
 }
 
-func (m Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd) {
 	outcome := m.projection.completeInstall(
 		msg.OperationID,
 		msg.Version,
@@ -196,7 +204,7 @@ func (m Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd) 
 	return m.handleMutationCompletion(outcome)
 }
 
-func (m Model) handleInstallFailure(msg installFailureMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleInstallFailure(msg installFailureMsg) (tea.Model, tea.Cmd) {
 	outcome := m.projection.failMutation(msg.OperationID, msg.Err)
 	if outcome.kind == catalogProjectionOutcomeStale {
 		return m, nil
@@ -205,7 +213,7 @@ func (m Model) handleInstallFailure(msg installFailureMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-func (m Model) handleActivationSuccess(msg activationSuccessMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleActivationSuccess(msg activationSuccessMsg) (tea.Model, tea.Cmd) {
 	outcome := m.projection.completeActivation(
 		msg.OperationID,
 		msg.Result.Version,
@@ -215,7 +223,7 @@ func (m Model) handleActivationSuccess(msg activationSuccessMsg) (tea.Model, tea
 	return m.handleMutationCompletion(outcome)
 }
 
-func (m Model) handleDeletionSuccess(msg deletionSuccessMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleDeletionSuccess(msg deletionSuccessMsg) (tea.Model, tea.Cmd) {
 	outcome := m.projection.completeDeletion(
 		msg.OperationID,
 		msg.Result.Version,
@@ -224,7 +232,7 @@ func (m Model) handleDeletionSuccess(msg deletionSuccessMsg) (tea.Model, tea.Cmd
 	return m.handleMutationCompletion(outcome)
 }
 
-func (m Model) handleMutationCompletion(outcome catalogProjectionOutcome) (tea.Model, tea.Cmd) {
+func (m *Model) handleMutationCompletion(outcome catalogProjectionOutcome) (tea.Model, tea.Cmd) {
 	if outcome.kind == catalogProjectionOutcomeStale {
 		return m, nil
 	}

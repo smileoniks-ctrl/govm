@@ -13,7 +13,7 @@ import (
 // handleKey processes a key press in the main TUI surface.
 // The dependency update confirmation modal is handled separately
 // in handleUpdateConfirmKey and short-circuits this path.
-func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
 		return m, tea.Quit
@@ -56,7 +56,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m.handleActiveComponentKey(msg)
 }
 
-func (m Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "down", "k", "j":
 	default:
@@ -83,7 +83,7 @@ func (m Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd
 // renderer to clear the screen when entering the Settings tab. Tab
 // (forward) and Shift+Tab (reverse) both route through here so both
 // directions share the same invariants.
-func (m Model) switchTab(target int) (tea.Model, tea.Cmd) {
+func (m *Model) switchTab(target int) (tea.Model, tea.Cmd) {
 	m.clearTabContext()
 	m.CurrentTab = target
 	// Lazy-load deps on first visit.
@@ -97,18 +97,18 @@ func (m Model) switchTab(target int) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleTabKey() (tea.Model, tea.Cmd) {
+func (m *Model) handleTabKey() (tea.Model, tea.Cmd) {
 	return m.switchTab((m.CurrentTab + 1) % tabCount)
 }
 
 // handleShiftTabKey is the reverse-direction mirror of handleTabKey:
 // it moves focus to the previous tab in cycle order, wrapping from
 // Available back to Settings.
-func (m Model) handleShiftTabKey() (tea.Model, tea.Cmd) {
+func (m *Model) handleShiftTabKey() (tea.Model, tea.Cmd) {
 	return m.switchTab((m.CurrentTab - 1 + tabCount) % tabCount)
 }
 
-func (m Model) handleInstallKey() (tea.Model, tea.Cmd) {
+func (m *Model) handleInstallKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab != AvailableTab || m.projection.operationPhase() != catalogOperationPhaseIdle {
 		return m, nil
 	}
@@ -128,7 +128,7 @@ func (m Model) handleInstallKey() (tea.Model, tea.Cmd) {
 	return m, m.installVersionCmd(operation.id, v)
 }
 
-func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
+func (m *Model) handleUseKey() (tea.Model, tea.Cmd) {
 	if (m.CurrentTab == AvailableTab || m.CurrentTab == InstalledTab) &&
 		m.projection.operationPhase() != catalogOperationPhaseIdle {
 		return m, nil
@@ -179,7 +179,7 @@ func (m Model) handleUseKey() (tea.Model, tea.Cmd) {
 // new Cycle, feeds StartEvent, and returns the tea.Cmd that runs the
 // initial check-updates intent through the execution seam. The update
 // confirmation dialog only opens after the fresh check completes.
-func (m Model) startUpdateCycle() (tea.Model, tea.Cmd) {
+func (m *Model) startUpdateCycle() (tea.Model, tea.Cmd) {
 	m.Deps.Cycle = deps.NewUpdateCycle()
 	next, intent, err := m.Deps.Cycle.Handle(deps.StartEvent{ModuleDir: m.Deps.ModuleDir})
 	if err != nil {
@@ -191,7 +191,7 @@ func (m Model) startUpdateCycle() (tea.Model, tea.Cmd) {
 	return m, m.cycleExecuteCmd(intent)
 }
 
-func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
+func (m *Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab == DepsTab {
 		m.Deps.Phase = OpChecking
 		// Progress text comes from DepsState.SpinnerText() while the
@@ -202,8 +202,7 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 		m.Status.Clear()
 		return m, CheckModuleDependencyUpdatesCmd(m.Deps.ModuleDir)
 	}
-	phase := m.projection.operationPhase()
-	if phase == catalogOperationPhaseReconciling {
+	if m.refreshInFlight() {
 		return m, nil
 	}
 	outcome := m.projection.startLoad(catalogLoadPurposeRefresh)
@@ -211,7 +210,14 @@ func (m Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 	return m, LoadVersionsCmd(m.runtime, outcome.loadRequest)
 }
 
-func (m Model) handleBackupsKey() (tea.Model, tea.Cmd) {
+func (m Model) refreshInFlight() bool {
+	phase := m.projection.operationPhase()
+	return phase == catalogOperationPhaseLoading ||
+		phase == catalogOperationPhaseReconciling ||
+		m.projection.refilterPending
+}
+
+func (m *Model) handleBackupsKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab != DepsTab {
 		return m, nil
 	}
@@ -225,7 +231,7 @@ func (m Model) handleBackupsKey() (tea.Model, tea.Cmd) {
 	return m, ListDependencyBackupsCmd(m.Deps.ModuleDir)
 }
 
-func (m Model) handleDeleteKey() (tea.Model, tea.Cmd) {
+func (m *Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab != AvailableTab && m.CurrentTab != InstalledTab {
 		return m, nil
 	}
@@ -263,7 +269,7 @@ func (m Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg.String() {
 	case "up", "k":
@@ -325,7 +331,7 @@ func (m *Model) adjustDepsBackupLimit(delta int) {
 	m.saveSettings()
 }
 
-func (m Model) handleDepsBackupLimitInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleDepsBackupLimitInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.Settings.CloseDepsBackupLimitInput()
@@ -391,7 +397,7 @@ func (m *Model) saveSettings() {
 	m.Status.SetTab("Settings saved.", "info")
 }
 
-func (m Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
+func (m *Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
 	if !m.ConfirmingDelete {
 		return m, nil
 	}
@@ -430,7 +436,7 @@ func (m Model) handleDeleteConfirmYes() (tea.Model, tea.Cmd) {
 	return m, m.deleteVersionCmd(operation.id, target.Version)
 }
 
-func (m Model) handleDeleteConfirmNo() (tea.Model, tea.Cmd) {
+func (m *Model) handleDeleteConfirmNo() (tea.Model, tea.Cmd) {
 	if !m.ConfirmingDelete {
 		return m, nil
 	}
