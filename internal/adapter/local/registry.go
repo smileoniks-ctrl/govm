@@ -25,10 +25,17 @@ type Registry interface {
 
 type FilesystemRegistry struct {
 	resolver *paths.Resolver
+	// currentGoVersion reports the version of the go executable found on
+	// PATH. It is a field so tests can exercise the effective-active
+	// fallback without depending on the go toolchain of the test host.
+	currentGoVersion func() string
 }
 
 func NewRegistry(resolver *paths.Resolver) *FilesystemRegistry {
-	return &FilesystemRegistry{resolver: resolver}
+	return &FilesystemRegistry{
+		resolver:         resolver,
+		currentGoVersion: utils.GetCurrentGoVersion,
+	}
 }
 
 func (r *FilesystemRegistry) List(ctx context.Context) ([]Toolchain, error) {
@@ -101,5 +108,8 @@ func (r *FilesystemRegistry) Active(ctx context.Context) (string, error) {
 	if activeVersion != "" {
 		return activeVersion, nil
 	}
-	return utils.GetCurrentGoVersion(), nil
+	if r.currentGoVersion == nil {
+		return utils.GetCurrentGoVersion(), nil
+	}
+	return r.currentGoVersion(), nil
 }

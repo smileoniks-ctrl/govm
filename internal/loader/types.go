@@ -27,8 +27,6 @@ type Platform struct {
 type Dependencies struct {
 	ReleaseSource      ReleaseSource
 	LocalRegistry      local.Registry
-	LocalVersions      LocalVersions
-	ActiveVersion      ActiveVersion
 	Platform           Platform
 	DistributionSource string
 }
@@ -36,19 +34,6 @@ type Dependencies struct {
 // ReleaseSource fetches the go.dev release catalog.
 type ReleaseSource interface {
 	FetchReleases(ctx context.Context) ([]Release, error)
-}
-
-// LocalVersions is the legacy split local-state seam retained for
-// compatibility with older tests. Production wiring uses LocalRegistry.
-type LocalVersions interface {
-	ScanInstalled(context.Context) (map[string]string, error)
-}
-
-// ActiveVersion is the legacy split active-state seam retained for
-// compatibility with older tests. Production wiring uses LocalRegistry.
-type ActiveVersion interface {
-	ReadActive(context.Context) (string, error)
-	GetFromPath(context.Context) string
 }
 
 // Release mirrors a single go.dev release entry. The Version field

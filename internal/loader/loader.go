@@ -2,6 +2,7 @@ package loader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -23,33 +24,22 @@ func LoadVersionCatalog(ctx context.Context, deps Dependencies) (VersionCatalog,
 		return VersionCatalog{}, fmt.Errorf("fetch releases: %w", err)
 	}
 
-	var installed map[string]string
-	var activeVersion string
-	if deps.LocalRegistry != nil {
-		localToolchains, err := deps.LocalRegistry.List(ctx)
-		if err != nil {
-			return VersionCatalog{}, fmt.Errorf("scan installed: %w", err)
-		}
-		installed = make(map[string]string, len(localToolchains))
-		for _, toolchain := range localToolchains {
-			installed[toolchain.Version] = toolchain.Path
-		}
-		activeVersion, err = deps.LocalRegistry.Active(ctx)
-		if err != nil {
-			return VersionCatalog{}, fmt.Errorf("read active version: %w", err)
-		}
-	} else {
-		installed, err = deps.LocalVersions.ScanInstalled(ctx)
-		if err != nil {
-			return VersionCatalog{}, fmt.Errorf("scan installed: %w", err)
-		}
-		activeVersion, err = deps.ActiveVersion.ReadActive(ctx)
-		if err != nil {
-			return VersionCatalog{}, fmt.Errorf("read active version: %w", err)
-		}
-		if activeVersion == "" {
-			activeVersion = deps.ActiveVersion.GetFromPath(ctx)
-		}
+	if deps.LocalRegistry == nil {
+		return VersionCatalog{}, errors.New("local toolchain registry is nil")
+	}
+
+	toolchains, err := deps.LocalRegistry.List(ctx)
+	if err != nil {
+		return VersionCatalog{}, fmt.Errorf("scan installed: %w", err)
+	}
+	installed := make(map[string]string, len(toolchains))
+	for _, toolchain := range toolchains {
+		installed[toolchain.Version] = toolchain.Path
+	}
+
+	activeVersion, err := deps.LocalRegistry.Active(ctx)
+	if err != nil {
+		return VersionCatalog{}, fmt.Errorf("read active version: %w", err)
 	}
 
 	versions := buildVersionCatalogWithSource(

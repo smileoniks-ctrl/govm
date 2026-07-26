@@ -7,36 +7,25 @@ import (
 	"testing"
 
 	"github.com/smileoniks-ctrl/govm/internal/adapter/godev"
+	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
 	"github.com/smileoniks-ctrl/govm/internal/loader"
 )
 
-type fakeLocalVersions struct {
-	installed map[string]string
-	err       error
+type fakeRegistry struct {
+	toolchains []local.Toolchain
+	active     string
 }
 
-func (f *fakeLocalVersions) ScanInstalled(ctx context.Context) (map[string]string, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.installed, nil
+func (f *fakeRegistry) List(context.Context) ([]local.Toolchain, error) {
+	return f.toolchains, nil
 }
 
-type fakeActiveVersion struct {
-	active       string
-	readErr      error
-	pathFallback string
+func (f *fakeRegistry) Find(context.Context, string) (local.Toolchain, error) {
+	return local.Toolchain{}, local.ErrNotFound
 }
 
-func (f *fakeActiveVersion) ReadActive(ctx context.Context) (string, error) {
-	if f.readErr != nil {
-		return "", f.readErr
-	}
+func (f *fakeRegistry) Active(context.Context) (string, error) {
 	return f.active, nil
-}
-
-func (f *fakeActiveVersion) GetFromPath(ctx context.Context) string {
-	return f.pathFallback
 }
 
 func TestIntegration_GodevWithLoader(t *testing.T) {
@@ -78,12 +67,10 @@ func TestIntegration_GodevWithLoader(t *testing.T) {
 
 	deps := loader.Dependencies{
 		ReleaseSource: godev.NewClient(server.Client(), server.URL),
-		LocalVersions: &fakeLocalVersions{
-			installed: map[string]string{
-				"1.21.5": "/home/user/.govm/versions/go1.21.5",
+		LocalRegistry: &fakeRegistry{
+			toolchains: []local.Toolchain{
+				{Version: "1.21.5", Path: "/home/user/.govm/versions/go1.21.5"},
 			},
-		},
-		ActiveVersion: &fakeActiveVersion{
 			active: "1.21.5",
 		},
 		Platform: loader.Platform{OS: "linux", Arch: "amd64"},

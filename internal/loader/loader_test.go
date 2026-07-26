@@ -25,33 +25,32 @@ func (f *fakeReleaseSource) FetchReleases(ctx context.Context) ([]Release, error
 	return f.releases, nil
 }
 
-type fakeLocalVersions struct {
-	installed map[string]string
-	err       error
+// fakeRegistry stands in for the local toolchain registry. The registry
+// owns the effective-active fallback, so the loader only sees whatever
+// version it reports.
+type fakeRegistry struct {
+	toolchains []local.Toolchain
+	listErr    error
+	active     string
+	activeErr  error
 }
 
-func (f *fakeLocalVersions) ScanInstalled(ctx context.Context) (map[string]string, error) {
-	if f.err != nil {
-		return nil, f.err
+func (f *fakeRegistry) List(context.Context) ([]local.Toolchain, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
 	}
-	return f.installed, nil
+	return f.toolchains, nil
 }
 
-type fakeActiveVersion struct {
-	active       string
-	readErr      error
-	pathFallback string
+func (f *fakeRegistry) Find(context.Context, string) (local.Toolchain, error) {
+	return local.Toolchain{}, local.ErrNotFound
 }
 
-func (f *fakeActiveVersion) ReadActive(ctx context.Context) (string, error) {
-	if f.readErr != nil {
-		return "", f.readErr
+func (f *fakeRegistry) Active(context.Context) (string, error) {
+	if f.activeErr != nil {
+		return "", f.activeErr
 	}
 	return f.active, nil
-}
-
-func (f *fakeActiveVersion) GetFromPath(ctx context.Context) string {
-	return f.pathFallback
 }
 
 func TestLoadVersionCatalog_Success(t *testing.T) {
@@ -74,12 +73,10 @@ func TestLoadVersionCatalog_Success(t *testing.T) {
 				},
 			},
 		},
-		LocalVersions: &fakeLocalVersions{
-			installed: map[string]string{
-				"1.21.5": "/home/user/.govm/versions/go1.21.5",
+		LocalRegistry: &fakeRegistry{
+			toolchains: []local.Toolchain{
+				{Version: "1.21.5", Path: "/home/user/.govm/versions/go1.21.5"},
 			},
-		},
-		ActiveVersion: &fakeActiveVersion{
 			active: "1.21.5",
 		},
 		Platform: Platform{OS: "linux", Arch: "amd64"},
@@ -117,31 +114,39 @@ func TestLoadVersionCatalog_Success(t *testing.T) {
 	}
 }
 
-func TestLoadVersionCatalog_FallbackToExec(t *testing.T) {
+// TestLoadVersionCatalog_AdoptsEffectiveActiveVersion pins that the
+// loader reports whatever the registry considers active, including a
+// version that is not installed under govm. The marker-or-PATH rule
+// itself belongs to the registry.
+func TestLoadVersionCatalog_AdoptsEffectiveActiveVersion(t *testing.T) {
 	deps := Dependencies{
 		ReleaseSource: &fakeReleaseSource{
 			releases: []Release{
 				{Version: "1.22.0", Stable: true, Files: []FileEntry{{Filename: "go1.22.0.linux-amd64.tar.gz", OS: "linux", Arch: "amd64"}}},
 			},
 		},
-		LocalVersions: &fakeLocalVersions{
-			installed: map[string]string{},
-		},
-		ActiveVersion: &fakeActiveVersion{
-			active:       "",
-			pathFallback: "1.20.3",
-		},
-		Platform: Platform{OS: "linux", Arch: "amd64"},
+		LocalRegistry: &fakeRegistry{active: "1.20.3"},
+		Platform:      Platform{OS: "linux", Arch: "amd64"},
 	}
 
-	ctx := context.Background()
-	catalog, err := LoadVersionCatalog(ctx, deps)
+	catalog, err := LoadVersionCatalog(context.Background(), deps)
 	if err != nil {
 		t.Fatalf("LoadVersionCatalog failed: %v", err)
 	}
 
 	if catalog.ActiveVersion != "1.20.3" {
-		t.Errorf("expected active version from exec fallback 1.20.3, got %s", catalog.ActiveVersion)
+		t.Errorf("expected active version 1.20.3, got %s", catalog.ActiveVersion)
+	}
+}
+
+func TestLoadVersionCatalog_RequiresRegistry(t *testing.T) {
+	deps := Dependencies{
+		ReleaseSource: &fakeReleaseSource{},
+		Platform:      Platform{OS: "linux", Arch: "amd64"},
+	}
+
+	if _, err := LoadVersionCatalog(context.Background(), deps); err == nil {
+		t.Fatal("expected an error when no local registry is wired")
 	}
 }
 
@@ -150,13 +155,8 @@ func TestLoadVersionCatalog_ReleaseSourceError(t *testing.T) {
 		ReleaseSource: &fakeReleaseSource{
 			err: errors.New("network timeout"),
 		},
-		LocalVersions: &fakeLocalVersions{
-			installed: map[string]string{},
-		},
-		ActiveVersion: &fakeActiveVersion{
-			active: "1.21.0",
-		},
-		Platform: Platform{OS: "linux", Arch: "amd64"},
+		LocalRegistry: &fakeRegistry{active: "1.21.0"},
+		Platform:      Platform{OS: "linux", Arch: "amd64"},
 	}
 
 	ctx := context.Background()
@@ -169,16 +169,14 @@ func TestLoadVersionCatalog_ReleaseSourceError(t *testing.T) {
 	}
 }
 
-func TestLoadVersionCatalog_LocalVersionsError(t *testing.T) {
+func TestLoadVersionCatalog_RegistryListError(t *testing.T) {
 	deps := Dependencies{
 		ReleaseSource: &fakeReleaseSource{
 			releases: []Release{},
 		},
-		LocalVersions: &fakeLocalVersions{
-			err: errors.New("permission denied"),
-		},
-		ActiveVersion: &fakeActiveVersion{
-			active: "1.21.0",
+		LocalRegistry: &fakeRegistry{
+			listErr: errors.New("permission denied"),
+			active:  "1.21.0",
 		},
 		Platform: Platform{OS: "linux", Arch: "amd64"},
 	}
@@ -198,11 +196,8 @@ func TestLoadVersionCatalog_ActiveVersionError(t *testing.T) {
 		ReleaseSource: &fakeReleaseSource{
 			releases: []Release{},
 		},
-		LocalVersions: &fakeLocalVersions{
-			installed: map[string]string{},
-		},
-		ActiveVersion: &fakeActiveVersion{
-			readErr: errors.New("corrupted file"),
+		LocalRegistry: &fakeRegistry{
+			activeErr: errors.New("corrupted file"),
 		},
 		Platform: Platform{OS: "linux", Arch: "amd64"},
 	}

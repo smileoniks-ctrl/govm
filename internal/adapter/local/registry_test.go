@@ -39,6 +39,55 @@ func TestFilesystemRegistryListSortsToolchains(t *testing.T) {
 	}
 }
 
+// TestFilesystemRegistryActivePrefersMarker pins the first half of the
+// effective-active rule: a recorded marker wins and the go executable on
+// PATH is never consulted.
+func TestFilesystemRegistryActivePrefersMarker(t *testing.T) {
+	home := t.TempDir()
+	activeFile := filepath.Join(home, ".govm", "active_version")
+	if err := os.MkdirAll(filepath.Dir(activeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(activeFile, []byte("1.22.0"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	registry := NewRegistry(&paths.Resolver{HomeDir: func() (string, error) {
+		return home, nil
+	}})
+	registry.currentGoVersion = func() string {
+		t.Fatal("PATH lookup consulted despite a recorded marker")
+		return ""
+	}
+
+	active, err := registry.Active(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != "1.22.0" {
+		t.Fatalf("active = %q, want 1.22.0", active)
+	}
+}
+
+// TestFilesystemRegistryActiveFallsBackToPath pins the second half: with
+// no marker recorded, the version reported by the go executable on PATH
+// becomes the effective active version.
+func TestFilesystemRegistryActiveFallsBackToPath(t *testing.T) {
+	home := t.TempDir()
+	registry := NewRegistry(&paths.Resolver{HomeDir: func() (string, error) {
+		return home, nil
+	}})
+	registry.currentGoVersion = func() string { return "1.20.3" }
+
+	active, err := registry.Active(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != "1.20.3" {
+		t.Fatalf("active = %q, want the PATH fallback 1.20.3", active)
+	}
+}
+
 func TestFilesystemRegistryFindNormalizesAndMatchesPrefix(t *testing.T) {
 	home := t.TempDir()
 	goPath := filepath.Join(home, ".govm", "versions", "go1.22.4", "bin", "go")
