@@ -128,7 +128,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if outcome.kind != catalogProjectionOutcomeLoadStarted {
 			return m, m.diskUsageCmd()
 		}
-		return m, tea.Batch(LoadVersionsCmd(m.runtime, outcome.loadRequest), m.diskUsageCmd())
+		return m, tea.Batch(LoadVersionsCmd(m.loadCatalog, outcome.loadRequest), m.diskUsageCmd())
 
 	case list.FilterMatchesMsg:
 		return m, m.projection.updateAvailable(msg)
@@ -239,7 +239,7 @@ func (m *Model) handleCatalogOutcome(outcome catalogProjectionOutcome) (tea.Mode
 		return m, nil
 	case catalogProjectionOutcomeLoadStarted:
 		m.Status.SetGlobal(m.verifyingStatus(outcome.receipt.operation), "warning")
-		return m, LoadVersionsCmd(m.runtime, outcome.loadRequest)
+		return m, LoadVersionsCmd(m.loadCatalog, outcome.loadRequest)
 	case catalogProjectionOutcomeReconciled:
 		m.applyCompletion(outcome.receipt.operation)
 		return m, outcome.cmd

@@ -218,7 +218,7 @@ func (m *Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 	}
 	outcome := m.projection.startLoad(catalogLoadPurposeRefresh)
 	m.Status.SetGlobal("", "")
-	return m, LoadVersionsCmd(m.runtime, outcome.loadRequest)
+	return m, LoadVersionsCmd(m.loadCatalog, outcome.loadRequest)
 }
 
 func (m Model) refreshInFlight() bool {

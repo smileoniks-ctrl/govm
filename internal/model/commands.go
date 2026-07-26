@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/application"
-	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -45,26 +44,31 @@ type distributionSourceValidatedMsg struct {
 	Err       error
 }
 
-// LoadVersionsCmd wraps the synchronous LoadVersionCatalog operation
-// in a tea.Cmd. This is the TUI adapter: it translates between the
-// loader's domain result and Bubbletea's message protocol.
-func LoadVersionsCmd(rt *services.Runtime, request catalogLoadRequest) tea.Cmd {
+// loadCatalogFunc returns the available Go version catalog. The TUI
+// depends on this narrow seam rather than on the composition root, so
+// tests can supply a catalog without wiring real services.
+type loadCatalogFunc func(context.Context) ([]utils.GoVersion, error)
+
+// LoadVersionsCmd wraps the synchronous catalog load in a tea.Cmd.
+// This is the TUI adapter: it translates between the loader's domain
+// result and Bubbletea's message protocol.
+func LoadVersionsCmd(load loadCatalogFunc, request catalogLoadRequest) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		if rt == nil || rt.Loader == nil {
+		if load == nil {
 			return catalogLoadFailedMsg{
 				RequestID: request.ID,
 				Err:       errors.New("no loader configured"),
 			}
 		}
-		catalog, err := rt.Loader.Load(ctx)
+		versions, err := load(ctx)
 		if err != nil {
 			return catalogLoadFailedMsg{RequestID: request.ID, Err: err}
 		}
 
-		return catalogLoadedMsg{RequestID: request.ID, Versions: catalog.Versions}
+		return catalogLoadedMsg{RequestID: request.ID, Versions: versions}
 	}
 }
 

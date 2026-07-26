@@ -52,6 +52,17 @@ func (l *Loader) Load(ctx context.Context) (loader.VersionCatalog, error) {
 	return loader.LoadVersionCatalog(ctx, l.deps)
 }
 
+// LoadVersions returns only the catalog entries. It is the narrow seam
+// the CLI and TUI adapters bind to, so they do not depend on the
+// composition root.
+func (l *Loader) LoadVersions(ctx context.Context) ([]utils.GoVersion, error) {
+	catalog, err := l.Load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return catalog.Versions, nil
+}
+
 func (l *Loader) LoadWithSource(ctx context.Context, source string) (loader.VersionCatalog, error) {
 	normalized, err := config.ValidateDistributionSource(source)
 	if err != nil {

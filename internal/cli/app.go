@@ -14,9 +14,13 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
-	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
+
+// loadCatalogFunc returns the available Go version catalog. The CLI
+// depends on this narrow seam rather than on the composition root, so
+// version matching can be exercised without wiring real services.
+type loadCatalogFunc func(context.Context) ([]utils.GoVersion, error)
 
 type activateFunc func(context.Context, string) (lifecycle.ActivationResult, error)
 type deleteFunc func(context.Context, string) (lifecycle.DeletionResult, error)
@@ -28,7 +32,7 @@ type changeDistributionSourceFunc func(context.Context, string) (application.Dis
 // distribution source.
 func (a *App) InstallVersion(version string) {
 	fmt.Fprintf(a.out, "🔍 Looking for Go version matching %s...\n", version)
-	matchedVersion, err := findMatchingVersion(a.operations.Runtime, version)
+	matchedVersion, err := findMatchingVersion(a.operations.LoadCatalog, version)
 	if err != nil {
 		fmt.Fprintf(a.out, "❌ %s\n", err)
 		return
@@ -42,7 +46,7 @@ func (a *App) InstallVersion(version string) {
 
 // Operations contains the narrow core seams used by App.
 type Operations struct {
-	Runtime                  *services.Runtime
+	LoadCatalog              loadCatalogFunc
 	Install                  installFunc
 	Activate                 activateFunc
 	Delete                   deleteFunc

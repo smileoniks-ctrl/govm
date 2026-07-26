@@ -41,7 +41,7 @@ func main() {
 		runtime.Loader,
 	)
 	app := cli.NewApp(cli.Operations{
-		Runtime:                  runtime,
+		LoadCatalog:              runtime.Loader.LoadVersions,
 		Install:                  runtime.Install.Install,
 		Activate:                 runtime.Lifecycle.Activate,
 		Delete:                   runtime.Lifecycle.Delete,
@@ -194,7 +194,7 @@ func launchTUI(runtime *services.Runtime, distributionSource *application.Distri
 
 	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning, theme).
 		BindVersionOperations(model.VersionOperations{
-			Runtime:             runtime,
+			LoadCatalog:         runtime.Loader.LoadVersions,
 			DistributionSource:  distributionSource.Change,
 			Install:             runtime.Install.Install,
 			InstallWithProgress: runtime.Install.InstallWithProgress,

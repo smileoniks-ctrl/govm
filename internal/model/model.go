@@ -11,7 +11,6 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
-	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
 
@@ -71,7 +70,7 @@ type Model struct {
 	Deps     DepsState
 	Settings SettingsState
 
-	runtime             *services.Runtime
+	loadCatalog         loadCatalogFunc
 	distributionSource  changeDistributionSourceFunc
 	installGo           installFunc
 	installWithProgress installProgressFunc
@@ -178,7 +177,7 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 // VersionOperations contains the narrow process-composed seams used by the
 // TUI for installed-version mutations and PATH presentation.
 type VersionOperations struct {
-	Runtime             *services.Runtime
+	LoadCatalog         loadCatalogFunc
 	DistributionSource  changeDistributionSourceFunc
 	Install             installFunc
 	InstallWithProgress installProgressFunc
@@ -192,7 +191,7 @@ type VersionOperations struct {
 
 // BindVersionOperations returns a copy of m bound to process-wide services.
 func (m Model) BindVersionOperations(operations VersionOperations) Model {
-	m.runtime = operations.Runtime
+	m.loadCatalog = operations.LoadCatalog
 	m.distributionSource = operations.DistributionSource
 	m.installGo = operations.Install
 	m.installWithProgress = operations.InstallWithProgress
@@ -208,7 +207,7 @@ func (m Model) BindVersionOperations(operations VersionOperations) Model {
 func (m Model) Init() tea.Cmd {
 	var load tea.Cmd
 	if m.initialLoad.ID != 0 {
-		load = LoadVersionsCmd(m.runtime, m.initialLoad)
+		load = LoadVersionsCmd(m.loadCatalog, m.initialLoad)
 	}
 	var usage tea.Cmd
 	if m.diskUsage != nil {
