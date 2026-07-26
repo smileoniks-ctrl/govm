@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/smileoniks-ctrl/govm/internal/config"
@@ -106,14 +107,11 @@ func archiveURL(source, filename string) string {
 	return strings.TrimRight(source, "/") + "/" + filename
 }
 
+// sortGoVersionRecordsDesc orders records highest-version-first. The
+// sort is stable so releases the comparator treats as equal keep their
+// go.dev order.
 func sortGoVersionRecordsDesc(records []utils.GoVersion) {
-	// Delegate to utils.CompareGoVersions for consistency with existing
-	// version comparison logic throughout the codebase.
-	for i := 0; i < len(records); i++ {
-		for j := i + 1; j < len(records); j++ {
-			if utils.CompareGoVersions(records[i].Version, records[j].Version) < 0 {
-				records[i], records[j] = records[j], records[i]
-			}
-		}
-	}
+	sort.SliceStable(records, func(i, j int) bool {
+		return utils.CompareGoVersions(records[i].Version, records[j].Version) > 0
+	})
 }
