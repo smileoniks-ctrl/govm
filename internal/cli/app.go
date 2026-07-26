@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
+	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
@@ -21,6 +22,7 @@ type activateFunc func(context.Context, string) (lifecycle.ActivationResult, err
 type deleteFunc func(context.Context, string) (lifecycle.DeletionResult, error)
 type prunePreviewFunc func(context.Context) (prune.Result, error)
 type pruneFunc func(context.Context) (prune.Result, error)
+type changeDistributionSourceFunc func(context.Context, string) (application.DistributionSourceResult, error)
 
 // InstallVersion resolves and installs a Go version from the configured
 // distribution source.
@@ -40,14 +42,36 @@ func (a *App) InstallVersion(version string) {
 
 // Operations contains the narrow core seams used by App.
 type Operations struct {
-	Runtime      *services.Runtime
-	Install      installFunc
-	Activate     activateFunc
-	Delete       deleteFunc
-	PreviewPrune prunePreviewFunc
-	Prune        pruneFunc
-	Registry     local.Registry
-	ShimInPath   func() bool
+	Runtime                  *services.Runtime
+	Install                  installFunc
+	Activate                 activateFunc
+	Delete                   deleteFunc
+	PreviewPrune             prunePreviewFunc
+	Prune                    pruneFunc
+	Registry                 local.Registry
+	ShimInPath               func() bool
+	ChangeDistributionSource changeDistributionSourceFunc
+}
+
+func (a *App) ChangeDistributionSource(source string) bool {
+	if a.operations.ChangeDistributionSource == nil {
+		fmt.Fprintln(a.out, "Error: distribution source operation is not configured")
+		return false
+	}
+	result, err := a.operations.ChangeDistributionSource(context.Background(), source)
+	if err != nil {
+		fmt.Fprintf(a.out, "Error: %v\n", err)
+		var changeErr *application.ChangeError
+		if !errors.As(err, &changeErr) || changeErr.SourcePreserved {
+			fmt.Fprintln(a.out, "Previous distribution source was preserved.")
+		} else {
+			fmt.Fprintln(a.out, "Previous distribution source could not be guaranteed preserved.")
+		}
+		return false
+	}
+	fmt.Fprintf(a.out, "Distribution source changed to %s.\n", result.Source)
+	fmt.Fprintln(a.out, "Matching archive verified for the current platform.")
+	return true
 }
 
 // App maps CLI commands and process I/O onto core operations.

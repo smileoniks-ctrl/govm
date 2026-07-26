@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -40,8 +41,7 @@ type catalogLoadFailedMsg struct {
 
 type distributionSourceValidatedMsg struct {
 	RequestID uint64
-	Source    string
-	Versions  []utils.GoVersion
+	Result    application.DistributionSourceResult
 	Err       error
 }
 
@@ -68,33 +68,22 @@ func LoadVersionsCmd(rt *services.Runtime, request catalogLoadRequest) tea.Cmd {
 	}
 }
 
-func ValidateDistributionSourceCmd(rt *services.Runtime, request catalogLoadRequest, source string) tea.Cmd {
+func ChangeDistributionSourceCmd(operation changeDistributionSourceFunc, request catalogLoadRequest, source string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		if rt == nil || rt.Loader == nil {
+		if operation == nil {
 			return distributionSourceValidatedMsg{
 				RequestID: request.ID,
-				Err:       errors.New("no loader configured"),
+				Err:       errors.New("no distribution source operation configured"),
 			}
 		}
-		catalog, err := rt.Loader.LoadWithSource(ctx, source)
-		if err != nil {
-			return distributionSourceValidatedMsg{RequestID: request.ID, Err: err}
-		}
-		for _, version := range catalog.Versions {
-			if version.Filename != "" {
-				return distributionSourceValidatedMsg{
-					RequestID: request.ID,
-					Source:    source,
-					Versions:  catalog.Versions,
-				}
-			}
-		}
+		result, err := operation(ctx, source)
 		return distributionSourceValidatedMsg{
 			RequestID: request.ID,
-			Err:       errors.New("distribution source has no archive for the current platform"),
+			Result:    result,
+			Err:       err,
 		}
 	}
 }

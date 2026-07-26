@@ -3,16 +3,70 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
+	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
 )
+
+func TestAppChangeDistributionSourceReportsSuccess(t *testing.T) {
+	var out bytes.Buffer
+	app := NewApp(Operations{
+		ChangeDistributionSource: func(context.Context, string) (application.DistributionSourceResult, error) {
+			return application.DistributionSourceResult{Source: "https://mirror.example/dl/"}, nil
+		},
+	}, nil, &out, &out)
+
+	if !app.ChangeDistributionSource("https://mirror.example/dl") {
+		t.Fatal("ChangeDistributionSource returned false")
+	}
+	if !strings.Contains(out.String(), "Distribution source changed to https://mirror.example/dl/.") ||
+		!strings.Contains(out.String(), "Matching archive verified") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestAppChangeDistributionSourceReportsPreservedSourceOnFailure(t *testing.T) {
+	var out bytes.Buffer
+	app := NewApp(Operations{
+		ChangeDistributionSource: func(context.Context, string) (application.DistributionSourceResult, error) {
+			return application.DistributionSourceResult{}, errors.New("catalog unavailable")
+		},
+	}, nil, &out, &out)
+
+	if app.ChangeDistributionSource("https://mirror.example/dl") {
+		t.Fatal("ChangeDistributionSource returned true")
+	}
+	if !strings.Contains(out.String(), "catalog unavailable") ||
+		!strings.Contains(out.String(), "Previous distribution source was preserved.") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestAppChangeDistributionSourceReportsRollbackUncertainty(t *testing.T) {
+	var out bytes.Buffer
+	app := NewApp(Operations{
+		ChangeDistributionSource: func(context.Context, string) (application.DistributionSourceResult, error) {
+			return application.DistributionSourceResult{}, &application.ChangeError{
+				Err: errors.New("rollback failed"),
+			}
+		},
+	}, nil, &out, &out)
+
+	if app.ChangeDistributionSource("https://mirror.example/dl") {
+		t.Fatal("ChangeDistributionSource returned true")
+	}
+	if !strings.Contains(out.String(), "could not be guaranteed preserved") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
 
 func TestAppDeleteReadsInjectedConfirmation(t *testing.T) {
 	home := t.TempDir()

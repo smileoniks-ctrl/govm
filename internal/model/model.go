@@ -1,17 +1,21 @@
 package model
 
 import (
+	"context"
 	"time"
 
 	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
+
+type changeDistributionSourceFunc func(context.Context, string) (application.DistributionSourceResult, error)
 
 // defaultConstructionWidth is the initial column budget passed to the
 // table-column helpers when a real WindowSizeMsg has not arrived yet.
@@ -68,6 +72,7 @@ type Model struct {
 	Settings SettingsState
 
 	runtime             *services.Runtime
+	distributionSource  changeDistributionSourceFunc
 	installGo           installFunc
 	installWithProgress installProgressFunc
 	activateGo          activateFunc
@@ -174,6 +179,7 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 // TUI for installed-version mutations and PATH presentation.
 type VersionOperations struct {
 	Runtime             *services.Runtime
+	DistributionSource  changeDistributionSourceFunc
 	Install             installFunc
 	InstallWithProgress installProgressFunc
 	Activate            activateFunc
@@ -187,6 +193,7 @@ type VersionOperations struct {
 // BindVersionOperations returns a copy of m bound to process-wide services.
 func (m Model) BindVersionOperations(operations VersionOperations) Model {
 	m.runtime = operations.Runtime
+	m.distributionSource = operations.DistributionSource
 	m.installGo = operations.Install
 	m.installWithProgress = operations.InstallWithProgress
 	m.activateGo = operations.Activate

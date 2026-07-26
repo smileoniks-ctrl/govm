@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/table"
+	"github.com/smileoniks-ctrl/govm/internal/loader"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -106,18 +107,8 @@ func (c *versionCatalog) replace(vs []utils.GoVersion) (bool, error) {
 	next := make([]utils.GoVersion, len(vs))
 	copy(next, vs)
 
-	seen := make(map[string]int, len(next))
-	for i := range next {
-		if next[i].Version == "" {
-			return false, catalogError(errKindInvalid, "", "empty version id at index %d", i)
-		}
-		if _, dup := seen[next[i].Version]; dup {
-			return false, catalogError(errKindInvalid, next[i].Version, "duplicate version id")
-		}
-		seen[next[i].Version] = i
-	}
-	if err := validateInvariants(next); err != nil {
-		return false, err
+	if err := loader.ValidateCatalogVersions(next); err != nil {
+		return false, catalogError(errKindInvalid, "", "%v", err)
 	}
 	if versionsEqual(c.versions, next) {
 		return false, nil
@@ -295,25 +286,9 @@ func versionsEqual(a, b []utils.GoVersion) bool {
 	return true
 }
 
-// validateInvariants enforces the catalog state invariants over a full
-// version slice. An active version may be unmanaged when it comes from
-// the system PATH, but catalog-driven activation still requires an
-// installed version.
-func validateInvariants(vs []utils.GoVersion) error {
-	activeCount := 0
-	for _, v := range vs {
-		if v.Active {
-			activeCount++
-		}
-		if v.Installed && v.Path == "" {
-			return catalogError(errKindInvalid, v.Version, "installed version requires non-empty path")
-		}
-		if !v.Installed && v.Path != "" {
-			return catalogError(errKindInvalid, v.Version, "uninstalled version must have empty path")
-		}
-	}
-	if activeCount > 1 {
-		return catalogError(errKindInvalid, "", "at most one active version allowed, got %d", activeCount)
+func validateInvariants(versions []utils.GoVersion) error {
+	if err := loader.ValidateCatalogVersions(versions); err != nil {
+		return catalogError(errKindInvalid, "", "%v", err)
 	}
 	return nil
 }

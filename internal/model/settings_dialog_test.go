@@ -1,13 +1,18 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/loader"
+	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
 func TestSettingsDepsBackupLimitDialogOpensWithCurrentValue(t *testing.T) {
@@ -179,5 +184,75 @@ func TestSettingsDistributionSourceDialogValidatesAndCancels(t *testing.T) {
 	m = updated.(Model)
 	if m.Settings.EditingDistributionSource {
 		t.Fatal("expected dialog to close after escape")
+	}
+}
+
+func TestSettingsDistributionSourceUsesOperationResult(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+	m.Settings.Cursor = 3
+	m = m.BindVersionOperations(VersionOperations{
+		DistributionSource: func(context.Context, string) (application.DistributionSourceResult, error) {
+			return application.DistributionSourceResult{
+				Source: "https://mirror.example/dl/",
+				Catalog: loader.VersionCatalog{Versions: []utils.GoVersion{{
+					Version:  "1.26.0",
+					Filename: "go1.26.0.darwin-arm64.tar.gz",
+				}}},
+			}, nil
+		},
+	})
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	m.Settings.DistributionSourceInput.SetValue("https://mirror.example/dl")
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if !m.Settings.EditingDistributionSource || !m.Settings.CheckingDistributionSource {
+		t.Fatal("dialog did not remain open while source operation was running")
+	}
+
+	updated, _ = m.Update(cmd())
+	m = updated.(Model)
+	if m.Settings.EditingDistributionSource {
+		t.Fatal("dialog remained open after successful source change")
+	}
+	if m.Settings.Values.DistributionSource != "https://mirror.example/dl/" {
+		t.Fatalf("source = %q", m.Settings.Values.DistributionSource)
+	}
+	if _, ok := m.projection.lookup("1.26.0"); !ok {
+		t.Fatal("operation catalog was not applied")
+	}
+}
+
+func TestSettingsDistributionSourceKeepsDialogOnOperationFailure(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+	m.Settings.Cursor = 3
+	m = m.BindVersionOperations(VersionOperations{
+		DistributionSource: func(context.Context, string) (application.DistributionSourceResult, error) {
+			return application.DistributionSourceResult{}, errors.New("catalog unavailable")
+		},
+	})
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	m.Settings.DistributionSourceInput.SetValue("https://mirror.example/dl")
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	updated, _ = m.Update(cmd())
+	m = updated.(Model)
+
+	if !m.Settings.EditingDistributionSource {
+		t.Fatal("dialog closed after failed source change")
+	}
+	if m.Settings.CheckingDistributionSource {
+		t.Fatal("source check remained active after failure")
+	}
+	if m.Settings.Values.DistributionSource != config.DefaultDistributionSource {
+		t.Fatalf("source = %q, want previous source", m.Settings.Values.DistributionSource)
+	}
+	if !strings.Contains(m.Settings.DistributionSourceInputErr, "catalog unavailable") {
+		t.Fatalf("error = %q", m.Settings.DistributionSourceInputErr)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	tea "charm.land/bubbletea/v2"
 	"fmt"
+	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/cli"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/model"
@@ -33,15 +34,22 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error initializing services: %v\n", err)
 		return
 	}
+	distributionSource := application.NewDistributionSourceOperation(
+		settingsPath,
+		application.FileSettingsStore{},
+		runtime.Loader,
+		runtime.Loader,
+	)
 	app := cli.NewApp(cli.Operations{
-		Runtime:      runtime,
-		Install:      runtime.Install.Install,
-		Activate:     runtime.Lifecycle.Activate,
-		Delete:       runtime.Lifecycle.Delete,
-		PreviewPrune: runtime.Prune.Preview,
-		Prune:        runtime.Prune.Prune,
-		Registry:     runtime.Registry,
-		ShimInPath:   utils.IsShimInPath,
+		Runtime:                  runtime,
+		Install:                  runtime.Install.Install,
+		Activate:                 runtime.Lifecycle.Activate,
+		Delete:                   runtime.Lifecycle.Delete,
+		PreviewPrune:             runtime.Prune.Preview,
+		Prune:                    runtime.Prune.Prune,
+		Registry:                 runtime.Registry,
+		ShimInPath:               utils.IsShimInPath,
+		ChangeDistributionSource: distributionSource.Change,
 	}, os.Stdin, os.Stdout, os.Stderr)
 	if len(os.Args) > 1 {
 		if handleCommandLine(app) != 0 {
@@ -50,7 +58,7 @@ func main() {
 		return
 	}
 	// handleCommandLine and TUI should never throw at the same time
-	launchTUI(runtime, settingsPath, settings)
+	launchTUI(runtime, distributionSource, settingsPath, settings)
 }
 func handleCommandLine(app *cli.App) int {
 	if len(os.Args) < 2 {
@@ -95,6 +103,15 @@ func handleCommandLine(app *cli.App) int {
 		if !app.PruneVersions(os.Args[2:]...) {
 			return 1
 		}
+	case "source":
+		if len(os.Args) < 3 {
+			fmt.Println("Error: 'source' requires an HTTPS base URL")
+			fmt.Println("Usage: govm source <url>")
+			return 1
+		}
+		if !app.ChangeDistributionSource(os.Args[2]) {
+			return 1
+		}
 	case "deps":
 		if len(os.Args) < 3 {
 			app.DepsCommand("help")
@@ -119,6 +136,7 @@ func printUsage() {
 	fmt.Println("  govm delete <version>  Delete a specific Go version")
 	fmt.Println("  govm list              List installed Go versions")
 	fmt.Println("  govm prune [options]   Remove inactive versions and temporary downloads")
+	fmt.Println("  govm source <url>      Change the toolchain distribution source")
 	fmt.Println("  govm deps list         List current module dependencies")
 	fmt.Println("  govm deps check        Check for available dependency updates")
 	fmt.Println("  govm deps update       Update direct dependencies (interactive)")
@@ -140,7 +158,7 @@ func loadTUISettings(stderr io.Writer, load func() (string, config.Settings, err
 	return settingsPath, settings
 }
 
-func launchTUI(runtime *services.Runtime, settingsPath string, settings config.Settings) {
+func launchTUI(runtime *services.Runtime, distributionSource *application.DistributionSourceOperation, settingsPath string, settings config.Settings) {
 	shimInPath := utils.IsShimInPath()
 	if !shimInPath {
 		setupModel, err := setup.New()
@@ -177,6 +195,7 @@ func launchTUI(runtime *services.Runtime, settingsPath string, settings config.S
 	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning, theme).
 		BindVersionOperations(model.VersionOperations{
 			Runtime:             runtime,
+			DistributionSource:  distributionSource.Change,
 			Install:             runtime.Install.Install,
 			InstallWithProgress: runtime.Install.InstallWithProgress,
 			Activate:            runtime.Lifecycle.Activate,

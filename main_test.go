@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -9,9 +10,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/smileoniks-ctrl/govm/internal/application"
+	"github.com/smileoniks-ctrl/govm/internal/cli"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
+
+func TestHandleCommandLineSourceReturnsNonZeroOnOperationFailure(t *testing.T) {
+	originalArgs := os.Args
+	os.Args = []string{"govm", "source", "https://mirror.example/dl"}
+	defer func() { os.Args = originalArgs }()
+
+	var out bytes.Buffer
+	app := cli.NewApp(cli.Operations{
+		ChangeDistributionSource: func(context.Context, string) (application.DistributionSourceResult, error) {
+			return application.DistributionSourceResult{}, errors.New("activation failed")
+		},
+	}, nil, &out, &out)
+
+	if code := handleCommandLine(app); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(out.String(), "Previous distribution source was preserved.") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
 
 func TestPrintUsageShowsVersion(t *testing.T) {
 	prev := utils.Version

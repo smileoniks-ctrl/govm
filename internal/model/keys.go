@@ -402,7 +402,7 @@ func (m *Model) beginDistributionSourceCheck() (tea.Model, tea.Cmd) {
 	m.Settings.CheckingDistributionSource = true
 	m.Settings.DistributionSourceRequestID = outcome.loadRequest.ID
 	m.Status.SetGlobal("Checking distribution source...", "warning")
-	return m, ValidateDistributionSourceCmd(m.runtime, outcome.loadRequest, source)
+	return m, ChangeDistributionSourceCmd(m.distributionSource, outcome.loadRequest, source)
 }
 
 func (m *Model) handleDistributionSourceValidation(msg distributionSourceValidatedMsg) (tea.Model, tea.Cmd) {
@@ -419,35 +419,12 @@ func (m *Model) handleDistributionSourceValidation(msg distributionSourceValidat
 	}
 
 	previous := m.Settings.Values
-	normalized, err := config.ValidateDistributionSource(msg.Source)
-	if err != nil {
-		m.Settings.DistributionSourceInputErr = err.Error()
-		return m, nil
-	}
 	next := previous
-	next.DistributionSource = normalized
-	if err := config.Save(m.Settings.Path, next); err != nil {
-		m.Settings.DistributionSourceInputErr = fmt.Sprintf("Failed to save settings: %v", err)
-		m.Settings.CheckingDistributionSource = false
-		outcome := m.projection.failLoad(msg.RequestID, err)
-		m.handleCatalogOutcome(outcome)
-		return m, nil
-	}
-	if err := m.runtime.Loader.SetDistributionSource(normalized); err != nil {
-		_ = config.Save(m.Settings.Path, previous)
-		m.Settings.DistributionSourceInputErr = fmt.Sprintf("Failed to apply settings: %v", err)
-		m.Settings.CheckingDistributionSource = false
-		outcome := m.projection.failLoad(msg.RequestID, err)
-		m.handleCatalogOutcome(outcome)
-		return m, nil
-	}
-
+	next.DistributionSource = msg.Result.Source
 	m.Settings.Values = next
 	m.Settings.CloseDistributionSourceInput()
-	outcome := m.projection.acceptLoad(msg.RequestID, msg.Versions)
+	outcome := m.projection.acceptLoad(msg.RequestID, msg.Result.Catalog.Versions)
 	if outcome.kind == catalogProjectionOutcomeRejected {
-		_ = config.Save(m.Settings.Path, previous)
-		_ = m.runtime.Loader.SetDistributionSource(previous.DistributionSource)
 		m.Settings.Values = previous
 		m.Settings.OpenDistributionSourceInput()
 		m.Settings.DistributionSourceInputErr = fmt.Sprintf("Failed to apply catalog: %v", outcome.err)
