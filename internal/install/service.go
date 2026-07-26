@@ -155,12 +155,24 @@ func (s *Service) ensureCoordinator() error {
 	return s.coordinatorErr
 }
 
-// Install performs a transactional install of req.Version.
+// Install performs a transactional install of req.Version without progress
+// reporting.
 //
 // Every failure path returns an *Error describing the stage; cleanup
 // of the current staging/download artefacts is always attempted and
 // any cleanup failure is joined onto the original error.
 func (s *Service) Install(ctx context.Context, req Request) (Result, error) {
+	return s.InstallWithProgress(ctx, req, nil)
+}
+
+// InstallWithProgress performs a transactional install and reports the
+// current stage and download byte counts to reporter.
+func (s *Service) InstallWithProgress(
+	ctx context.Context,
+	req Request,
+	reporter ProgressReporter,
+) (Result, error) {
+	reportProgress(reporter, req, StageValidate)
 	if err := validateRequest(req); err != nil {
 		return Result{}, &Error{Stage: StageValidate, Err: err}
 	}
@@ -170,10 +182,12 @@ func (s *Service) Install(ctx context.Context, req Request) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, &Error{Stage: StageValidate, Err: err}
 	}
+	reportProgress(reporter, req, StageLock)
 	if err := s.ensureCoordinator(); err != nil {
 		return Result{}, &Error{Stage: StageLock, Err: err}
 	}
 
+	reportProgress(reporter, req, StagePrepare)
 	root, err := s.resolver.RootDir()
 	if err != nil {
 		return Result{}, &Error{Stage: StagePrepare, Err: err}
@@ -213,8 +227,18 @@ func (s *Service) Install(ctx context.Context, req Request) (Result, error) {
 		return Result{}, &Error{Stage: StagePrepare, Err: fmt.Errorf("existing install is not a real directory: %q", finalDir)}
 	}
 
-	res, err := s.install(ctx, req, versionsDir, downloadsDir, stagingDir, partPath, finalExisted)
+	res, err := s.install(
+		ctx,
+		req,
+		versionsDir,
+		downloadsDir,
+		stagingDir,
+		partPath,
+		finalExisted,
+		reporter,
+	)
 	if err != nil {
+		reportProgress(reporter, req, StageCleanup)
 		joinFailureCleanup(partPath, stagingDir, &err)
 		return res, err
 	}
@@ -223,13 +247,24 @@ func (s *Service) Install(ctx context.Context, req Request) (Result, error) {
 
 // install performs preparation without the global mutation lock, then uses
 // the coordinator only for recovery, final revalidation, and commit.
-func (s *Service) install(ctx context.Context, req Request, versionsDir, downloadsDir, stagingDir, partPath string, finalExisted bool) (Result, error) {
+func (s *Service) install(
+	ctx context.Context,
+	req Request,
+	versionsDir,
+	downloadsDir,
+	stagingDir,
+	partPath string,
+	finalExisted bool,
+	reporter ProgressReporter,
+) (Result, error) {
 	var warnings []Warning
 
-	_, digest, err := s.download(ctx, req, partPath)
+	reportProgress(reporter, req, StageDownload)
+	_, digest, err := s.download(ctx, req, partPath, reporter)
 	if err != nil {
 		return Result{}, &Error{Stage: StageDownload, Err: err}
 	}
+	reportProgress(reporter, req, StageIntegrity)
 	if req.SHA256 == "" {
 		warnings = append(warnings, Warning{Kind: WarningIntegrityUnavailable})
 	} else {
@@ -242,9 +277,11 @@ func (s *Service) install(ctx context.Context, req Request, versionsDir, downloa
 		}
 	}
 
+	reportProgress(reporter, req, StageExtract)
 	if err := s.extract(ctx, partPath, stagingDir); err != nil {
 		return Result{}, &Error{Stage: StageExtract, Err: fmt.Errorf("extract archive: %w", err)}
 	}
+	reportProgress(reporter, req, StageVerify)
 	binaryPath := filepath.Join(stagingDir, "go", "bin", binaryName())
 	if _, err := os.Stat(binaryPath); err != nil {
 		return Result{}, &Error{Stage: StageVerify, Err: fmt.Errorf("extracted binary missing: %w", err)}
@@ -273,6 +310,7 @@ func (s *Service) install(ctx context.Context, req Request, versionsDir, downloa
 		},
 	}
 
+	reportProgress(reporter, req, StageCommit)
 	var committedWarnings []Warning
 	stateResult, mutateErr := s.state.Mutate(ctx, func(ctx context.Context, store *state.MarkerStore) error {
 		if err := requireRealInstallDirectory(versionsDir); err != nil {
@@ -286,6 +324,7 @@ func (s *Service) install(ctx context.Context, req Request, versionsDir, downloa
 			filepath.Base(partPath):   {},
 		})
 		committedWarnings = append(committedWarnings, orphanWarnings...)
+		reportProgress(reporter, req, StageCleanup)
 		if err := ctx.Err(); err != nil {
 			return &Error{Stage: StageCommit, Err: err}
 		}
@@ -584,7 +623,12 @@ func installCoordinatorError(err error) error {
 // download streams the archive into partPath exactly once. It returns
 // the computed SHA-256 digest of the bytes written so callers can
 // verify integrity without re-reading the file.
-func (s *Service) download(ctx context.Context, req Request, partPath string) (int64, []byte, error) {
+func (s *Service) download(
+	ctx context.Context,
+	req Request,
+	partPath string,
+	reporter ProgressReporter,
+) (int64, []byte, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
 	if err != nil {
 		return 0, nil, fmt.Errorf("build request: %w", err)
@@ -606,7 +650,16 @@ func (s *Service) download(ctx context.Context, req Request, partPath string) (i
 	// Hard cap: read at most one byte beyond the maximum so an
 	// overshoot is detectable without an unbounded copy.
 	limited := io.LimitReader(&ctxReader{ctx: ctx, r: resp.Body}, MaxDownloadSize+1)
-	written, copyErr := io.Copy(io.MultiWriter(partFile, hasher), limited)
+	writer := &progressWriter{
+		writer:   io.MultiWriter(partFile, hasher),
+		reporter: reporter,
+		progress: Progress{
+			Version:    req.Version,
+			Stage:      StageDownload,
+			BytesTotal: req.Size,
+		},
+	}
+	written, copyErr := io.Copy(writer, limited)
 	closeErr := partFile.Close()
 	if copyErr != nil {
 		return 0, nil, copyErr
@@ -624,6 +677,38 @@ func (s *Service) download(ctx context.Context, req Request, partPath string) (i
 		return 0, nil, fmt.Errorf("download size mismatch: got %d bytes, want %d", written, req.Size)
 	}
 	return written, hasher.Sum(nil), nil
+}
+
+type progressWriter struct {
+	writer   io.Writer
+	reporter ProgressReporter
+	progress Progress
+}
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if n > 0 {
+		w.progress.BytesReceived += int64(n)
+		reportProgressValue(w.reporter, w.progress)
+	}
+	return n, err
+}
+
+func reportProgress(reporter ProgressReporter, req Request, stage Stage) {
+	progress := Progress{
+		Version: req.Version,
+		Stage:   stage,
+	}
+	if stage == StageDownload {
+		progress.BytesTotal = req.Size
+	}
+	reportProgressValue(reporter, progress)
+}
+
+func reportProgressValue(reporter ProgressReporter, progress Progress) {
+	if reporter != nil {
+		reporter.Report(progress)
+	}
 }
 
 // commit performs the transactional swap of staging/go -> finalDir.

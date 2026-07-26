@@ -21,6 +21,31 @@ type Request struct {
 	Size     int64
 }
 
+// Progress describes the latest observable state of an installation.
+// BytesReceived and BytesTotal are meaningful during StageDownload; the
+// latter is zero when the archive size is unknown.
+type Progress struct {
+	Version       string
+	Stage         Stage
+	BytesReceived int64
+	BytesTotal    int64
+}
+
+// ProgressReporter observes installation progress. Implementations must
+// return promptly and must not affect the installation result.
+type ProgressReporter interface {
+	Report(Progress)
+}
+
+// ProgressReporterFunc adapts a function into a ProgressReporter.
+type ProgressReporterFunc func(Progress)
+
+func (f ProgressReporterFunc) Report(progress Progress) {
+	if f != nil {
+		f(progress)
+	}
+}
+
 type WarningKind int
 
 const (
