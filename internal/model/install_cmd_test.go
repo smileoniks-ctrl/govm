@@ -18,26 +18,32 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
-// installCapture is a fake install function that records the request
-// and context it was called with and returns a canned result.
-func installCapture(req *install.Request, ctxp *context.Context, result install.Result, err error) installFunc {
-	return func(ctx context.Context, r install.Request) (install.Result, error) {
+// installProgressCapture is a fake progress-reporting install function
+// that records the request and context it was called with and returns a
+// canned result.
+func installProgressCapture(
+	req *install.Request,
+	ctxp *context.Context,
+	result install.Result,
+	err error,
+) installProgressFunc {
+	return func(ctx context.Context, r install.Request, _ install.ProgressReporter) (install.Result, error) {
 		*req = r
 		*ctxp = ctx
 		return result, err
 	}
 }
 
-// TestInstallVersionCmd_MapsRequestAndTimeout verifies that
-// installVersionCmd maps every GoVersion field (including the integrity
-// metadata) into the install.Request and hands the core a deadline-bound
-// context, then resolves to an installSuccessMsg carrying the whole
-// result.
-func TestInstallVersionCmd_MapsRequestAndTimeout(t *testing.T) {
+// TestInstallVersionProgressCmd_MapsRequestAndTimeout verifies that the
+// install command dispatched by the TUI maps every GoVersion field
+// (including the integrity metadata) into the install.Request and hands
+// the core a deadline-bound context, then resolves to an
+// installSuccessMsg carrying the whole result.
+func TestInstallVersionProgressCmd_MapsRequestAndTimeout(t *testing.T) {
 	m := newTestModel(t)
 	var captured install.Request
 	var capturedCtx context.Context
-	m.installGo = installCapture(&captured, &capturedCtx,
+	m.installWithProgress = installProgressCapture(&captured, &capturedCtx,
 		install.Result{Version: "1.30.0", Path: "/p/1.30.0"}, nil)
 
 	src := utils.GoVersion{
@@ -48,7 +54,7 @@ func TestInstallVersionCmd_MapsRequestAndTimeout(t *testing.T) {
 		Size:     987654,
 	}
 	const operationID = 42
-	msg := m.installVersionCmd(operationID, src)()
+	msg := m.installVersionProgressCmd(operationID, src)()
 
 	// Every field, including the propagated integrity metadata, is
 	// mapped into the request.
@@ -83,17 +89,21 @@ func TestInstallVersionCmd_MapsRequestAndTimeout(t *testing.T) {
 	}
 }
 
-// TestInstallVersionCmd_FailureReturnsTypedError verifies a failing
-// install produces an installFailureMsg carrying the requested version
-// and the typed (stage-aware) error.
-func TestInstallVersionCmd_FailureReturnsTypedError(t *testing.T) {
+// TestInstallVersionProgressCmd_FailureReturnsTypedError verifies a
+// failing install produces an installFailureMsg carrying the requested
+// version and the typed (stage-aware) error.
+func TestInstallVersionProgressCmd_FailureReturnsTypedError(t *testing.T) {
 	m := newTestModel(t)
 	installErr := &install.Error{Stage: install.StageDownload, Err: errors.New("network down")}
-	m.installGo = func(ctx context.Context, r install.Request) (install.Result, error) {
+	m.installWithProgress = func(
+		context.Context,
+		install.Request,
+		install.ProgressReporter,
+	) (install.Result, error) {
 		return install.Result{}, installErr
 	}
 
-	msg := m.installVersionCmd(42, utils.GoVersion{Version: "1.30.0"})()
+	msg := m.installVersionProgressCmd(42, utils.GoVersion{Version: "1.30.0"})()
 
 	failure, ok := msg.(installFailureMsg)
 	if !ok {
@@ -107,21 +117,44 @@ func TestInstallVersionCmd_FailureReturnsTypedError(t *testing.T) {
 	}
 }
 
-// TestInstallVersionCmd_NilInstallerDoesNotPanic verifies a model whose
-// installer was never bound surfaces a failure instead of panicking,
-// keeping bare test constructors safe.
-func TestInstallVersionCmd_NilInstallerDoesNotPanic(t *testing.T) {
+// TestInstallVersionProgressCmd_NilInstallerDoesNotPanic verifies a
+// model whose installer was never bound surfaces a failure instead of
+// panicking, keeping bare test constructors safe.
+func TestInstallVersionProgressCmd_NilInstallerDoesNotPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("installVersionCmd panicked on nil installer: %v", r)
+			t.Fatalf("installVersionProgressCmd panicked on nil installer: %v", r)
 		}
 	}()
 	m := newTestModel(t)
 	m.installGo = nil
+	m.installWithProgress = nil
 
-	msg := m.installVersionCmd(42, utils.GoVersion{Version: "1.30.0"})()
+	msg := m.installVersionProgressCmd(42, utils.GoVersion{Version: "1.30.0"})()
 	if _, ok := msg.(installFailureMsg); !ok {
 		t.Fatalf("expected installFailureMsg for nil installer, got %T", msg)
+	}
+}
+
+// TestInstallVersionProgressCmd_FallsBackToPlainInstaller verifies the
+// progress path still installs through the plain installer when no
+// progress-reporting installer is bound.
+func TestInstallVersionProgressCmd_FallsBackToPlainInstaller(t *testing.T) {
+	m := newTestModel(t)
+	m.installWithProgress = nil
+	var captured install.Request
+	m.installGo = func(_ context.Context, r install.Request) (install.Result, error) {
+		captured = r
+		return install.Result{Version: r.Version, Path: "/p/" + r.Version}, nil
+	}
+
+	msg := m.installVersionProgressCmd(42, utils.GoVersion{Version: "1.30.0"})()
+
+	if captured.Version != "1.30.0" {
+		t.Fatalf("captured request = %+v, want the requested version", captured)
+	}
+	if _, ok := msg.(installSuccessMsg); !ok {
+		t.Fatalf("expected installSuccessMsg, got %T", msg)
 	}
 }
 

@@ -4,12 +4,10 @@ package model
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/install"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -56,38 +54,6 @@ type installFailureMsg struct {
 	OperationID uint64
 	Version     string
 	Err         error
-}
-
-// installVersionCmd maps a catalog GoVersion to an install.Request and
-// returns the tea.Cmd that runs the installation through the injected
-// install function. The command always resolves to either an
-// installSuccessMsg (carrying the whole install.Result) or an
-// installFailureMsg (carrying the requested version and the typed
-// error). A model whose installer was never bound surfaces a failure
-// instead of panicking, which keeps bare test constructors safe.
-func (m Model) installVersionCmd(operationID uint64, v utils.GoVersion) tea.Cmd {
-	return func() tea.Msg {
-		req := buildInstallRequest(v)
-		if m.installGo == nil {
-			return installFailureMsg{
-				OperationID: operationID,
-				Version:     req.Version,
-				Err:         errors.New("no installer configured"),
-			}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), installTimeout)
-		defer cancel()
-		result, err := m.installGo(ctx, req)
-		if err != nil {
-			return installFailureMsg{OperationID: operationID, Version: req.Version, Err: err}
-		}
-		return installSuccessMsg{
-			OperationID: operationID,
-			Version:     result.Version,
-			Path:        result.Path,
-			Warnings:    result.Warnings,
-		}
-	}
 }
 
 // installSuccessStatus renders the status text and kind for a completed
