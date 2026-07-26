@@ -721,6 +721,20 @@ func (a *catalogProjectionAdapter) setTheme(theme styles.Theme) catalogProjectio
 	}
 }
 
+func (a *catalogProjectionAdapter) setDiskUsage(sizes map[string]int64) catalogProjectionOutcome {
+	changed, err := a.catalog.setDiskUsage(sizes)
+	if err != nil {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeRejected, err: err}
+	}
+	if !changed {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeNoop}
+	}
+	return catalogProjectionOutcome{
+		kind: catalogProjectionOutcomePublished,
+		cmd:  a.publish(a.catalog.projection()),
+	}
+}
+
 func (a *catalogProjectionAdapter) availableModel() list.Model {
 	return a.list
 }

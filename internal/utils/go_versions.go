@@ -37,6 +37,7 @@ type GoVersion struct {
 	Installed bool
 	Active    bool
 	Path      string
+	DiskUsage int64
 	Stable    bool
 }
 

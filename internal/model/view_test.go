@@ -169,6 +169,13 @@ func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
 	}
 }
 
+func TestRenderHelp_InstalledIncludesPrune(t *testing.T) {
+	got := stripANSI(renderHelp(testTheme(), InstalledTab, false, ConfirmDialog{}, 80))
+	if !strings.Contains(got, "p prune") {
+		t.Fatalf("expected prune hint, got: %s", got)
+	}
+}
+
 func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 	tests := []struct {
 		name             string

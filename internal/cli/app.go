@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,12 +11,15 @@ import (
 
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
 type activateFunc func(context.Context, string) (lifecycle.ActivationResult, error)
 type deleteFunc func(context.Context, string) (lifecycle.DeletionResult, error)
+type prunePreviewFunc func(context.Context) (prune.Result, error)
+type pruneFunc func(context.Context) (prune.Result, error)
 
 type pathResolver interface {
 	ActiveVersionFile() (string, error)
@@ -40,12 +44,14 @@ func (a *App) InstallVersion(version string) {
 
 // Operations contains the narrow core seams used by App.
 type Operations struct {
-	Runtime    *services.Runtime
-	Install    installFunc
-	Activate   activateFunc
-	Delete     deleteFunc
-	Resolver   pathResolver
-	ShimInPath func() bool
+	Runtime      *services.Runtime
+	Install      installFunc
+	Activate     activateFunc
+	Delete       deleteFunc
+	PreviewPrune prunePreviewFunc
+	Prune        pruneFunc
+	Resolver     pathResolver
+	ShimInPath   func() bool
 }
 
 // App maps CLI commands and process I/O onto core operations.
@@ -198,6 +204,112 @@ func (a *App) DeleteVersion(version string) {
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(a.out, "⚠️  %s\n", warning)
 	}
+}
+
+// PruneVersions previews and optionally removes inactive toolchains and
+// govm-owned temporary downloads.
+func (a *App) PruneVersions(args ...string) bool {
+	yes, dryRun, err := parsePruneArgs(args)
+	if err != nil {
+		fmt.Fprintf(a.out, "Error: %v\n", err)
+		return false
+	}
+	if a.operations.PreviewPrune == nil || a.operations.Prune == nil {
+		fmt.Fprintln(a.out, "Error: prune service is not configured")
+		return false
+	}
+
+	result, previewErr := a.operations.PreviewPrune(context.Background())
+	printPrunePlan(a.out, result, dryRun)
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(a.out, "Warning: %s\n", warning)
+	}
+	if previewErr != nil {
+		fmt.Fprintf(a.out, "Error: cannot safely prune versions: %v\n", previewErr)
+		if len(result.Candidates) == 0 {
+			return false
+		}
+	}
+	if len(result.Candidates) == 0 {
+		fmt.Fprintln(a.out, "Nothing to prune.")
+		return previewErr == nil
+	}
+	if dryRun {
+		return previewErr == nil
+	}
+	if !yes {
+		fmt.Fprint(a.out, "Are you sure? (y/N): ")
+	}
+	if !yes && !confirm(a.in) {
+		fmt.Fprintln(a.out, "Operation canceled.")
+		return true
+	}
+
+	fmt.Fprintln(a.out, "Pruning...")
+	removed, pruneErr := a.operations.Prune(context.Background())
+	for _, candidate := range removed.Removed {
+		fmt.Fprintf(a.out, "Removed %s (%d bytes)\n", candidate.Path, candidate.Bytes)
+	}
+	for _, warning := range removed.Warnings {
+		fmt.Fprintf(a.out, "Warning: %s\n", warning)
+	}
+	if pruneErr != nil {
+		fmt.Fprintf(a.out, "Error: prune completed with warnings: %v\n", pruneErr)
+		return false
+	}
+	fmt.Fprintf(a.out, "Freed %d bytes.\n", pruneRemovedBytes(removed))
+	return true
+}
+
+func parsePruneArgs(args []string) (yes, dryRun bool, err error) {
+	for _, arg := range args {
+		switch arg {
+		case "--yes", "-y":
+			yes = true
+		case "--dry-run":
+			dryRun = true
+		case "--help", "-h":
+			return false, false, errors.New("usage: govm prune [--yes] [--dry-run]")
+		default:
+			return false, false, fmt.Errorf("unknown prune option %q", arg)
+		}
+	}
+	return yes, dryRun, nil
+}
+
+func confirm(in io.Reader) bool {
+	var response string
+	if _, err := fmt.Fscan(in, &response); err != nil {
+		return false
+	}
+	return strings.EqualFold(response, "y")
+}
+
+func printPrunePlan(out io.Writer, result prune.Result, dryRun bool) {
+	action := "Would remove"
+	if !dryRun {
+		action = "Plan to remove"
+	}
+	fmt.Fprintf(out, "%s %d object(s), %d bytes:\n", action, len(result.Candidates), pruneResultBytes(result))
+	for _, candidate := range result.Candidates {
+		fmt.Fprintf(out, "  %s (%d bytes)\n", candidate.Path, candidate.Bytes)
+	}
+}
+
+func pruneResultBytes(result prune.Result) int64 {
+	var total int64
+	for _, candidate := range result.Candidates {
+		total += candidate.Bytes
+	}
+	return total
+}
+
+func pruneRemovedBytes(result prune.Result) int64 {
+	var total int64
+	for _, candidate := range result.Removed {
+		total += candidate.Bytes
+	}
+	return total
 }
 
 // DepsCommand routes `govm deps <subcommand>`.

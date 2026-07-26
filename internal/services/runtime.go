@@ -15,6 +15,8 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/loader"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"github.com/smileoniks-ctrl/govm/internal/prune"
+	"github.com/smileoniks-ctrl/govm/internal/state"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -26,6 +28,7 @@ type Runtime struct {
 	Loader    *Loader
 	Lifecycle *lifecycle.Service
 	Install   *install.Service
+	Prune     *prune.Service
 	Paths     *paths.Resolver
 }
 
@@ -104,17 +107,23 @@ func NewRuntime(settings config.Settings) (*Runtime, error) {
 		DistributionSource: source,
 	}
 
-	lifecycleSvc, err := lifecycle.New()
+	coordinator := state.NewCoordinator(resolver)
+	lifecycleSvc, err := lifecycle.NewService(resolver, coordinator)
 	if err != nil {
 		return nil, fmt.Errorf("initialize lifecycle service: %w", err)
 	}
 
-	installSvc := install.NewService()
+	installSvc := install.NewServiceWithResolverAndCoordinator(resolver, coordinator)
+	pruneSvc, err := prune.New(resolver, coordinator, lifecycleSvc)
+	if err != nil {
+		return nil, fmt.Errorf("initialize prune service: %w", err)
+	}
 
 	return &Runtime{
 		Loader:    &Loader{deps: loaderDeps, httpClient: httpClient},
 		Lifecycle: lifecycleSvc,
 		Install:   installSvc,
+		Prune:     pruneSvc,
 		Paths:     resolver,
 	}, nil
 }

@@ -14,6 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/install"
+	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -192,6 +193,36 @@ func TestInstallSuccess_PreservesExistingSuccessText(t *testing.T) {
 	if activity := got.projection.activityState(); activity.kind != catalogActivityIdle {
 		t.Fatalf("activity = %+v, want idle after successful install", activity)
 	}
+}
+
+func TestInstallSuccessRefreshesDiskUsage(t *testing.T) {
+	m := newVersionCacheTestModel(t)
+	m.diskUsage = func(context.Context) (prune.Summary, error) {
+		return prune.Summary{
+			VersionBytes: map[string]int64{"1.25.0": 4096},
+		}, nil
+	}
+	operation := m.projection.startMutation(catalogMutationInstall, "1.25.0")
+	updated, cmd := m.Update(installSuccessMsg{
+		OperationID: operation.id,
+		Version:     "1.25.0",
+		Path:        "/new/1.25",
+	})
+	if cmd == nil {
+		t.Fatal("expected disk usage refresh command")
+	}
+	updatedModel := updated.(Model)
+	updated, _ = updatedModel.Update(m.diskUsageCmd()())
+	got := updated.(Model)
+	for _, row := range got.projection.installedModel().Rows() {
+		if row[0] == "1.25.0" {
+			if row[2] != "4.0 KiB" {
+				t.Fatalf("size column = %q, want 4.0 KiB", row[2])
+			}
+			return
+		}
+	}
+	t.Fatal("installed version 1.25.0 not found")
 }
 
 // TestInstallSuccess_WarningsProduceWarningStatus verifies that install

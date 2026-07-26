@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -45,6 +46,9 @@ func (m Model) View() tea.View {
 		components = append(components, renderContentCanvas(m.projection.availableView(), width, height))
 	case InstalledTab:
 		components = append(components, renderContentCanvas(m.projection.installedView(), width, height))
+		if m.diskUsage != nil {
+			components = append(components, renderInstalledSummary(m.DiskUsage))
+		}
 	case DepsTab:
 		components = append(components, renderContentCanvas(m.Deps.Table.View(), width, height))
 	case SettingsTab:
@@ -62,6 +66,13 @@ func (m Model) View() tea.View {
 		m.Deps.Dialog,
 		width,
 	)
+	if m.PruneConfirming {
+		help = renderKeyHints(t, [][2]string{
+			{"y", "confirm"},
+			{"n", "cancel"},
+			{"q", "quit"},
+		}, width)
+	}
 	if m.Settings.EditingDepsBackupLimit {
 		help = renderKeyHints(t, [][2]string{
 			{"enter", "save"},
@@ -83,11 +94,41 @@ func (m Model) View() tea.View {
 		rendered = overlayDialog(rendered, renderDistributionSourceDialog(t, m.Settings, viewport), viewport)
 	} else if m.Deps.Dialog.Active() {
 		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(t, m.Deps, viewport), viewport)
+	} else if m.PruneConfirming {
+		rendered = overlayDialog(rendered, renderPruneDialog(t, m.PrunePlan, viewport.Width), viewport)
 	}
 
 	v := tea.NewView(rendered)
 	v.AltScreen = true
 	return v
+}
+
+func renderInstalledSummary(summary prune.Summary) string {
+	return fmt.Sprintf(
+		"Installed: %s  Downloads: %s  Reclaimable: %s",
+		prune.FormatBytes(summary.InstalledBytes),
+		prune.FormatBytes(summary.DownloadBytes),
+		prune.FormatBytes(summary.ReclaimableBytes),
+	)
+}
+
+func renderPruneDialog(t styles.Theme, result prune.Result, width int) string {
+	lines := []string{
+		"Prune inactive Go versions?",
+		fmt.Sprintf("Candidates: %d", len(result.Candidates)),
+		fmt.Sprintf("Reclaimable: %s", prune.FormatBytes(pruneResultBytes(result))),
+		"",
+	}
+	for _, candidate := range result.Candidates {
+		label := candidate.Version
+		if label == "" {
+			label = candidate.Path
+		}
+		lines = append(lines, fmt.Sprintf("  %s  %s", label, prune.FormatBytes(candidate.Bytes)))
+	}
+	lines = append(lines, "", "Press Y to confirm, N to cancel.")
+	content := strings.Join(lines, "\n")
+	return t.DialogBoxStyle.Width(maxInt(30, minInt(width-8, 72))).Render(content)
 }
 
 func renderMinimumViewport(t styles.Theme, width, height int) string {
@@ -326,6 +367,7 @@ func renderHelp(t styles.Theme, currentTab int, confirmingDelete bool, dialog Co
 		hints = [][2]string{
 			{"u", "use"},
 			{"d", "delete"},
+			{"p", "prune"},
 			{"tab", "switch"},
 			{"q", "quit"},
 		}

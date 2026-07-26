@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
@@ -42,6 +43,11 @@ type Model struct {
 	ShimPathWarning  string
 	ConfirmingDelete bool
 	DeleteVersion    string
+	PruneConfirming  bool
+	PrunePreviewing  bool
+	PruneRunning     bool
+	PrunePlan        prune.Result
+	DiskUsage        prune.Summary
 	Width            int
 	Height           int
 	TermWidth        int
@@ -66,6 +72,9 @@ type Model struct {
 	installWithProgress installProgressFunc
 	activateGo          activateFunc
 	deleteGo            deleteFunc
+	previewPrune        previewPruneFunc
+	prune               pruneFunc
+	diskUsage           diskUsageFunc
 	shimInPath          func() bool
 }
 
@@ -169,6 +178,9 @@ type VersionOperations struct {
 	InstallWithProgress installProgressFunc
 	Activate            activateFunc
 	Delete              deleteFunc
+	PreviewPrune        previewPruneFunc
+	Prune               pruneFunc
+	DiskUsage           diskUsageFunc
 	ShimInPath          func() bool
 }
 
@@ -179,6 +191,9 @@ func (m Model) BindVersionOperations(operations VersionOperations) Model {
 	m.installWithProgress = operations.InstallWithProgress
 	m.activateGo = operations.Activate
 	m.deleteGo = operations.Delete
+	m.previewPrune = operations.PreviewPrune
+	m.prune = operations.Prune
+	m.diskUsage = operations.DiskUsage
 	m.shimInPath = operations.ShimInPath
 	return m
 }
@@ -188,10 +203,25 @@ func (m Model) Init() tea.Cmd {
 	if m.initialLoad.ID != 0 {
 		load = LoadVersionsCmd(m.runtime, m.initialLoad)
 	}
+	var usage tea.Cmd
+	if m.diskUsage != nil {
+		usage = m.diskUsageCmd()
+	}
 	return tea.Batch(
 		load,
+		usage,
 		m.Spinner.Tick,
 	)
+}
+
+func (m Model) diskUsageCmd() tea.Cmd {
+	if m.diskUsage == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		summary, err := m.diskUsage(nil)
+		return diskUsageMsg{Summary: summary, Err: err}
+	}
 }
 
 func (m Model) viewHeight() int {

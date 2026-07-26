@@ -202,6 +202,30 @@ func (c *versionCatalog) markDeleted(version string) (bool, error) {
 	return true, nil
 }
 
+func (c *versionCatalog) setDiskUsage(sizes map[string]int64) (bool, error) {
+	if sizes == nil {
+		return false, nil
+	}
+	next := cloneVersions(c.versions)
+	changed := false
+	for i := range next {
+		if !next[i].Installed {
+			continue
+		}
+		size, ok := sizes[next[i].Version]
+		if !ok || next[i].DiskUsage == size {
+			continue
+		}
+		next[i].DiskUsage = size
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+	c.commit(next)
+	return true, nil
+}
+
 // lookup returns the stored record for version. The bool is false when
 // the version is absent.
 func (c *versionCatalog) lookup(version string) (utils.GoVersion, bool) {
@@ -316,7 +340,7 @@ func buildInstalled(vs []utils.GoVersion) []table.Row {
 		if v.Active {
 			status = "active"
 		}
-		rows = append(rows, table.Row{v.Version, v.Path, status})
+		rows = append(rows, table.Row{v.Version, v.Path, formatDiskUsage(v.DiskUsage), status})
 	}
 	return rows
 }

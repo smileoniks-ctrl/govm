@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
+	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
 
@@ -35,7 +36,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.projection.operationPhase() == catalogOperationPhaseMutating {
 		switch msg.String() {
-		case "i", "u", "d":
+		case "i", "u", "d", "p":
 			return m, nil
 		}
 	}
@@ -50,9 +51,17 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleBackupsKey()
 	case "d":
 		return m.handleDeleteKey()
+	case "p":
+		return m.handlePruneKey()
 	case "y", "Y":
+		if m.PruneConfirming {
+			return m.handlePruneConfirmYes()
+		}
 		return m.handleDeleteConfirmYes()
 	case "n", "N":
+		if m.PruneConfirming {
+			return m.handlePruneConfirmNo()
+		}
 		return m.handleDeleteConfirmNo()
 	}
 	return m.handleActiveComponentKey(msg)
@@ -237,6 +246,9 @@ func (m *Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab != AvailableTab && m.CurrentTab != InstalledTab {
 		return m, nil
 	}
+	if m.PruneConfirming || m.PrunePreviewing || m.PruneRunning {
+		return m, nil
+	}
 	if m.projection.operationPhase() != catalogOperationPhaseIdle {
 		return m, nil
 	}
@@ -268,6 +280,41 @@ func (m *Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 	m.ConfirmingDelete = true
 	m.DeleteVersion = v.Version
 	m.Status.SetTab(fmt.Sprintf("Are you sure you want to delete Go %s? Press Y to confirm, N to cancel.", v.Version), "warning")
+	return m, nil
+}
+
+func (m *Model) handlePruneKey() (tea.Model, tea.Cmd) {
+	if m.CurrentTab != InstalledTab ||
+		m.projection.operationPhase() != catalogOperationPhaseIdle ||
+		m.ConfirmingDelete || m.PruneConfirming || m.PrunePreviewing || m.PruneRunning {
+		return m, nil
+	}
+	if m.previewPrune == nil {
+		m.Status.SetTab("Prune service is not configured.", "error")
+		return m, nil
+	}
+	m.PrunePreviewing = true
+	m.Status.SetTab("Preparing prune plan...", "info")
+	return m, m.previewPruneCmd()
+}
+
+func (m *Model) handlePruneConfirmYes() (tea.Model, tea.Cmd) {
+	if !m.PruneConfirming || m.PruneRunning {
+		return m, nil
+	}
+	m.PruneConfirming = false
+	m.PruneRunning = true
+	m.Status.SetGlobal("Pruning inactive Go versions...", "info")
+	return m, m.pruneCmd()
+}
+
+func (m *Model) handlePruneConfirmNo() (tea.Model, tea.Cmd) {
+	if !m.PruneConfirming {
+		return m, nil
+	}
+	m.PruneConfirming = false
+	m.PrunePlan = prune.Result{}
+	m.Status.SetTab("Prune operation canceled.", "info")
 	return m, nil
 }
 

@@ -461,7 +461,7 @@ func TestVersionCatalogAliasingSafety(t *testing.T) {
 	if len(proj2.installed) != 1 {
 		t.Fatalf("catalog installed corrupted by projection aliasing: len=%d", len(proj2.installed))
 	}
-	wantRow := table.Row{"1.22.0", "/a", ""}
+	wantRow := table.Row{"1.22.0", "/a", "0 B", ""}
 	for i, cell := range wantRow {
 		if proj2.installed[0][i] != cell {
 			t.Fatalf("catalog installed row corrupted: %v", proj2.installed[0])
@@ -500,7 +500,7 @@ func TestVersionCatalogSetThemeUpdatesRenderedTitle(t *testing.T) {
 	}
 	// Installed projection is unaffected by theme change.
 	proj := c.projection()
-	if len(proj.installed) != 1 || proj.installed[0][0] != "1.22.0" || proj.installed[0][2] != "active" {
+	if len(proj.installed) != 1 || proj.installed[0][0] != "1.22.0" || proj.installed[0][3] != "active" {
 		t.Fatalf("installed projection changed unexpectedly: %v", proj.installed)
 	}
 }

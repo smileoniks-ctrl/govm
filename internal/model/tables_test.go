@@ -85,8 +85,8 @@ func TestInstalledTableColumns_AllLayouts(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cols := installedTableColumns(tc.width)
-			if len(cols) != 3 {
-				t.Fatalf("expected 3 columns, got %d", len(cols))
+			if len(cols) != 4 {
+				t.Fatalf("expected 4 columns, got %d", len(cols))
 			}
 			for i, c := range cols {
 				if c.Width <= 0 {
@@ -151,7 +151,7 @@ func TestUpdateDependencyTable_StatusPriorities(t *testing.T) {
 func TestUpdateInstalledTable_SkipsUninstalled(t *testing.T) {
 	m := newTestModel(t)
 	seedVersions(t, &m, []utils.GoVersion{
-		{Version: "1.20.0", Installed: true, Path: "/p/1.20", Active: true},
+		{Version: "1.20.0", Installed: true, Path: "/p/1.20", DiskUsage: 2048, Active: true},
 		{Version: "1.21.0", Installed: false},
 		{Version: "1.22.0", Installed: true, Path: "/p/1.22"},
 	})
@@ -159,10 +159,10 @@ func TestUpdateInstalledTable_SkipsUninstalled(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 installed rows, got %d", len(rows))
 	}
-	if rows[0][0] != "1.20.0" || rows[0][2] != "active" {
+	if rows[0][0] != "1.20.0" || rows[0][2] != "2.0 KiB" || rows[0][3] != "active" {
 		t.Fatalf("row 0 mismatch: %v", rows[0])
 	}
-	if rows[1][0] != "1.22.0" || rows[1][2] != "" {
+	if rows[1][0] != "1.22.0" || rows[1][2] != "0 B" || rows[1][3] != "" {
 		t.Fatalf("row 1 mismatch: %v", rows[1])
 	}
 }

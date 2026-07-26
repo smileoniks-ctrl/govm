@@ -161,12 +161,15 @@ func assertVersionViewsConsistent(t *testing.T, m Model) {
 		if row[1] != v.Path {
 			t.Errorf("installed row Path = %q, want %q", row[1], v.Path)
 		}
+		if row[2] != formatDiskUsage(v.DiskUsage) {
+			t.Errorf("installed row Size = %q, want %q", row[2], formatDiskUsage(v.DiskUsage))
+		}
 		wantStatus := ""
 		if v.Active {
 			wantStatus = "active"
 		}
-		if row[2] != wantStatus {
-			t.Errorf("installed row Status = %q, want %q", row[2], wantStatus)
+		if row[3] != wantStatus {
+			t.Errorf("installed row Status = %q, want %q", row[3], wantStatus)
 		}
 	}
 }

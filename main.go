@@ -34,24 +34,28 @@ func main() {
 		return
 	}
 	app := cli.NewApp(cli.Operations{
-		Runtime:    runtime,
-		Install:    runtime.Install.Install,
-		Activate:   runtime.Lifecycle.Activate,
-		Delete:     runtime.Lifecycle.Delete,
-		Resolver:   runtime.Paths,
-		ShimInPath: utils.IsShimInPath,
+		Runtime:      runtime,
+		Install:      runtime.Install.Install,
+		Activate:     runtime.Lifecycle.Activate,
+		Delete:       runtime.Lifecycle.Delete,
+		PreviewPrune: runtime.Prune.Preview,
+		Prune:        runtime.Prune.Prune,
+		Resolver:     runtime.Paths,
+		ShimInPath:   utils.IsShimInPath,
 	}, os.Stdin, os.Stdout, os.Stderr)
 	if len(os.Args) > 1 {
-		handleCommandLine(app)
+		if handleCommandLine(app) != 0 {
+			os.Exit(1)
+		}
 		return
 	}
 	// handleCommandLine and TUI should never throw at the same time
 	launchTUI(runtime, settingsPath, settings)
 }
-func handleCommandLine(app *cli.App) {
+func handleCommandLine(app *cli.App) int {
 	if len(os.Args) < 2 {
 		printUsage()
-		return
+		return 0
 	}
 	command := os.Args[1]
 	switch command {
@@ -60,7 +64,7 @@ func handleCommandLine(app *cli.App) {
 			fmt.Println("Error: 'install' requires a version argument")
 			fmt.Println("Usage: govm install <version>")
 			fmt.Println("Example: govm install 1.21")
-			return
+			return 1
 		}
 		version := os.Args[2]
 		version = strings.TrimPrefix(version, "go")
@@ -70,7 +74,7 @@ func handleCommandLine(app *cli.App) {
 			fmt.Println("Error: 'use' requires a version argument")
 			fmt.Println("Usage: govm use <version>")
 			fmt.Println("Example: govm use 1.21")
-			return
+			return 1
 		}
 		version := os.Args[2]
 		version = strings.TrimPrefix(version, "go")
@@ -80,17 +84,21 @@ func handleCommandLine(app *cli.App) {
 			fmt.Println("Error: 'delete' requires a version argument")
 			fmt.Println("Usage: govm delete <version>")
 			fmt.Println("Example: govm delete 1.21")
-			return
+			return 1
 		}
 		version := os.Args[2]
 		version = strings.TrimPrefix(version, "go")
 		app.DeleteVersion(version)
 	case "list":
 		app.ListVersions()
+	case "prune":
+		if !app.PruneVersions(os.Args[2:]...) {
+			return 1
+		}
 	case "deps":
 		if len(os.Args) < 3 {
 			app.DepsCommand("help")
-			return
+			return 0
 		}
 		app.DepsCommand(os.Args[2:]...)
 	case "help":
@@ -98,7 +106,9 @@ func handleCommandLine(app *cli.App) {
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
+		return 1
 	}
+	return 0
 }
 func printUsage() {
 	fmt.Printf("GoVM - Go Version Manager (version %s)\n", utils.GetVersion())
@@ -108,6 +118,7 @@ func printUsage() {
 	fmt.Println("  govm use <version>     Switch to a specific Go version")
 	fmt.Println("  govm delete <version>  Delete a specific Go version")
 	fmt.Println("  govm list              List installed Go versions")
+	fmt.Println("  govm prune [options]   Remove inactive versions and temporary downloads")
 	fmt.Println("  govm deps list         List current module dependencies")
 	fmt.Println("  govm deps check        Check for available dependency updates")
 	fmt.Println("  govm deps update       Update direct dependencies (interactive)")
@@ -171,6 +182,9 @@ func launchTUI(runtime *services.Runtime, settingsPath string, settings config.S
 			Activate:            runtime.Lifecycle.Activate,
 			Delete:              runtime.Lifecycle.Delete,
 			ShimInPath:          utils.IsShimInPath,
+			PreviewPrune:        runtime.Prune.Preview,
+			Prune:               runtime.Prune.Prune,
+			DiskUsage:           runtime.Prune.DiskUsage,
 		})
 	p := tea.NewProgram(
 		model.NewProgramModel(initialModel),

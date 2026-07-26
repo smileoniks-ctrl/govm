@@ -361,6 +361,47 @@ func (s *Service) Delete(ctx context.Context, canonical string) (DeletionResult,
 	return result, nil
 }
 
+// DeleteLocked deletes canonical while the shared coordinator lock is held.
+// Callers must invoke this only from a coordinator mutation callback.
+func (s *Service) DeleteLocked(ctx context.Context, store *state.MarkerStore, canonical string) (DeletionResult, error) {
+	if err := version.Validate(canonical); err != nil {
+		return DeletionResult{}, operationError(state.OperationDelete, PhaseValidate, err)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return DeletionResult{}, operationError(state.OperationDelete, PhaseValidate, err)
+	}
+	if store == nil {
+		return DeletionResult{}, operationError(state.OperationDelete, PhasePrepare, errors.New("state marker store is nil"))
+	}
+	return s.deleteLocked(ctx, store, canonical)
+}
+
+// ValidateInstalledVersion verifies the canonical on-disk toolchain layout
+// without mutating it.
+func (s *Service) ValidateInstalledVersion(canonical string) error {
+	if err := version.Validate(canonical); err != nil {
+		return operationError(state.OperationDelete, PhaseValidate, err)
+	}
+	layout, err := s.resolveLayout()
+	if err != nil {
+		return operationError(state.OperationDelete, PhasePrepare, err)
+	}
+	_, err = s.validateInstalledVersion(layout.versions, filepath.Join(layout.versions, "go"+canonical))
+	return err
+}
+
+// ReadActiveVersion reads and validates the active-version record.
+func (s *Service) ReadActiveVersion() (string, bool, error) {
+	layout, err := s.resolveLayout()
+	if err != nil {
+		return "", false, err
+	}
+	return s.readActiveVersion(layout.active)
+}
+
 func (s *Service) deleteLocked(ctx context.Context, store *state.MarkerStore, canonical string) (DeletionResult, error) {
 	layout, err := s.resolveLayout()
 	if err != nil {

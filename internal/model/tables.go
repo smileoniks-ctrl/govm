@@ -4,6 +4,7 @@ import (
 	"charm.land/bubbles/v2/table"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
+	"github.com/smileoniks-ctrl/govm/internal/prune"
 )
 
 func (m *Model) updateDependencyTable() {
@@ -39,9 +40,9 @@ func dependencyStatus(d deps.ModuleDependency) string {
 }
 
 func installedTableColumns(width int) []table.Column {
-	versionWidth, statusWidth, minPathWidth := 10, 10, 18
+	versionWidth, sizeWidth, statusWidth, minPathWidth := 10, 10, 10, 18
 
-	pathWidth := width - versionWidth - statusWidth - 6
+	pathWidth := width - versionWidth - sizeWidth - statusWidth - 8
 	if pathWidth < minPathWidth {
 		pathWidth = minPathWidth
 	}
@@ -49,8 +50,13 @@ func installedTableColumns(width int) []table.Column {
 	return []table.Column{
 		{Title: "Version", Width: versionWidth},
 		{Title: "Path", Width: pathWidth},
+		{Title: "Size", Width: sizeWidth},
 		{Title: "Status", Width: statusWidth},
 	}
+}
+
+func formatDiskUsage(bytes int64) string {
+	return prune.FormatBytes(bytes)
 }
 
 func dependencyTableColumns(width int) []table.Column {

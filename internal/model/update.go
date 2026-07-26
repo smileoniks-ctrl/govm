@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
+	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -73,13 +74,61 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case catalogLoadedMsg:
-		return m.handleCatalogOutcome(m.projection.acceptLoad(msg.RequestID, msg.Versions))
+		updated, cmd := m.handleCatalogOutcome(m.projection.acceptLoad(msg.RequestID, msg.Versions))
+		usage := m.projection.setDiskUsage(m.DiskUsage.VersionBytes)
+		return updated, tea.Batch(cmd, usage.cmd)
 
 	case catalogLoadFailedMsg:
 		return m.handleCatalogOutcome(m.projection.failLoad(msg.RequestID, msg.Err))
 
 	case distributionSourceValidatedMsg:
 		return m.handleDistributionSourceValidation(msg)
+
+	case diskUsageMsg:
+		m.DiskUsage = msg.Summary
+		outcome := m.projection.setDiskUsage(msg.Summary.VersionBytes)
+		if msg.Err != nil {
+			m.Status.SetTab(fmt.Sprintf("Disk usage unavailable: %v", msg.Err), "warning")
+		} else if len(msg.Summary.Warnings) > 0 {
+			m.Status.SetTab("Disk usage is approximate; some files could not be inspected.", "warning")
+		}
+		return m, outcome.cmd
+
+	case prunePreviewMsg:
+		m.PrunePreviewing = false
+		m.PrunePlan = msg.Result
+		if len(msg.Result.Candidates) == 0 {
+			if msg.Err != nil {
+				m.Status.SetTab(fmt.Sprintf("Prune unavailable: %v", msg.Err), "error")
+			} else {
+				m.Status.SetTab("Nothing to prune.", "info")
+			}
+			return m, nil
+		}
+		m.PruneConfirming = true
+		if msg.Err != nil {
+			m.Status.SetTab(fmt.Sprintf("Prune has warnings: %v", msg.Err), "warning")
+		} else {
+			m.Status.SetTab("Review the prune plan and press Y to confirm.", "warning")
+		}
+		return m, nil
+
+	case pruneDoneMsg:
+		m.PruneRunning = false
+		m.PrunePlan = msg.Result
+		if msg.Err != nil {
+			m.Status.SetGlobal(fmt.Sprintf("Prune completed with warnings: %v", msg.Err), "warning")
+		} else {
+			m.Status.SetGlobal(
+				fmt.Sprintf("Pruned %d object(s), freed %s.", len(msg.Result.Removed), formatDiskUsage(pruneResultBytes(msg.Result))),
+				"success",
+			)
+		}
+		outcome := m.projection.startLoad(catalogLoadPurposeRefresh)
+		if outcome.kind != catalogProjectionOutcomeLoadStarted {
+			return m, m.diskUsageCmd()
+		}
+		return m, tea.Batch(LoadVersionsCmd(m.runtime, outcome.loadRequest), m.diskUsageCmd())
 
 	case list.FilterMatchesMsg:
 		return m, m.projection.updateAvailable(msg)
@@ -176,6 +225,14 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func pruneResultBytes(result prune.Result) int64 {
+	var total int64
+	for _, candidate := range result.Removed {
+		total += candidate.Bytes
+	}
+	return total
+}
+
 func (m *Model) handleCatalogOutcome(outcome catalogProjectionOutcome) (tea.Model, tea.Cmd) {
 	switch outcome.kind {
 	case catalogProjectionOutcomeStale, catalogProjectionOutcomeSuppressed:
@@ -220,7 +277,8 @@ func (m *Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd)
 		msg.Path,
 		msg.Warnings,
 	)
-	return m.handleMutationCompletion(outcome)
+	updated, cmd := m.handleMutationCompletion(outcome)
+	return updated, tea.Batch(cmd, m.diskUsageCmd())
 }
 
 func (m *Model) handleInstallFailure(msg installFailureMsg) (tea.Model, tea.Cmd) {
