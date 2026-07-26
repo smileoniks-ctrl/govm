@@ -146,3 +146,38 @@ func TestSettingsDepsBackupLimitDialogKeepsValueAfterSaveFailure(t *testing.T) {
 		t.Fatalf("expected save error in dialog, got:\n%s", view)
 	}
 }
+
+func TestSettingsDistributionSourceDialogValidatesAndCancels(t *testing.T) {
+	m := newTestModel(t)
+	m.CurrentTab = SettingsTab
+	m.Settings.Cursor = 3
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	view := stripANSI(m.View().Content)
+	if !strings.Contains(view, "Set distribution source") {
+		t.Fatalf("expected distribution source dialog, got:\n%s", view)
+	}
+	if !strings.Contains(view, config.DefaultDistributionSource) {
+		t.Fatalf("expected dialog to contain current source, got:\n%s", view)
+	}
+
+	m.Settings.DistributionSourceInput.SetValue("")
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(Model)
+	if cmd != nil {
+		t.Fatal("invalid source returned a command")
+	}
+	if !m.Settings.EditingDistributionSource {
+		t.Fatal("expected dialog to remain open after invalid source")
+	}
+	if m.Settings.Values.DistributionSource != config.DefaultDistributionSource {
+		t.Fatalf("source = %q, want unchanged default", m.Settings.Values.DistributionSource)
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = updated.(Model)
+	if m.Settings.EditingDistributionSource {
+		t.Fatal("expected dialog to close after escape")
+	}
+}

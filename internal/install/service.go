@@ -803,8 +803,9 @@ func binaryName() string {
 	return "go"
 }
 
-// newProductionHTTPClient returns a client restricted to HTTPS and the
-// official Go download hosts for every redirect hop.
+// newProductionHTTPClient returns a client restricted to HTTPS for every
+// redirect hop. The initial archive host comes from the configured
+// distribution source, and mirrors may redirect to HTTPS CDN hosts.
 func newProductionHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 30 * time.Minute,
@@ -814,10 +815,6 @@ func newProductionHTTPClient() *http.Client {
 			}
 			if req.URL.Scheme != "https" {
 				return fmt.Errorf("redirect to non-https scheme: %q", req.URL.Scheme)
-			}
-			host := req.URL.Hostname()
-			if !strings.EqualFold(host, "go.dev") && !strings.EqualFold(host, "dl.google.com") {
-				return fmt.Errorf("redirect to disallowed host: %q", host)
 			}
 			return nil
 		},
@@ -864,7 +861,7 @@ func validateRequest(req Request) error {
 	return nil
 }
 
-// validateURL enforces the official download URL shape.
+// validateURL enforces the configured distribution source URL shape.
 func validateURL(raw, filename string) error {
 	if raw == "" {
 		return errors.New("url is required")
@@ -876,11 +873,14 @@ func validateURL(raw, filename string) error {
 	if u.Scheme != "https" {
 		return fmt.Errorf("url scheme must be https, got %q", u.Scheme)
 	}
-	if !strings.EqualFold(u.Hostname(), "go.dev") {
-		return fmt.Errorf("url host must be go.dev, got %q", u.Hostname())
+	if u.Hostname() == "" {
+		return errors.New("url host is required")
 	}
-	if !strings.HasPrefix(u.Path, "/dl/") {
-		return fmt.Errorf("url path must be under /dl/, got %q", u.Path)
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("url must not contain user information, query parameters, or a fragment")
+	}
+	if u.Path == "" || !strings.HasSuffix(u.Path, "/"+filename) {
+		return fmt.Errorf("url path must end with %q, got %q", filename, u.Path)
 	}
 	base := u.Path
 	if idx := strings.LastIndex(base, "/"); idx >= 0 {

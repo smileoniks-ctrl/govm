@@ -116,6 +116,7 @@ func TestSettingsTabRendersRowsAndHelp(t *testing.T) {
 		"Deps display: Direct only",
 		"Theme: Current",
 		"Deps backups: 10",
+		"Distribution source: https://go.dev/dl/",
 		"↑/↓",
 		"enter",
 		"tab",

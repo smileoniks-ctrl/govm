@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
 
@@ -195,8 +196,6 @@ type Doer interface {
 	Do(*http.Request) (*http.Response, error)
 }
 
-
-
 // GoDevFile mirrors the per-file entry in go.dev's /dl/?mode=json
 // payload. SHA256 and Size are propagated so the install core can
 // verify archive integrity. Exported for use by adapters.
@@ -215,8 +214,8 @@ type GoDevFile struct {
 // bare version strings ("1.22.0", not "go1.22.0"). Exported for use
 // by adapters.
 type GoDevRelease struct {
-	Version string       `json:"version"`
-	Stable  bool         `json:"stable"`
+	Version string      `json:"version"`
+	Stable  bool        `json:"stable"`
 	Files   []GoDevFile `json:"files"`
 }
 
@@ -282,7 +281,7 @@ func buildVersionCatalog(
 			v := GoVersion{
 				Version:  release.Version,
 				Filename: file.Filename,
-				URL:      "https://go.dev/dl/" + file.Filename,
+				URL:      strings.TrimRight(config.DefaultDistributionSource, "/") + "/" + file.Filename,
 				SHA256:   file.SHA256,
 				Size:     file.Size,
 				Stable:   release.Stable,

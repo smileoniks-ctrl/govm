@@ -22,6 +22,9 @@ func TestDefaultSettings(t *testing.T) {
 	if got.DepsBackupLimit != 10 {
 		t.Fatalf("DepsBackupLimit = %d, want 10", got.DepsBackupLimit)
 	}
+	if got.DistributionSource != DefaultDistributionSource {
+		t.Fatalf("DistributionSource = %q, want %q", got.DistributionSource, DefaultDistributionSource)
+	}
 }
 
 func TestValidateDepsBackupLimit(t *testing.T) {
@@ -47,6 +50,50 @@ func TestValidateDepsBackupLimit(t *testing.T) {
 	}
 }
 
+func TestValidateDistributionSource(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "normalizes trailing slash",
+			raw:  " https://mirror.example/go ",
+			want: "https://mirror.example/go/",
+		},
+		{
+			name: "preserves nested path",
+			raw:  "https://mirror.example/releases///",
+			want: "https://mirror.example/releases/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ValidateDistributionSource(tt.raw)
+			if err != nil {
+				t.Fatalf("ValidateDistributionSource(%q) error = %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Fatalf("ValidateDistributionSource(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+
+	for _, raw := range []string{
+		"",
+		"http://mirror.example/go/",
+		"https://mirror.example/go/?token=secret",
+		"https://user:pass@mirror.example/go/",
+		"https://mirror.example/go/#archive",
+	} {
+		t.Run("rejects "+raw, func(t *testing.T) {
+			if _, err := ValidateDistributionSource(raw); err == nil {
+				t.Fatalf("ValidateDistributionSource(%q) error = nil, want error", raw)
+			}
+		})
+	}
+}
+
 func TestNormalizeUnknowns(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -61,9 +108,10 @@ func TestNormalizeUnknowns(t *testing.T) {
 				DepsBackupLimit: 25,
 			},
 			want: Settings{
-				DepsDisplay:     DepsDisplayAll,
-				Theme:           ThemeLight,
-				DepsBackupLimit: 25,
+				DepsDisplay:        DepsDisplayAll,
+				Theme:              ThemeLight,
+				DepsBackupLimit:    25,
+				DistributionSource: DefaultDistributionSource,
 			},
 		},
 		{
@@ -74,9 +122,10 @@ func TestNormalizeUnknowns(t *testing.T) {
 				DepsBackupLimit: 1,
 			},
 			want: Settings{
-				DepsDisplay:     DepsDisplayDirect,
-				Theme:           ThemeCurrent,
-				DepsBackupLimit: 1,
+				DepsDisplay:        DepsDisplayDirect,
+				Theme:              ThemeCurrent,
+				DepsBackupLimit:    1,
+				DistributionSource: DefaultDistributionSource,
 			},
 		},
 		{
@@ -87,9 +136,10 @@ func TestNormalizeUnknowns(t *testing.T) {
 				DepsBackupLimit: 100,
 			},
 			want: Settings{
-				DepsDisplay:     DepsDisplayAll,
-				Theme:           ThemeLight,
-				DepsBackupLimit: 100,
+				DepsDisplay:        DepsDisplayAll,
+				Theme:              ThemeLight,
+				DepsBackupLimit:    100,
+				DistributionSource: DefaultDistributionSource,
 			},
 		},
 		{
@@ -182,9 +232,10 @@ func TestLoadNormalizesDepsBackupLimit(t *testing.T) {
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "settings.json")
 	settings := Settings{
-		DepsDisplay:     DepsDisplayAll,
-		Theme:           ThemeLight,
-		DepsBackupLimit: 25,
+		DepsDisplay:        DepsDisplayAll,
+		Theme:              ThemeLight,
+		DepsBackupLimit:    25,
+		DistributionSource: DefaultDistributionSource,
 	}
 
 	if err := Save(path, settings); err != nil {
@@ -367,7 +418,12 @@ func TestLoadWithMigrationNewFilePresent(t *testing.T) {
 	if migrated {
 		t.Fatal("migrated = true, want false")
 	}
-	want := Settings{DepsDisplay: DepsDisplayAll, Theme: ThemeLight, DepsBackupLimit: 10}
+	want := Settings{
+		DepsDisplay:        DepsDisplayAll,
+		Theme:              ThemeLight,
+		DepsBackupLimit:    10,
+		DistributionSource: DefaultDistributionSource,
+	}
 	if gotSettings != want {
 		t.Fatalf("settings = %+v, want %+v", gotSettings, want)
 	}
@@ -420,7 +476,12 @@ func TestLoadWithMigrationMigratesLegacy(t *testing.T) {
 	if !migrated {
 		t.Fatal("migrated = false, want true")
 	}
-	want := Settings{DepsDisplay: DepsDisplayAll, Theme: ThemeLight, DepsBackupLimit: 10}
+	want := Settings{
+		DepsDisplay:        DepsDisplayAll,
+		Theme:              ThemeLight,
+		DepsBackupLimit:    10,
+		DistributionSource: DefaultDistributionSource,
+	}
 	if gotSettings != want {
 		t.Fatalf("settings = %+v, want %+v", gotSettings, want)
 	}

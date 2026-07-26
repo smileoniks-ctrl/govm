@@ -3,6 +3,7 @@ package godev
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/smileoniks-ctrl/govm/internal/loader"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
@@ -23,6 +24,10 @@ func NewClient(httpClient utils.Doer, url string) *Client {
 		httpClient: httpClient,
 		url:        url,
 	}
+}
+
+func NewClientForSource(httpClient utils.Doer, source string) *Client {
+	return NewClient(httpClient, strings.TrimRight(source, "/")+"/?mode=json&include=all")
 }
 
 // FetchReleases fetches the go.dev release catalog and maps it to

@@ -3,7 +3,9 @@ package loader
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -34,7 +36,14 @@ func LoadVersionCatalog(ctx context.Context, deps Dependencies) (VersionCatalog,
 		activeVersion = deps.ActiveVersion.GetFromPath(ctx)
 	}
 
-	versions := buildVersionCatalog(releases, deps.Platform.OS, deps.Platform.Arch, installed, activeVersion)
+	versions := buildVersionCatalogWithSource(
+		releases,
+		deps.Platform.OS,
+		deps.Platform.Arch,
+		installed,
+		activeVersion,
+		deps.DistributionSource,
+	)
 
 	return VersionCatalog{
 		Versions:      versions,
@@ -56,6 +65,15 @@ func buildVersionCatalog(
 	installed map[string]string,
 	activeVersion string,
 ) []utils.GoVersion {
+	return buildVersionCatalogWithSource(releases, targetOS, arch, installed, activeVersion, config.DefaultDistributionSource)
+}
+
+func buildVersionCatalogWithSource(
+	releases []Release,
+	targetOS, arch string,
+	installed map[string]string,
+	activeVersion, source string,
+) []utils.GoVersion {
 	var versions []utils.GoVersion
 	for _, release := range releases {
 		for _, file := range release.Files {
@@ -65,7 +83,7 @@ func buildVersionCatalog(
 			v := utils.GoVersion{
 				Version:  release.Version,
 				Filename: file.Filename,
-				URL:      "https://go.dev/dl/" + file.Filename,
+				URL:      archiveURL(source, file.Filename),
 				SHA256:   file.SHA256,
 				Size:     file.Size,
 				Stable:   release.Stable,
@@ -83,6 +101,13 @@ func buildVersionCatalog(
 	}
 	sortGoVersionRecordsDesc(versions)
 	return versions
+}
+
+func archiveURL(source, filename string) string {
+	if source == "" {
+		source = config.DefaultDistributionSource
+	}
+	return strings.TrimRight(source, "/") + "/" + filename
 }
 
 func sortGoVersionRecordsDesc(records []utils.GoVersion) {

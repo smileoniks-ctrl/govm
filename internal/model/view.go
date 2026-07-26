@@ -67,12 +67,20 @@ func (m Model) View() tea.View {
 			{"enter", "save"},
 			{"esc", "cancel"},
 		}, width)
+	} else if m.Settings.EditingDistributionSource {
+		help = renderKeyHints(t, [][2]string{
+			{"enter", "check and save"},
+			{"r", "reset"},
+			{"esc", "cancel"},
+		}, width)
 	}
 	components = append(components, help)
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
 
 	if m.Settings.EditingDepsBackupLimit {
 		rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(t, m.Settings, viewport), viewport)
+	} else if m.Settings.EditingDistributionSource {
+		rendered = overlayDialog(rendered, renderDistributionSourceDialog(t, m.Settings, viewport), viewport)
 	} else if m.Deps.Dialog.Active() {
 		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(t, m.Deps, viewport), viewport)
 	}
@@ -207,6 +215,7 @@ func renderSettingsView(settings SettingsState) string {
 		fmt.Sprintf("Deps display: %s", depsDisplayLabel(values.DepsDisplay)),
 		fmt.Sprintf("Theme: %s", themeLabel(values.Theme)),
 		fmt.Sprintf("Deps backups: %d", values.DepsBackupLimit),
+		fmt.Sprintf("Distribution source: %s", truncateSettingValue(values.DistributionSource, 48)),
 	}
 	for i, row := range rows {
 		prefix := "  "
@@ -216,6 +225,16 @@ func renderSettingsView(settings SettingsState) string {
 		rows[i] = prefix + row
 	}
 	return strings.Join(rows, "\n")
+}
+
+func truncateSettingValue(value string, max int) string {
+	if max < 1 || len(value) <= max {
+		return value
+	}
+	if max <= 3 {
+		return value[:max]
+	}
+	return value[:max-3] + "..."
 }
 
 func depsDisplayLabel(mode config.DepsDisplayMode) string {

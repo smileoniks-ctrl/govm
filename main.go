@@ -24,7 +24,11 @@ func main() {
 	if err := utils.SetupShimDirectory(); err != nil {
 		fmt.Printf("Warning: Failed to set up shim directory: %v\n", err)
 	}
-	runtime, err := services.NewRuntime()
+	settingsPath, settings := loadTUISettings(os.Stderr, func() (string, config.Settings, error) {
+		path, s, _, err := config.LoadWithMigration()
+		return path, s, err
+	})
+	runtime, err := services.NewRuntime(settings)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing services: %v\n", err)
 		return
@@ -42,7 +46,7 @@ func main() {
 		return
 	}
 	// handleCommandLine and TUI should never throw at the same time
-	launchTUI(runtime)
+	launchTUI(runtime, settingsPath, settings)
 }
 func handleCommandLine(app *cli.App) {
 	if len(os.Args) < 2 {
@@ -125,7 +129,7 @@ func loadTUISettings(stderr io.Writer, load func() (string, config.Settings, err
 	return settingsPath, settings
 }
 
-func launchTUI(runtime *services.Runtime) {
+func launchTUI(runtime *services.Runtime, settingsPath string, settings config.Settings) {
 	shimInPath := utils.IsShimInPath()
 	if !shimInPath {
 		setupModel, err := setup.New()
@@ -143,10 +147,6 @@ func launchTUI(runtime *services.Runtime) {
 	if !shimInPath {
 		shimPathWarning = "GoVM is not in your PATH. " + utils.GetShimPathInstructions()
 	}
-	settingsPath, settings := loadTUISettings(os.Stderr, func() (string, config.Settings, error) {
-		path, s, _, err := config.LoadWithMigration()
-		return path, s, err
-	})
 	theme := styles.NewTheme(config.ThemeName(settings.Theme))
 
 	if _, err := os.UserHomeDir(); err != nil {

@@ -21,6 +21,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	if m.Settings.EditingDistributionSource {
+		if key, ok := msg.(tea.KeyPressMsg); ok {
+			return m.handleDistributionSourceInputKey(key)
+		}
+
+		var cmd tea.Cmd
+		m.Settings.DistributionSourceInput, cmd = m.Settings.DistributionSourceInput.Update(msg)
+		cmds = append(cmds, cmd)
+	}
 	if m.Settings.EditingDepsBackupLimit {
 		if key, ok := msg.(tea.KeyPressMsg); ok {
 			return m.handleDepsBackupLimitInputKey(key)
@@ -68,6 +77,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case catalogLoadFailedMsg:
 		return m.handleCatalogOutcome(m.projection.failLoad(msg.RequestID, msg.Err))
+
+	case distributionSourceValidatedMsg:
+		return m.handleDistributionSourceValidation(msg)
 
 	case list.FilterMatchesMsg:
 		return m, m.projection.updateAvailable(msg)

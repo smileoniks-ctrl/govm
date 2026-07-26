@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -281,21 +282,132 @@ func (m *Model) handleSettingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.Settings.Cursor == 2 {
 			return m, m.Settings.OpenDepsBackupLimitInput()
 		}
+		if m.Settings.Cursor == 3 {
+			return m, m.Settings.OpenDistributionSourceInput()
+		}
 		cmd = m.toggleSelectedSetting()
 	case "left", "h":
 		if m.Settings.Cursor == 2 {
 			m.adjustDepsBackupLimit(-1)
+		} else if m.Settings.Cursor == 3 {
+			return m, m.Settings.OpenDistributionSourceInput()
 		} else {
 			cmd = m.toggleSelectedSetting()
 		}
 	case "right", "l":
 		if m.Settings.Cursor == 2 {
 			m.adjustDepsBackupLimit(1)
+		} else if m.Settings.Cursor == 3 {
+			return m, m.Settings.OpenDistributionSourceInput()
 		} else {
 			cmd = m.toggleSelectedSetting()
 		}
 	}
 	return m, cmd
+}
+
+func (m *Model) handleDistributionSourceInputKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.Settings.CheckingDistributionSource {
+		if msg.String() == "esc" {
+			outcome := m.projection.failLoad(
+				m.Settings.DistributionSourceRequestID,
+				errors.New("distribution source check canceled"),
+			)
+			m.Settings.CloseDistributionSourceInput()
+			return m.handleCatalogOutcome(outcome)
+		}
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		m.Settings.CloseDistributionSourceInput()
+		return m, nil
+	case "r":
+		m.Settings.DistributionSourceInput.SetValue(config.DefaultDistributionSource)
+		m.Settings.DistributionSourceInputErr = ""
+		return m.beginDistributionSourceCheck()
+	case "enter":
+		if err := m.Settings.DistributionSourceInput.Err; err != nil {
+			m.Settings.DistributionSourceInputErr = err.Error()
+			return m, nil
+		}
+		return m.beginDistributionSourceCheck()
+	default:
+		var cmd tea.Cmd
+		m.Settings.DistributionSourceInput, cmd = m.Settings.DistributionSourceInput.Update(msg)
+		m.Settings.DistributionSourceInputErr = ""
+		return m, cmd
+	}
+}
+
+func (m *Model) beginDistributionSourceCheck() (tea.Model, tea.Cmd) {
+	source, err := config.ValidateDistributionSource(m.Settings.DistributionSourceInput.Value())
+	if err != nil {
+		m.Settings.DistributionSourceInputErr = err.Error()
+		return m, nil
+	}
+	outcome := m.projection.startLoad(catalogLoadPurposeRefresh)
+	if outcome.kind != catalogProjectionOutcomeLoadStarted {
+		m.Settings.DistributionSourceInputErr = "cannot check distribution source while another operation is active"
+		return m, nil
+	}
+	m.Settings.CheckingDistributionSource = true
+	m.Settings.DistributionSourceRequestID = outcome.loadRequest.ID
+	m.Status.SetGlobal("Checking distribution source...", "warning")
+	return m, ValidateDistributionSourceCmd(m.runtime, outcome.loadRequest, source)
+}
+
+func (m *Model) handleDistributionSourceValidation(msg distributionSourceValidatedMsg) (tea.Model, tea.Cmd) {
+	if !m.Settings.CheckingDistributionSource ||
+		msg.RequestID != m.Settings.DistributionSourceRequestID {
+		return m, nil
+	}
+	if msg.Err != nil {
+		m.Settings.CheckingDistributionSource = false
+		m.Settings.DistributionSourceInputErr = msg.Err.Error()
+		outcome := m.projection.failLoad(msg.RequestID, msg.Err)
+		m.handleCatalogOutcome(outcome)
+		return m, nil
+	}
+
+	previous := m.Settings.Values
+	normalized, err := config.ValidateDistributionSource(msg.Source)
+	if err != nil {
+		m.Settings.DistributionSourceInputErr = err.Error()
+		return m, nil
+	}
+	next := previous
+	next.DistributionSource = normalized
+	if err := config.Save(m.Settings.Path, next); err != nil {
+		m.Settings.DistributionSourceInputErr = fmt.Sprintf("Failed to save settings: %v", err)
+		m.Settings.CheckingDistributionSource = false
+		outcome := m.projection.failLoad(msg.RequestID, err)
+		m.handleCatalogOutcome(outcome)
+		return m, nil
+	}
+	if err := m.runtime.Loader.SetDistributionSource(normalized); err != nil {
+		_ = config.Save(m.Settings.Path, previous)
+		m.Settings.DistributionSourceInputErr = fmt.Sprintf("Failed to apply settings: %v", err)
+		m.Settings.CheckingDistributionSource = false
+		outcome := m.projection.failLoad(msg.RequestID, err)
+		m.handleCatalogOutcome(outcome)
+		return m, nil
+	}
+
+	m.Settings.Values = next
+	m.Settings.CloseDistributionSourceInput()
+	outcome := m.projection.acceptLoad(msg.RequestID, msg.Versions)
+	if outcome.kind == catalogProjectionOutcomeRejected {
+		_ = config.Save(m.Settings.Path, previous)
+		_ = m.runtime.Loader.SetDistributionSource(previous.DistributionSource)
+		m.Settings.Values = previous
+		m.Settings.OpenDistributionSourceInput()
+		m.Settings.DistributionSourceInputErr = fmt.Sprintf("Failed to apply catalog: %v", outcome.err)
+		return m, nil
+	}
+	m.Status.SetTab("Settings saved.", "info")
+	return m, outcome.cmd
 }
 
 func (m *Model) toggleSelectedSetting() tea.Cmd {

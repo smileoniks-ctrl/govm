@@ -163,11 +163,14 @@ func TestInstall_Validation(t *testing.T) {
 		{"url non-https", with(base(), func(r *Request) {
 			r.URL = "http://go.dev/dl/" + r.Filename
 		})},
-		{"url wrong host", with(base(), func(r *Request) {
-			r.URL = "https://example.com/dl/" + r.Filename
+		{"url missing host", with(base(), func(r *Request) {
+			r.URL = "https:///dl/" + r.Filename
 		})},
-		{"url path not under dl", with(base(), func(r *Request) {
-			r.URL = "https://go.dev/other/" + r.Filename
+		{"url path missing filename", with(base(), func(r *Request) {
+			r.URL = "https://mirror.example/go/"
+		})},
+		{"url query", with(base(), func(r *Request) {
+			r.URL = "https://mirror.example/go/" + r.Filename + "?token=secret"
 		})},
 		{"url basename mismatch", with(base(), func(r *Request) {
 			r.URL = "https://go.dev/dl/other.tar.gz"
@@ -208,6 +211,16 @@ func TestInstall_ValidationAcceptsCaseInsensitiveOfficialHost(t *testing.T) {
 	}
 }
 
+func TestInstall_ValidationAcceptsConfiguredMirrorURL(t *testing.T) {
+	s, _ := newTestService(t, "1.22.0")
+	req := makeRequest("1.22.0")
+	req.URL = "https://mirror.example/golang/" + req.Filename
+
+	if _, err := s.Install(context.Background(), req); err != nil {
+		t.Fatalf("configured mirror URL should be accepted: %v", err)
+	}
+}
+
 func TestProductionHTTPClientRedirectPolicy(t *testing.T) {
 	client := newProductionHTTPClient()
 	if client.Timeout != 30*time.Minute {
@@ -224,7 +237,7 @@ func TestProductionHTTPClientRedirectPolicy(t *testing.T) {
 		{name: "google download", rawURL: "https://dl.google.com/go/file", wantErr: false},
 		{name: "uppercase official host", rawURL: "https://DL.GOOGLE.COM/go/file", wantErr: false},
 		{name: "plaintext", rawURL: "http://dl.google.com/go/file", wantErr: true},
-		{name: "disallowed host", rawURL: "https://example.com/go/file", wantErr: true},
+		{name: "mirror CDN host", rawURL: "https://example.com/go/file", wantErr: false},
 		{name: "too many redirects", rawURL: "https://go.dev/dl/file", via: 10, wantErr: true},
 	}
 

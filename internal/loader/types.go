@@ -24,10 +24,11 @@ type Platform struct {
 // Dependencies bundles the external I/O adapters LoadVersionCatalog
 // needs. Each dependency is substitutable for testing.
 type Dependencies struct {
-	ReleaseSource ReleaseSource
-	LocalVersions LocalVersions
-	ActiveVersion ActiveVersion
-	Platform      Platform
+	ReleaseSource      ReleaseSource
+	LocalVersions      LocalVersions
+	ActiveVersion      ActiveVersion
+	Platform           Platform
+	DistributionSource string
 }
 
 // ReleaseSource fetches the go.dev release catalog.

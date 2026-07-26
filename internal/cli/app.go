@@ -22,7 +22,8 @@ type pathResolver interface {
 	VersionsDir() (string, error)
 }
 
-// InstallVersion resolves and installs a Go version from go.dev.
+// InstallVersion resolves and installs a Go version from the configured
+// distribution source.
 func (a *App) InstallVersion(version string) {
 	fmt.Fprintf(a.out, "🔍 Looking for Go version matching %s...\n", version)
 	matchedVersion, err := findMatchingVersion(a.operations.Runtime, version)

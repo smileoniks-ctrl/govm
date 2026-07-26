@@ -38,8 +38,8 @@ func (f *fakeLocalVersions) ScanInstalled(ctx context.Context) (map[string]strin
 }
 
 type fakeActiveVersion struct {
-	active      string
-	readErr     error
+	active       string
+	readErr      error
 	pathFallback string
 }
 
@@ -238,6 +238,32 @@ func TestBuildVersionCatalog_Sorting(t *testing.T) {
 	}
 }
 
+func TestBuildVersionCatalogWithSource_UsesMirrorArchiveURL(t *testing.T) {
+	releases := []Release{{
+		Version: "1.22.1",
+		Files: []FileEntry{{
+			Filename: "go1.22.1.linux-amd64.tar.gz",
+			OS:       "linux",
+			Arch:     "amd64",
+		}},
+	}}
+
+	versions := buildVersionCatalogWithSource(
+		releases,
+		"linux",
+		"amd64",
+		nil,
+		"",
+		"https://mirror.example/go/",
+	)
+	if len(versions) != 1 {
+		t.Fatalf("expected 1 version, got %d", len(versions))
+	}
+	if got := versions[0].URL; got != "https://mirror.example/go/go1.22.1.linux-amd64.tar.gz" {
+		t.Fatalf("archive URL = %q, want mirror URL", got)
+	}
+}
+
 func TestBuildVersionCatalog_PlatformFiltering(t *testing.T) {
 	releases := []Release{
 		{
@@ -360,4 +386,3 @@ func TestLoadVersionCatalog_WithRealLocalAdapters(t *testing.T) {
 		}
 	}
 }
-

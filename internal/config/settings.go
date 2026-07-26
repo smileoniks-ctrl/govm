@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 )
@@ -25,23 +27,26 @@ const (
 )
 
 const (
-	tempFilePrefix         = ".settings-"
-	defaultDepsBackupLimit = 10
-	MinDepsBackupLimit     = 1
-	MaxDepsBackupLimit     = 100
+	tempFilePrefix            = ".settings-"
+	defaultDepsBackupLimit    = 10
+	MinDepsBackupLimit        = 1
+	MaxDepsBackupLimit        = 100
+	DefaultDistributionSource = "https://go.dev/dl/"
 )
 
 type Settings struct {
-	DepsDisplay     DepsDisplayMode `json:"depsDisplay"`
-	Theme           ThemeName       `json:"theme"`
-	DepsBackupLimit int             `json:"depsBackupLimit"`
+	DepsDisplay        DepsDisplayMode `json:"depsDisplay"`
+	Theme              ThemeName       `json:"theme"`
+	DepsBackupLimit    int             `json:"depsBackupLimit"`
+	DistributionSource string          `json:"distributionSource"`
 }
 
 func DefaultSettings() Settings {
 	return Settings{
-		DepsDisplay:     DepsDisplayDirect,
-		Theme:           ThemeCurrent,
-		DepsBackupLimit: defaultDepsBackupLimit,
+		DepsDisplay:        DepsDisplayDirect,
+		Theme:              ThemeCurrent,
+		DepsBackupLimit:    defaultDepsBackupLimit,
+		DistributionSource: DefaultDistributionSource,
 	}
 }
 
@@ -55,7 +60,41 @@ func Normalize(settings Settings) Settings {
 	if ValidateDepsBackupLimit(settings.DepsBackupLimit) != nil {
 		settings.DepsBackupLimit = defaultDepsBackupLimit
 	}
+	if strings.TrimSpace(settings.DistributionSource) == "" {
+		settings.DistributionSource = DefaultDistributionSource
+	} else if normalized, err := ValidateDistributionSource(settings.DistributionSource); err == nil {
+		settings.DistributionSource = normalized
+	}
 	return settings
+}
+
+func ValidateDistributionSource(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("distribution source is required")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("parse distribution source: %w", err)
+	}
+	if parsed.Scheme != "https" {
+		return "", fmt.Errorf("distribution source scheme must be https, got %q", parsed.Scheme)
+	}
+	if parsed.Host == "" {
+		return "", errors.New("distribution source host is required")
+	}
+	if parsed.User != nil {
+		return "", errors.New("distribution source must not contain user information")
+	}
+	if parsed.RawQuery != "" {
+		return "", errors.New("distribution source must not contain query parameters")
+	}
+	if parsed.Fragment != "" {
+		return "", errors.New("distribution source must not contain a fragment")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/"
+	parsed.RawPath = ""
+	return parsed.String(), nil
 }
 
 func ValidateDepsBackupLimit(limit int) error {

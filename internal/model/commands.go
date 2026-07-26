@@ -38,6 +38,13 @@ type catalogLoadFailedMsg struct {
 	Err       error
 }
 
+type distributionSourceValidatedMsg struct {
+	RequestID uint64
+	Source    string
+	Versions  []utils.GoVersion
+	Err       error
+}
+
 // LoadVersionsCmd wraps the synchronous LoadVersionCatalog operation
 // in a tea.Cmd. This is the TUI adapter: it translates between the
 // loader's domain result and Bubbletea's message protocol.
@@ -58,5 +65,36 @@ func LoadVersionsCmd(rt *services.Runtime, request catalogLoadRequest) tea.Cmd {
 		}
 
 		return catalogLoadedMsg{RequestID: request.ID, Versions: catalog.Versions}
+	}
+}
+
+func ValidateDistributionSourceCmd(rt *services.Runtime, request catalogLoadRequest, source string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if rt == nil || rt.Loader == nil {
+			return distributionSourceValidatedMsg{
+				RequestID: request.ID,
+				Err:       errors.New("no loader configured"),
+			}
+		}
+		catalog, err := rt.Loader.LoadWithSource(ctx, source)
+		if err != nil {
+			return distributionSourceValidatedMsg{RequestID: request.ID, Err: err}
+		}
+		for _, version := range catalog.Versions {
+			if version.Filename != "" {
+				return distributionSourceValidatedMsg{
+					RequestID: request.ID,
+					Source:    source,
+					Versions:  catalog.Versions,
+				}
+			}
+		}
+		return distributionSourceValidatedMsg{
+			RequestID: request.ID,
+			Err:       errors.New("distribution source has no archive for the current platform"),
+		}
 	}
 }
