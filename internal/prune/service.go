@@ -93,11 +93,6 @@ func New(resolver *paths.Resolver, coordinator *state.Coordinator, lifecycleServ
 	return &Service{resolver: resolver, state: coordinator, lifecycle: lifecycleService}, nil
 }
 
-// NewService is an explicit constructor alias for composition roots.
-func NewService(resolver *paths.Resolver, coordinator *state.Coordinator, lifecycleService *lifecycle.Service) (*Service, error) {
-	return New(resolver, coordinator, lifecycleService)
-}
-
 // Prune removes all valid inactive toolchains and safe temporary downloads.
 // Invalid or unknown objects are preserved and reported as warnings.
 func (s *Service) Prune(ctx context.Context) (Result, error) {

@@ -91,30 +91,10 @@ type Service struct {
 	coordinatorErr  error
 }
 
-// NewService returns a production-configured Service.
-func NewService() *Service {
-	resolver := paths.New()
-	return newService(resolver, state.NewCoordinator(resolver))
-}
-
-// NewServiceWithCoordinator returns a production-configured Service using the
-// supplied shared state coordinator. The coordinator must use the same
-// resolver as the service when a non-default filesystem root is required.
-func NewServiceWithCoordinator(coordinator *state.Coordinator) *Service {
-	resolver := paths.New()
-	return newService(resolver, coordinator)
-}
-
-// NewServiceWithResolverAndCoordinator returns a production-configured
-// Service with explicitly shared filesystem resolution and state coordination.
-func NewServiceWithResolverAndCoordinator(resolver *paths.Resolver, coordinator *state.Coordinator) *Service {
-	if resolver == nil {
-		resolver = paths.New()
-	}
-	return newService(resolver, coordinator)
-}
-
-func newService(resolver *paths.Resolver, coordinator *state.Coordinator) *Service {
+// New returns a production-configured Service. Callers share one
+// resolver and one coordinator with the other services that mutate
+// installed-version state, so every mutation takes the same lock.
+func New(resolver *paths.Resolver, coordinator *state.Coordinator) *Service {
 	if resolver == nil {
 		resolver = paths.New()
 	}
@@ -727,16 +707,13 @@ func reportProgressValue(reporter ProgressReporter, progress Progress) {
 	}
 }
 
-// commit performs the transactional swap of staging/go -> finalDir.
+// commitWithBackup performs the transactional swap of staging/go ->
+// finalDir.
 //
 // If finalDir already exists it is first renamed to a unique backup. On
 // commit failure the backup is restored; if restoration also fails the
 // backup is preserved under a .recovery-* path and the returned *Error
 // carries RecoveryPath.
-func (s *Service) commit(stagingDir, finalDir string) (backupDir string, err error) {
-	return s.commitWithBackup(stagingDir, finalDir, "")
-}
-
 func (s *Service) commitWithBackup(stagingDir, finalDir, backupDir string) (string, error) {
 	goDir := filepath.Join(stagingDir, "go")
 	if backupDir == "" {

@@ -118,12 +118,12 @@ func NewRuntime(settings config.Settings) (*Runtime, error) {
 	}
 
 	coordinator := state.NewCoordinator(resolver)
-	lifecycleSvc, err := lifecycle.NewService(resolver, coordinator)
+	lifecycleSvc, err := lifecycle.New(resolver, coordinator)
 	if err != nil {
 		return nil, fmt.Errorf("initialize lifecycle service: %w", err)
 	}
 
-	installSvc := install.NewServiceWithResolverAndCoordinator(resolver, coordinator)
+	installSvc := install.New(resolver, coordinator)
 	pruneSvc, err := prune.New(resolver, coordinator, lifecycleSvc)
 	if err != nil {
 		return nil, fmt.Errorf("initialize prune service: %w", err)

@@ -34,7 +34,7 @@ func newTestFixture(t *testing.T) *testFixture {
 		t.Fatal(err)
 	}
 	coordinator := state.NewCoordinator(resolver)
-	lifecycleService, err := lifecycle.NewService(resolver, coordinator)
+	lifecycleService, err := lifecycle.New(resolver, coordinator)
 	if err != nil {
 		t.Fatal(err)
 	}

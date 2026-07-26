@@ -75,16 +75,10 @@ type Service struct {
 	fs          fileSystem
 }
 
-// New constructs a production service with its own shared-state coordinator.
-func New() (*Service, error) {
-	resolver := paths.New()
-	return NewService(resolver, state.NewCoordinator(resolver))
-}
-
-// NewService constructs a service using coordinator for the global mutation
+// New constructs a service using coordinator for the global mutation
 // lock and recovery dispatch. Callers should share one coordinator with other
 // installed-version mutation services.
-func NewService(resolver *paths.Resolver, coordinator *state.Coordinator) (*Service, error) {
+func New(resolver *paths.Resolver, coordinator *state.Coordinator) (*Service, error) {
 	if resolver == nil {
 		resolver = paths.New()
 	}
@@ -391,15 +385,6 @@ func (s *Service) ValidateInstalledVersion(canonical string) error {
 	}
 	_, err = s.validateInstalledVersion(layout.versions, filepath.Join(layout.versions, "go"+canonical))
 	return err
-}
-
-// ReadActiveVersion reads and validates the active-version record.
-func (s *Service) ReadActiveVersion() (string, bool, error) {
-	layout, err := s.resolveLayout()
-	if err != nil {
-		return "", false, err
-	}
-	return s.readActiveVersion(layout.active)
 }
 
 func (s *Service) deleteLocked(ctx context.Context, store *state.MarkerStore, canonical string) (DeletionResult, error) {

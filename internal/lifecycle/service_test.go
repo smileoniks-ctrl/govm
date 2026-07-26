@@ -34,7 +34,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	coordinator := state.NewCoordinator(resolver)
-	service, err := NewService(resolver, coordinator)
+	service, err := New(resolver, coordinator)
 	if err != nil {
 		t.Fatal(err)
 	}

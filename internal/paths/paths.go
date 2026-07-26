@@ -88,11 +88,6 @@ func (r *Resolver) DownloadsDir() (string, error) {
 	return filepath.Join(root, downloadsDirName), nil
 }
 
-// InstallationLockFile returns the cross-process installation lock path.
-func (r *Resolver) InstallationLockFile() (string, error) {
-	return r.StateMutationLockFile()
-}
-
 // StateMutationLockFile returns the cross-process lock path used to
 // serialize every mutation of govm's installed-version state. The
 // historical filename remains install.lock for compatibility.
