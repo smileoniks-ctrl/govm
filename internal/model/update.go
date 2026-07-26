@@ -130,6 +130,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Spinner, cmd = m.Spinner.Update(msg)
 		return m, cmd
 
+	case installProgressMsg:
+		return m, m.handleInstallProgress(msg)
+
+	case installProgressPollMsg:
+		return m, m.handleInstallProgressPoll(msg)
+
 	case installSuccessMsg:
 		return m.handleInstallSuccess(msg)
 
@@ -195,6 +201,7 @@ func (m *Model) handleCatalogOutcome(outcome catalogProjectionOutcome) (tea.Mode
 }
 
 func (m *Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd) {
+	m.clearInstallProgress(msg.OperationID)
 	outcome := m.projection.completeInstall(
 		msg.OperationID,
 		msg.Version,
@@ -205,6 +212,7 @@ func (m *Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd)
 }
 
 func (m *Model) handleInstallFailure(msg installFailureMsg) (tea.Model, tea.Cmd) {
+	m.clearInstallProgress(msg.OperationID)
 	outcome := m.projection.failMutation(msg.OperationID, msg.Err)
 	if outcome.kind == catalogProjectionOutcomeStale {
 		return m, nil

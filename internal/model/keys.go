@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
@@ -125,7 +126,7 @@ func (m *Model) handleInstallKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.Status.SetGlobal("", "")
-	return m, m.installVersionCmd(operation.id, v)
+	return m, m.installVersionProgressCmd(operation.id, v)
 }
 
 func (m *Model) handleUseKey() (tea.Model, tea.Cmd) {
@@ -385,6 +386,9 @@ func (m *Model) applyRuntimeTheme() tea.Cmd {
 	m.theme = t
 	m.Settings.ApplyTheme()
 	m.Spinner.Style = t.SpinnerStyle
+	m.Progress.FullColor = t.Primary
+	m.Progress.EmptyColor = t.Muted
+	m.Progress.PercentageStyle = lipgloss.NewStyle().Foreground(t.Info)
 	m.Deps.Table.SetStyles(tableStyles(t))
 	return m.projection.setTheme(t).cmd
 }

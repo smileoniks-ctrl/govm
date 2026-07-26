@@ -322,6 +322,13 @@ func (a *catalogProjectionAdapter) startMutation(kind catalogMutationKind, versi
 	return op
 }
 
+func (a *catalogProjectionAdapter) activeOperationID() uint64 {
+	if !a.operationActive {
+		return 0
+	}
+	return a.operation.id
+}
+
 func mutationActivity(kind catalogMutationKind) catalogActivityKind {
 	switch kind {
 	case catalogMutationInstall:

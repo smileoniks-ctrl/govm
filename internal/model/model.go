@@ -3,6 +3,7 @@ package model
 import (
 	"time"
 
+	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
@@ -28,8 +29,10 @@ type Model struct {
 	projection  catalogProjectionAdapter
 	initialLoad catalogLoadRequest
 
-	Spinner    spinner.Model
-	CurrentTab int
+	Spinner         spinner.Model
+	Progress        progress.Model
+	installProgress installProgressState
+	CurrentTab      int
 	// Status owns the status triplet (text, kind, scope) as the
 	// StatusLine value-type module. Reads go through Text/Kind/Scope;
 	// mutations go through SetTab/SetGlobal/Clear/ClearTab.
@@ -58,11 +61,12 @@ type Model struct {
 	Deps     DepsState
 	Settings SettingsState
 
-	runtime    *services.Runtime
-	installGo  installFunc
-	activateGo activateFunc
-	deleteGo   deleteFunc
-	shimInPath func() bool
+	runtime             *services.Runtime
+	installGo           installFunc
+	installWithProgress installProgressFunc
+	activateGo          activateFunc
+	deleteGo            deleteFunc
+	shimInPath          func() bool
 }
 
 type programModel struct {
@@ -148,6 +152,7 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 		projection:      projection,
 		initialLoad:     initialLoad,
 		Spinner:         sp,
+		Progress:        newInstallProgressModel(theme),
 		Layout:          styles.LayoutNormal,
 		theme:           theme,
 		Deps:            NewDepsState(moduleDir, depTable),
@@ -159,17 +164,19 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 // VersionOperations contains the narrow process-composed seams used by the
 // TUI for installed-version mutations and PATH presentation.
 type VersionOperations struct {
-	Runtime    *services.Runtime
-	Install    installFunc
-	Activate   activateFunc
-	Delete     deleteFunc
-	ShimInPath func() bool
+	Runtime             *services.Runtime
+	Install             installFunc
+	InstallWithProgress installProgressFunc
+	Activate            activateFunc
+	Delete              deleteFunc
+	ShimInPath          func() bool
 }
 
 // BindVersionOperations returns a copy of m bound to process-wide services.
 func (m Model) BindVersionOperations(operations VersionOperations) Model {
 	m.runtime = operations.Runtime
 	m.installGo = operations.Install
+	m.installWithProgress = operations.InstallWithProgress
 	m.activateGo = operations.Activate
 	m.deleteGo = operations.Delete
 	m.shimInPath = operations.ShimInPath

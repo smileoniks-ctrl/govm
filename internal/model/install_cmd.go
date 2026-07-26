@@ -24,6 +24,22 @@ const installTimeout = 30 * time.Minute
 // ((*Service).Install), and by fakes injected in tests.
 type installFunc func(context.Context, install.Request) (install.Result, error)
 
+type installProgressFunc func(
+	context.Context,
+	install.Request,
+	install.ProgressReporter,
+) (install.Result, error)
+
+func buildInstallRequest(v utils.GoVersion) install.Request {
+	return install.Request{
+		Version:  v.Version,
+		Filename: v.Filename,
+		URL:      v.URL,
+		SHA256:   v.SHA256,
+		Size:     v.Size,
+	}
+}
+
 // installSuccessMsg carries the operation ID and whole install.Result for a
 // completed installation, including any non-fatal warnings the core surfaced.
 type installSuccessMsg struct {
@@ -51,13 +67,7 @@ type installFailureMsg struct {
 // instead of panicking, which keeps bare test constructors safe.
 func (m Model) installVersionCmd(operationID uint64, v utils.GoVersion) tea.Cmd {
 	return func() tea.Msg {
-		req := install.Request{
-			Version:  v.Version,
-			Filename: v.Filename,
-			URL:      v.URL,
-			SHA256:   v.SHA256,
-			Size:     v.Size,
-		}
+		req := buildInstallRequest(v)
 		if m.installGo == nil {
 			return installFailureMsg{
 				OperationID: operationID,

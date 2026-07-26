@@ -165,11 +165,12 @@ func launchTUI(runtime *services.Runtime) {
 
 	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning, theme).
 		BindVersionOperations(model.VersionOperations{
-			Runtime:    runtime,
-			Install:    runtime.Install.Install,
-			Activate:   runtime.Lifecycle.Activate,
-			Delete:     runtime.Lifecycle.Delete,
-			ShimInPath: utils.IsShimInPath,
+			Runtime:             runtime,
+			Install:             runtime.Install.Install,
+			InstallWithProgress: runtime.Install.InstallWithProgress,
+			Activate:            runtime.Lifecycle.Activate,
+			Delete:              runtime.Lifecycle.Delete,
+			ShimInPath:          utils.IsShimInPath,
 		})
 	p := tea.NewProgram(
 		model.NewProgramModel(initialModel),
