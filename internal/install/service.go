@@ -188,67 +188,86 @@ func (s *Service) InstallWithProgress(
 	}
 
 	reportProgress(reporter, req, StagePrepare)
-	root, err := s.resolver.RootDir()
-	if err != nil {
-		return Result{}, &Error{Stage: StagePrepare, Err: err}
-	}
-	versionsDir, err := s.resolver.VersionsDir()
-	if err != nil {
-		return Result{}, &Error{Stage: StagePrepare, Err: err}
-	}
-	downloadsDir, err := s.resolver.DownloadsDir()
-	if err != nil {
-		return Result{}, &Error{Stage: StagePrepare, Err: err}
-	}
-	if !paths.IsDirectChild(root, versionsDir) || !paths.IsDirectChild(root, downloadsDir) {
-		return Result{}, &Error{Stage: StagePrepare, Err: errors.New("resolved install paths are outside the canonical root")}
-	}
-	for _, dir := range []string{root, versionsDir, downloadsDir} {
-		if err := os.MkdirAll(dir, dirMode); err != nil {
-			return Result{}, &Error{Stage: StagePrepare, Err: fmt.Errorf("create directory %q: %w", dir, err)}
+	var result Result
+	coordinated, mutateErr := s.state.Mutate(ctx, func(ctx context.Context, store *state.MarkerStore) error {
+		root, err := s.resolver.RootDir()
+		if err != nil {
+			return &Error{Stage: StagePrepare, Err: err}
 		}
-		if err := requireRealInstallDirectory(dir); err != nil {
-			return Result{}, &Error{Stage: StagePrepare, Err: err}
+		versionsDir, err := s.resolver.VersionsDir()
+		if err != nil {
+			return &Error{Stage: StagePrepare, Err: err}
 		}
-	}
+		downloadsDir, err := s.resolver.DownloadsDir()
+		if err != nil {
+			return &Error{Stage: StagePrepare, Err: err}
+		}
+		if !paths.IsDirectChild(root, versionsDir) || !paths.IsDirectChild(root, downloadsDir) {
+			return &Error{Stage: StagePrepare, Err: errors.New("resolved install paths are outside the canonical root")}
+		}
+		for _, dir := range []string{root, versionsDir, downloadsDir} {
+			if err := os.MkdirAll(dir, dirMode); err != nil {
+				return &Error{Stage: StagePrepare, Err: fmt.Errorf("create directory %q: %w", dir, err)}
+			}
+			if err := requireRealInstallDirectory(dir); err != nil {
+				return &Error{Stage: StagePrepare, Err: err}
+			}
+		}
 
-	stagingDir := filepath.Join(versionsDir, stagingPrefix+uniqueID())
-	if err := os.Mkdir(stagingDir, dirMode); err != nil {
-		return Result{}, &Error{Stage: StagePrepare, Err: fmt.Errorf("create staging directory: %w", err)}
-	}
-	partPath := filepath.Join(downloadsDir, partPrefix+uniqueID()+partSuffix)
-	finalDir := filepath.Join(versionsDir, "go"+req.Version)
-	finalInfo, finalStatErr := os.Lstat(finalDir)
-	finalExisted := finalStatErr == nil
-	if finalStatErr != nil && !errors.Is(finalStatErr, os.ErrNotExist) {
-		return Result{}, &Error{Stage: StagePrepare, Err: fmt.Errorf("inspect existing install: %w", finalStatErr)}
-	}
-	if finalExisted && (finalInfo.Mode()&os.ModeSymlink != 0 || !finalInfo.IsDir()) {
-		return Result{}, &Error{Stage: StagePrepare, Err: fmt.Errorf("existing install is not a real directory: %q", finalDir)}
-	}
+		stagingDir := filepath.Join(versionsDir, stagingPrefix+uniqueID())
+		if err := os.Mkdir(stagingDir, dirMode); err != nil {
+			return &Error{Stage: StagePrepare, Err: fmt.Errorf("create staging directory: %w", err)}
+		}
+		partPath := filepath.Join(downloadsDir, partPrefix+uniqueID()+partSuffix)
+		failPreparation := func(cause error) error {
+			reportProgress(reporter, req, StageCleanup)
+			joinFailureCleanup(partPath, stagingDir, &cause)
+			return cause
+		}
+		finalDir := filepath.Join(versionsDir, "go"+req.Version)
+		finalInfo, finalStatErr := os.Lstat(finalDir)
+		finalExisted := finalStatErr == nil
+		if finalStatErr != nil && !errors.Is(finalStatErr, os.ErrNotExist) {
+			return failPreparation(&Error{Stage: StagePrepare, Err: fmt.Errorf("inspect existing install: %w", finalStatErr)})
+		}
+		if finalExisted && (finalInfo.Mode()&os.ModeSymlink != 0 || !finalInfo.IsDir()) {
+			return failPreparation(&Error{Stage: StagePrepare, Err: fmt.Errorf("existing install is not a real directory: %q", finalDir)})
+		}
 
-	res, err := s.install(
-		ctx,
-		req,
-		versionsDir,
-		downloadsDir,
-		stagingDir,
-		partPath,
-		finalExisted,
-		reporter,
-	)
-	if err != nil {
-		reportProgress(reporter, req, StageCleanup)
-		joinFailureCleanup(partPath, stagingDir, &err)
-		return res, err
+		result, err = s.installLocked(
+			ctx,
+			store,
+			req,
+			versionsDir,
+			downloadsDir,
+			stagingDir,
+			partPath,
+			finalExisted,
+			reporter,
+		)
+		if err != nil {
+			reportProgress(reporter, req, StageCleanup)
+			joinFailureCleanup(partPath, stagingDir, &err)
+		}
+		return err
+	})
+	if mutateErr != nil {
+		return result, installCoordinatorError(mutateErr)
 	}
-	return res, nil
+	for _, warning := range coordinated.RecoveryWarnings {
+		result.Warnings = append(result.Warnings, Warning{
+			Kind: WarningCleanup,
+			Err:  errors.New(warning.Error()),
+		})
+	}
+	return result, nil
 }
 
-// install performs preparation without the global mutation lock, then uses
-// the coordinator only for recovery, final revalidation, and commit.
-func (s *Service) install(
+// installLocked performs the complete install lifecycle while the coordinator
+// lock is held. This includes creation and cleanup of all temporary artifacts.
+func (s *Service) installLocked(
 	ctx context.Context,
+	store *state.MarkerStore,
 	req Request,
 	versionsDir,
 	downloadsDir,
@@ -312,7 +331,7 @@ func (s *Service) install(
 
 	reportProgress(reporter, req, StageCommit)
 	var committedWarnings []Warning
-	stateResult, mutateErr := s.state.Mutate(ctx, func(ctx context.Context, store *state.MarkerStore) error {
+	installErr := func() error {
 		if err := requireRealInstallDirectory(versionsDir); err != nil {
 			return &Error{Stage: StageCommit, Err: err}
 		}
@@ -403,12 +422,9 @@ func (s *Service) install(
 			committedWarnings = append(committedWarnings, Warning{Kind: WarningCleanup, Err: err})
 		}
 		return nil
-	})
-	if mutateErr != nil {
-		return Result{}, installCoordinatorError(mutateErr)
-	}
-	for _, warning := range stateResult.RecoveryWarnings {
-		warnings = append(warnings, Warning{Kind: WarningCleanup, Err: errors.New(warning.Error())})
+	}()
+	if installErr != nil {
+		return Result{}, installErr
 	}
 	warnings = append(warnings, committedWarnings...)
 	return Result{Version: req.Version, Path: finalDir, Warnings: warnings}, nil

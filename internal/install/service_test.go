@@ -138,6 +138,39 @@ func assertStage(t *testing.T, err error, want Stage) {
 
 func versionsDirFor(tmp string) string { return filepath.Join(tmp, ".govm", "versions") }
 
+func TestInstallHoldsMutationLockDuringDownload(t *testing.T) {
+	s, _ := newTestService(t, "1.26.1")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	s.doer = &fakeDoer{respond: func(*http.Request) (*http.Response, error) {
+		close(entered)
+		<-release
+		return okResponse([]byte("archive-content")), nil
+	}}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Install(t.Context(), makeRequest("1.26.1"))
+		done <- err
+	}()
+	<-entered
+
+	resolver := s.resolver
+	lockPath, err := resolver.StateMutationLockFile()
+	must(t, err)
+	lock := flock.New(lockPath)
+	locked, err := lock.TryLock()
+	must(t, err)
+	if locked {
+		_ = lock.Unlock()
+		t.Fatal("install did not hold mutation lock during download")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+}
+
 // seedInstall writes a recognisable prior install (bin/go plus a
 // marker) at the final version directory.
 func seedInstall(t *testing.T, dir string) {
