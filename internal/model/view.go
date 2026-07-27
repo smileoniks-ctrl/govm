@@ -66,7 +66,7 @@ func (m Model) View() tea.View {
 		m.Deps.Dialog,
 		width,
 	)
-	if m.PruneConfirming {
+	if m.Prune.Confirming() {
 		help = renderKeyHints(t, [][2]string{
 			{"y", "confirm"},
 			{"n", "cancel"},
@@ -94,8 +94,8 @@ func (m Model) View() tea.View {
 		rendered = overlayDialog(rendered, renderDistributionSourceDialog(t, m.Settings, viewport), viewport)
 	} else if m.Deps.Dialog.Active() {
 		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(t, m.Deps, viewport), viewport)
-	} else if m.PruneConfirming {
-		rendered = overlayDialog(rendered, renderPruneDialog(t, m.PrunePlan, viewport.Width), viewport)
+	} else if m.Prune.Confirming() {
+		rendered = overlayDialog(rendered, renderPruneDialog(t, m.Prune.Plan(), viewport.Width), viewport)
 	}
 
 	v := tea.NewView(rendered)

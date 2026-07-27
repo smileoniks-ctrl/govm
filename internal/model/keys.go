@@ -9,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
-	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
 
@@ -54,12 +53,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "p":
 		return m.handlePruneKey()
 	case "y", "Y":
-		if m.PruneConfirming {
+		if m.Prune.Confirming() {
 			return m.handlePruneConfirmYes()
 		}
 		return m.handleDeleteConfirmYes()
 	case "n", "N":
-		if m.PruneConfirming {
+		if m.Prune.Confirming() {
 			return m.handlePruneConfirmNo()
 		}
 		return m.handleDeleteConfirmNo()
@@ -246,7 +245,7 @@ func (m *Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab != AvailableTab && m.CurrentTab != InstalledTab {
 		return m, nil
 	}
-	if m.PruneConfirming || m.PrunePreviewing || m.PruneRunning {
+	if m.Prune.Busy() {
 		return m, nil
 	}
 	if m.projection.operationPhase() != catalogOperationPhaseIdle {
@@ -286,34 +285,35 @@ func (m *Model) handleDeleteKey() (tea.Model, tea.Cmd) {
 func (m *Model) handlePruneKey() (tea.Model, tea.Cmd) {
 	if m.CurrentTab != InstalledTab ||
 		m.projection.operationPhase() != catalogOperationPhaseIdle ||
-		m.ConfirmingDelete || m.PruneConfirming || m.PrunePreviewing || m.PruneRunning {
+		m.ConfirmingDelete {
 		return m, nil
 	}
+	// The nil check stays ahead of the transition: moving to previewing
+	// without emitting a command would strand the phase until the user
+	// leaves the tab.
 	if m.previewPrune == nil {
 		m.Status.SetTab("Prune service is not configured.", "error")
 		return m, nil
 	}
-	m.PrunePreviewing = true
+	if !m.Prune.BeginPreview() {
+		return m, nil
+	}
 	m.Status.SetTab("Preparing prune plan...", "info")
 	return m, m.previewPruneCmd()
 }
 
 func (m *Model) handlePruneConfirmYes() (tea.Model, tea.Cmd) {
-	if !m.PruneConfirming || m.PruneRunning {
+	if !m.Prune.Confirm() {
 		return m, nil
 	}
-	m.PruneConfirming = false
-	m.PruneRunning = true
 	m.Status.SetGlobal("Pruning inactive Go versions...", "info")
 	return m, m.pruneCmd()
 }
 
 func (m *Model) handlePruneConfirmNo() (tea.Model, tea.Cmd) {
-	if !m.PruneConfirming {
+	if !m.Prune.Cancel() {
 		return m, nil
 	}
-	m.PruneConfirming = false
-	m.PrunePlan = prune.Result{}
 	m.Status.SetTab("Prune operation canceled.", "info")
 	return m, nil
 }

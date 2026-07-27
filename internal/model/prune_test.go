@@ -22,7 +22,7 @@ func TestInstalledPrunePreviewAndConfirmation(t *testing.T) {
 			}},
 		}, nil
 	}
-	m.prune = func(context.Context) (prune.Result, error) {
+	m.runPrune = func(context.Context) (prune.Result, error) {
 		return prune.Result{
 			Removed: []prune.Candidate{{
 				Path:    "/versions/go1.23.0",
@@ -35,23 +35,23 @@ func TestInstalledPrunePreviewAndConfirmation(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'p'})
 	m = updated.(Model)
-	if !m.PrunePreviewing {
+	if m.Prune.phase != prunePhasePreviewing {
 		t.Fatal("expected prune preview to start")
 	}
 	updated, _ = m.Update(cmd())
 	m = updated.(Model)
-	if !m.PruneConfirming {
+	if m.Prune.phase != prunePhaseConfirming {
 		t.Fatal("expected prune confirmation")
 	}
 
 	updated, cmd = m.Update(tea.KeyPressMsg{Code: 'y'})
 	m = updated.(Model)
-	if !m.PruneRunning {
+	if m.Prune.phase != prunePhaseRunning {
 		t.Fatal("expected prune operation to start")
 	}
 	updated, _ = m.Update(cmd())
 	m = updated.(Model)
-	if m.PruneRunning {
+	if m.Prune.phase == prunePhaseRunning {
 		t.Fatal("expected prune operation to finish")
 	}
 	if m.Status.Kind() != "success" {
@@ -67,7 +67,7 @@ func TestPruneCommandsApplyOperationDeadlines(t *testing.T) {
 		preview = budget(t, ctx)
 		return prune.Result{}, nil
 	}
-	m.prune = func(ctx context.Context) (prune.Result, error) {
+	m.runPrune = func(ctx context.Context) (prune.Result, error) {
 		run = budget(t, ctx)
 		return prune.Result{}, nil
 	}

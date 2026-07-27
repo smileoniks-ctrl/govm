@@ -51,12 +51,12 @@ func (m Model) previewPruneCmd() tea.Cmd {
 
 func (m Model) pruneCmd() tea.Cmd {
 	return func() tea.Msg {
-		if m.prune == nil {
+		if m.runPrune == nil {
 			return pruneDoneMsg{Err: errors.New("no prune service configured")}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), pruneTimeout)
 		defer cancel()
-		result, err := m.prune(ctx)
+		result, err := m.runPrune(ctx)
 		return pruneDoneMsg{Result: result, Err: err}
 	}
 }

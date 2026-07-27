@@ -46,16 +46,15 @@ type Model struct {
 	ShimPathWarning  string
 	ConfirmingDelete bool
 	DeleteVersion    string
-	PruneConfirming  bool
-	PrunePreviewing  bool
-	PruneRunning     bool
-	PrunePlan        prune.Result
-	DiskUsage        prune.Summary
-	Width            int
-	Height           int
-	TermWidth        int
-	TermHeight       int
-	Layout           styles.LayoutMode
+	// Prune owns the prune flow (phase plus the plan awaiting
+	// confirmation) as the PruneState value-type module.
+	Prune      PruneState
+	DiskUsage  prune.Summary
+	Width      int
+	Height     int
+	TermWidth  int
+	TermHeight int
+	Layout     styles.LayoutMode
 
 	// theme is the immutable rendering snapshot used by View and every
 	// renderer. main.go builds it once from settings at startup and
@@ -77,7 +76,7 @@ type Model struct {
 	activateGo          activateFunc
 	deleteGo            deleteFunc
 	previewPrune        previewPruneFunc
-	prune               pruneFunc
+	runPrune            pruneFunc
 	diskUsage           diskUsageFunc
 	shimInPath          func() bool
 }
@@ -198,7 +197,7 @@ func (m Model) BindVersionOperations(operations VersionOperations) Model {
 	m.activateGo = operations.Activate
 	m.deleteGo = operations.Delete
 	m.previewPrune = operations.PreviewPrune
-	m.prune = operations.Prune
+	m.runPrune = operations.Prune
 	m.diskUsage = operations.DiskUsage
 	m.shimInPath = operations.ShimInPath
 	return m

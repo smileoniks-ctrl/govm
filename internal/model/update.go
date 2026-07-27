@@ -95,9 +95,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, outcome.cmd
 
 	case prunePreviewMsg:
-		m.PrunePreviewing = false
-		m.PrunePlan = msg.Result
-		if len(msg.Result.Candidates) == 0 {
+		if !m.Prune.AcceptPreview(msg.Result) {
 			if msg.Err != nil {
 				m.Status.SetTab(fmt.Sprintf("Prune unavailable: %v", msg.Err), "error")
 			} else {
@@ -105,7 +103,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		m.PruneConfirming = true
 		if msg.Err != nil {
 			m.Status.SetTab(fmt.Sprintf("Prune has warnings: %v", msg.Err), "warning")
 		} else {
@@ -114,8 +111,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pruneDoneMsg:
-		m.PruneRunning = false
-		m.PrunePlan = msg.Result
+		m.Prune.Finish()
 		if msg.Err != nil {
 			m.Status.SetGlobal(fmt.Sprintf("Prune completed with warnings: %v", msg.Err), "warning")
 		} else {
