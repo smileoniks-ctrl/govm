@@ -85,10 +85,20 @@ type catalogProjectionOutcome struct {
 	err         error
 }
 
-type catalogProjectionReconciliation struct {
-	active    bool
+// catalogOperationState is the single carrier of what the adapter is doing.
+// operation.id == 0 means no operation is in flight: startMutation
+// pre-increments the counter, so a live id is always >= 1. The four
+// transition methods below are the only writers of the phase; the sole
+// other write is completeMutation storing its receipt on the operation
+// already in flight.
+//
+// Invariants held by the type: phase == Reconciling implies operation.id != 0,
+// because reconciliation continues the operation that started it. Loading is
+// a parallel axis and lives outside this value: a catalog refresh may run
+// while a mutation is in flight, and then the phase stays mutational.
+type catalogOperationState struct {
+	phase     catalogOperationPhase
 	operation catalogOperation
-	loadID    uint64
 }
 
 type catalogProjectionPendingRestore struct {
@@ -116,12 +126,8 @@ type catalogProjectionAdapter struct {
 	installedTable  table.Model
 	generation      uint64
 	pendingRestore  catalogProjectionPendingRestore
-	activity        catalogActivity
-	phase           catalogOperationPhase
-	reconciliation  catalogProjectionReconciliation
+	state           catalogOperationState
 	refilterPending bool
-	operation       catalogOperation
-	operationActive bool
 	load            catalogLoadRequest
 	loadActive      bool
 	nextOperationID uint64
@@ -154,15 +160,14 @@ func newCatalogProjectionAdapter(theme styles.Theme) catalogProjectionAdapter {
 }
 
 func (a *catalogProjectionAdapter) startLoad(purpose catalogLoadPurpose) catalogProjectionOutcome {
-	if a.reconciliation.active {
+	if a.state.phase == catalogOperationPhaseReconciling {
 		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
 	}
 	a.refilterPending = false
 	a.pendingRestore = catalogProjectionPendingRestore{}
 	request := a.registerLoad(purpose)
 	if !a.hasActiveMutation() {
-		a.phase = catalogOperationPhaseLoading
-		a.activity = catalogActivity{kind: catalogActivityLoading}
+		a.beginLoad()
 	}
 	return catalogProjectionOutcome{
 		kind:        catalogProjectionOutcomeLoadStarted,
@@ -170,19 +175,15 @@ func (a *catalogProjectionAdapter) startLoad(purpose catalogLoadPurpose) catalog
 	}
 }
 
-func (a *catalogProjectionAdapter) startReconciliationLoad(op catalogOperation) catalogProjectionOutcome {
-	request := a.registerLoad(catalogLoadPurposeRefresh)
-	a.reconciliation = catalogProjectionReconciliation{
-		active:    true,
-		operation: op,
-		loadID:    request.ID,
-	}
-	a.activity = catalogActivity{kind: catalogActivityReconciling, version: op.version}
-	a.phase = catalogOperationPhaseReconciling
+// startReconciliationLoad verifies the operation already in flight, so it
+// reads that operation from the state instead of taking a second copy of it.
+func (a *catalogProjectionAdapter) startReconciliationLoad() catalogProjectionOutcome {
+	request := a.registerLoad(catalogLoadPurposeReconcile)
+	a.beginReconcile()
 	return catalogProjectionOutcome{
 		kind:        catalogProjectionOutcomeLoadStarted,
 		loadRequest: request,
-		receipt:     catalogReceipt{operation: op},
+		receipt:     catalogReceipt{operation: a.state.operation},
 	}
 }
 
@@ -192,11 +193,11 @@ func (a *catalogProjectionAdapter) acceptLoad(requestID uint64, versions []utils
 	if !a.loadActive || requestID != a.load.ID {
 		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
 	}
-	if a.reconciliation.active && requestID != a.reconciliation.loadID {
-		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
-	}
 	request := a.load
 	reconciliationRequest := a.isReconciliationRequest(requestID)
+	if a.state.phase == catalogOperationPhaseReconciling && !reconciliationRequest {
+		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
+	}
 	a.invalidateLoad()
 
 	changed, err := a.catalog.replace(versions)
@@ -208,8 +209,7 @@ func (a *catalogProjectionAdapter) acceptLoad(requestID uint64, versions []utils
 					err:  err,
 				}
 			}
-			a.activity = catalogActivity{kind: catalogActivityIdle}
-			a.phase = catalogOperationPhaseIdle
+			a.toIdle()
 			return catalogProjectionOutcome{
 				kind: catalogProjectionOutcomeRejected,
 				err:  err,
@@ -227,8 +227,8 @@ func (a *catalogProjectionAdapter) acceptLoad(requestID uint64, versions []utils
 		outcome.cmd = a.publish(a.catalog.projection())
 	}
 
-	if a.reconciliation.active {
-		pending := a.reconciliation.operation
+	if a.state.phase == catalogOperationPhaseReconciling {
+		pending := a.state.operation
 		if !a.verify(pending) {
 			return a.finishReconciliation(catalogProjectionOutcome{
 				kind: catalogProjectionOutcomeFailed,
@@ -236,10 +236,7 @@ func (a *catalogProjectionAdapter) acceptLoad(requestID uint64, versions []utils
 				err:  fmt.Errorf("operation %d could not be confirmed against the installed catalog", pending.id),
 			})
 		}
-		a.reconciliation = catalogProjectionReconciliation{}
-		a.clearOperation()
-		a.activity = catalogActivity{kind: catalogActivityIdle}
-		a.phase = catalogOperationPhaseIdle
+		a.toIdle()
 		outcome.kind = catalogProjectionOutcomeReconciled
 		outcome.receipt = catalogReceipt{
 			operation:  pending,
@@ -251,9 +248,8 @@ func (a *catalogProjectionAdapter) acceptLoad(requestID uint64, versions []utils
 	if a.hasActiveMutation() {
 		return outcome
 	}
-	if request.Purpose == catalogLoadPurposeInitial || request.Purpose == catalogLoadPurposeRefresh {
-		a.activity = catalogActivity{kind: catalogActivityIdle}
-		a.phase = catalogOperationPhaseIdle
+	if request.Purpose != catalogLoadPurposeReconcile {
+		a.toIdle()
 	}
 	return outcome
 }
@@ -262,10 +258,10 @@ func (a *catalogProjectionAdapter) failLoad(requestID uint64, err error) catalog
 	if !a.loadActive || requestID != a.load.ID {
 		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
 	}
-	if a.reconciliation.active && requestID != a.reconciliation.loadID {
+	reconciliationRequest := a.isReconciliationRequest(requestID)
+	if a.state.phase == catalogOperationPhaseReconciling && !reconciliationRequest {
 		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
 	}
-	reconciliationRequest := a.isReconciliationRequest(requestID)
 	a.invalidateLoad()
 	if err == nil {
 		err = errors.New("catalog load failed")
@@ -277,8 +273,7 @@ func (a *catalogProjectionAdapter) failLoad(requestID uint64, err error) catalog
 		}
 	}
 	if !reconciliationRequest {
-		a.activity = catalogActivity{kind: catalogActivityIdle}
-		a.phase = catalogOperationPhaseIdle
+		a.toIdle()
 		return catalogProjectionOutcome{
 			kind: catalogProjectionOutcomeFailed,
 			err:  err,
@@ -306,40 +301,18 @@ func (a *catalogProjectionAdapter) replaceSnapshot(versions []utils.GoVersion) c
 	}
 }
 
+// startMutation refuses to start while another operation is in flight. A
+// reconciling adapter still carries the operation that started the
+// reconciliation, so the single check below covers both phases.
 func (a *catalogProjectionAdapter) startMutation(kind catalogMutationKind, version string) catalogOperation {
-	if a.hasActiveMutation() || a.reconciliation.active {
+	if a.hasActiveMutation() {
 		return catalogOperation{}
 	}
-	a.nextOperationID++
-	op := catalogOperation{id: a.nextOperationID, kind: kind, version: version}
-	a.operation = op
-	a.operationActive = true
-	a.phase = catalogOperationPhaseMutating
-	a.activity = catalogActivity{
-		kind:    mutationActivity(kind),
-		version: version,
-	}
-	return op
+	return a.beginMutation(kind, version)
 }
 
 func (a *catalogProjectionAdapter) activeOperationID() uint64 {
-	if !a.operationActive {
-		return 0
-	}
-	return a.operation.id
-}
-
-func mutationActivity(kind catalogMutationKind) catalogActivityKind {
-	switch kind {
-	case catalogMutationInstall:
-		return catalogActivityInstalling
-	case catalogMutationActivation:
-		return catalogActivityActivating
-	case catalogMutationDeletion:
-		return catalogActivityDeleting
-	default:
-		return catalogActivityIdle
-	}
+	return a.state.operation.id
 }
 
 func (a *catalogProjectionAdapter) completeInstall(
@@ -387,36 +360,32 @@ func (a *catalogProjectionAdapter) completeMutation(
 	storeReceipt func(*catalogOperation),
 	mutate func() (bool, error),
 ) catalogProjectionOutcome {
-	if !a.operationActive ||
-		a.operation.id != operationID ||
-		a.operation.kind != kind ||
-		a.operation.version != version {
+	if !a.hasActiveMutation() ||
+		a.state.operation.id != operationID ||
+		a.state.operation.kind != kind ||
+		a.state.operation.version != version {
 		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
 	}
-	op := a.operation
+	op := a.state.operation
 	storeReceipt(&op)
-	a.operation = op
+	a.state.operation = op
 	a.invalidateLoads()
 
 	changed, err := mutate()
 	if err != nil {
 		if errors.Is(err, errCatalogNotFound) {
-			outcome := a.startReconciliationLoad(op)
+			outcome := a.startReconciliationLoad()
 			outcome.err = err
 			return outcome
 		}
-		a.clearOperation()
-		a.activity = catalogActivity{kind: catalogActivityIdle}
-		a.phase = catalogOperationPhaseIdle
+		a.toIdle()
 		return catalogProjectionOutcome{
 			kind:    catalogProjectionOutcomeCommittedWarning,
 			receipt: catalogReceipt{operation: op},
 			err:     err,
 		}
 	}
-	a.clearOperation()
-	a.activity = catalogActivity{kind: catalogActivityIdle}
-	a.phase = catalogOperationPhaseIdle
+	a.toIdle()
 	receipt := catalogReceipt{operation: op}
 	if !changed {
 		return catalogProjectionOutcome{
@@ -432,17 +401,14 @@ func (a *catalogProjectionAdapter) completeMutation(
 }
 
 func (a *catalogProjectionAdapter) failMutation(operationID uint64, err error) catalogProjectionOutcome {
-	if !a.operationActive || a.operation.id != operationID {
+	if !a.hasActiveMutation() || a.state.operation.id != operationID {
 		return catalogProjectionOutcome{kind: catalogProjectionOutcomeStale}
 	}
-	op := a.operation
-	a.clearOperation()
-	if a.reconciliation.active && a.reconciliation.operation.id == operationID {
-		a.reconciliation = catalogProjectionReconciliation{}
+	op := a.state.operation
+	if a.state.phase == catalogOperationPhaseReconciling {
 		a.invalidateLoads()
 	}
-	a.activity = catalogActivity{kind: catalogActivityIdle}
-	a.phase = catalogOperationPhaseIdle
+	a.toIdle()
 	return catalogProjectionOutcome{
 		kind:    catalogProjectionOutcomeFailed,
 		receipt: catalogReceipt{operation: op},
@@ -465,24 +431,58 @@ func (a *catalogProjectionAdapter) verify(op catalogOperation) bool {
 }
 
 func (a *catalogProjectionAdapter) finishReconciliation(outcome catalogProjectionOutcome) catalogProjectionOutcome {
-	if a.reconciliation.active {
-		op := a.reconciliation.operation
-		a.clearOperation()
-		a.reconciliation = catalogProjectionReconciliation{}
-		outcome.receipt.operation = op
+	if a.state.phase == catalogOperationPhaseReconciling {
+		outcome.receipt.operation = a.state.operation
 	}
 	a.invalidateLoads()
-	a.activity = catalogActivity{kind: catalogActivityIdle}
-	a.phase = catalogOperationPhaseIdle
+	a.toIdle()
 	return outcome
 }
 
-func (a *catalogProjectionAdapter) hasActiveMutation() bool {
-	return a.operationActive
+// toIdle drops the operation and returns the adapter to rest. It is the one
+// place that spells out the reset the flow used to repeat verbatim.
+func (a *catalogProjectionAdapter) toIdle() {
+	a.state = catalogOperationState{}
 }
 
+// beginLoad marks a catalog load as the visible activity. It leaves the
+// operation alone: startLoad only calls it when no mutation is in flight.
+func (a *catalogProjectionAdapter) beginLoad() {
+	a.state.phase = catalogOperationPhaseLoading
+}
+
+// beginMutation registers a new operation and returns it. The counter is
+// pre-incremented, so the returned id is always >= 1.
+func (a *catalogProjectionAdapter) beginMutation(kind catalogMutationKind, version string) catalogOperation {
+	a.nextOperationID++
+	a.state = catalogOperationState{
+		phase: catalogOperationPhaseMutating,
+		operation: catalogOperation{
+			id:      a.nextOperationID,
+			kind:    kind,
+			version: version,
+		},
+	}
+	return a.state.operation
+}
+
+// beginReconcile keeps the operation being verified: it takes no version, so
+// the phase cannot drift away from the operation it reconciles.
+func (a *catalogProjectionAdapter) beginReconcile() {
+	a.state.phase = catalogOperationPhaseReconciling
+}
+
+func (a *catalogProjectionAdapter) hasActiveMutation() bool {
+	return a.state.operation.id != 0
+}
+
+// isReconciliationRequest reports whether the in-flight load is the one
+// started to verify an operation. The purpose travels with the request, so
+// there is no second copy of the id to fall out of sync.
 func (a *catalogProjectionAdapter) isReconciliationRequest(requestID uint64) bool {
-	return a.reconciliation.active && a.reconciliation.loadID == requestID
+	return a.loadActive &&
+		a.load.ID == requestID &&
+		a.load.Purpose == catalogLoadPurposeReconcile
 }
 
 func (a *catalogProjectionAdapter) registerLoad(purpose catalogLoadPurpose) catalogLoadRequest {
@@ -490,11 +490,6 @@ func (a *catalogProjectionAdapter) registerLoad(purpose catalogLoadPurpose) cata
 	a.load = catalogLoadRequest{ID: a.nextLoadID, Purpose: purpose}
 	a.loadActive = true
 	return a.load
-}
-
-func (a *catalogProjectionAdapter) clearOperation() {
-	a.operation = catalogOperation{}
-	a.operationActive = false
 }
 
 func (a *catalogProjectionAdapter) invalidateLoad() {
@@ -759,10 +754,35 @@ func (a *catalogProjectionAdapter) projection() versionProjection {
 	return a.catalog.projection()
 }
 
+// activityState derives what the adapter is doing from its state. It is a
+// projection of the state, not a second copy of it.
 func (a *catalogProjectionAdapter) activityState() catalogActivity {
-	return a.activity
+	switch a.state.phase {
+	case catalogOperationPhaseLoading:
+		return catalogActivity{kind: catalogActivityLoading}
+	case catalogOperationPhaseReconciling:
+		return catalogActivity{
+			kind:    catalogActivityReconciling,
+			version: a.state.operation.version,
+		}
+	case catalogOperationPhaseMutating:
+		activity := catalogActivity{
+			kind:    catalogActivityIdle,
+			version: a.state.operation.version,
+		}
+		switch a.state.operation.kind {
+		case catalogMutationInstall:
+			activity.kind = catalogActivityInstalling
+		case catalogMutationActivation:
+			activity.kind = catalogActivityActivating
+		case catalogMutationDeletion:
+			activity.kind = catalogActivityDeleting
+		}
+		return activity
+	}
+	return catalogActivity{kind: catalogActivityIdle}
 }
 
 func (a *catalogProjectionAdapter) operationPhase() catalogOperationPhase {
-	return a.phase
+	return a.state.phase
 }

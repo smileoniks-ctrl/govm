@@ -46,7 +46,7 @@ func TestCatalogProjection_InvalidReconciliationPreservesPriorWidgets(t *testing
 	})
 	m = updated.(Model)
 
-	request := m.projection.reconciliation.loadID
+	request := m.projection.load.ID
 	updated, _ = m.Update(catalogLoadedMsg{
 		RequestID: request,
 		Versions: []utils.GoVersion{
@@ -130,7 +130,7 @@ func TestCatalogProjection_NormalRefreshDoesNotReportReconciliationSuccess(t *te
 	if got.Status.Kind() != "warning" || got.Status.Text() != "keep this status" {
 		t.Fatalf("normal refresh changed status to %q (%s), want unchanged warning", got.Status.Text(), got.Status.Kind())
 	}
-	if got.projection.reconciliation.active {
+	if got.projection.operationPhase() == catalogOperationPhaseReconciling {
 		t.Fatal("normal refresh unexpectedly established reconciliation context")
 	}
 }

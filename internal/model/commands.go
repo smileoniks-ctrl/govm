@@ -16,8 +16,9 @@ import (
 type catalogLoadPurpose string
 
 const (
-	catalogLoadPurposeInitial catalogLoadPurpose = "initial"
-	catalogLoadPurposeRefresh catalogLoadPurpose = "refresh"
+	catalogLoadPurposeInitial   catalogLoadPurpose = "initial"
+	catalogLoadPurposeRefresh   catalogLoadPurpose = "refresh"
+	catalogLoadPurposeReconcile catalogLoadPurpose = "reconcile"
 )
 
 // catalogLoadRequest identifies one catalog load operation.

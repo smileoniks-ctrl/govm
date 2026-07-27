@@ -429,6 +429,86 @@ func TestCatalogProjectionAdapterNotFoundStartsReconciliation(t *testing.T) {
 	}
 }
 
+func TestCatalogProjectionAdapterRefreshStartedDuringMutationKeepsMutationActivity(t *testing.T) {
+	adapter := newCatalogProjectionAdapterTestFixture(t, []utils.GoVersion{{Version: "1.30.0"}})
+	adapter.startMutation(catalogMutationInstall, "1.30.0")
+
+	load := adapter.startLoad(catalogLoadPurposeRefresh)
+	if load.kind != catalogProjectionOutcomeLoadStarted {
+		t.Fatalf("refresh outcome kind = %v, want LoadStarted", load.kind)
+	}
+	if phase := adapter.operationPhase(); phase != catalogOperationPhaseMutating {
+		t.Fatalf("phase = %v, want Mutating", phase)
+	}
+	if activity := adapter.activityState(); activity != (catalogActivity{
+		kind:    catalogActivityInstalling,
+		version: "1.30.0",
+	}) {
+		t.Fatalf("activity = %+v, want installing 1.30.0", activity)
+	}
+}
+
+func TestCatalogProjectionAdapterReconciliationRequestIsIdentifiedByPurpose(t *testing.T) {
+	adapter := newCatalogProjectionAdapter(testTheme())
+
+	refresh := adapter.startLoad(catalogLoadPurposeRefresh)
+	if refresh.loadRequest.Purpose != catalogLoadPurposeRefresh {
+		t.Fatalf("refresh purpose = %q, want refresh", refresh.loadRequest.Purpose)
+	}
+	if adapter.isReconciliationRequest(refresh.loadRequest.ID) {
+		t.Fatal("refresh request reported as reconciliation request")
+	}
+	if outcome := adapter.acceptLoad(refresh.loadRequest.ID, nil); outcome.kind == catalogProjectionOutcomeReconciled {
+		t.Fatal("refresh response reported reconciliation success")
+	}
+
+	operation := adapter.startMutation(catalogMutationInstall, "1.30.0")
+	started := adapter.completeInstall(operation.id, operation.version, "/p/1.30.0", nil)
+	if started.kind != catalogProjectionOutcomeLoadStarted {
+		t.Fatalf("completion kind = %v, want LoadStarted", started.kind)
+	}
+	if started.loadRequest.Purpose != catalogLoadPurposeReconcile {
+		t.Fatalf("reconciliation purpose = %q, want reconcile", started.loadRequest.Purpose)
+	}
+	if !adapter.isReconciliationRequest(started.loadRequest.ID) {
+		t.Fatal("reconciliation request not identified by purpose")
+	}
+	if adapter.isReconciliationRequest(started.loadRequest.ID + 1) {
+		t.Fatal("unknown request id reported as reconciliation request")
+	}
+}
+
+func TestCatalogProjectionAdapterLoadDuringReconciliationIsRejected(t *testing.T) {
+	adapter := newCatalogProjectionAdapter(testTheme())
+	operation := adapter.startMutation(catalogMutationInstall, "1.30.0")
+	started := adapter.completeInstall(operation.id, operation.version, "/p/1.30.0", nil)
+	if started.kind != catalogProjectionOutcomeLoadStarted {
+		t.Fatalf("completion kind = %v, want LoadStarted", started.kind)
+	}
+
+	if outcome := adapter.startLoad(catalogLoadPurposeRefresh); outcome.kind != catalogProjectionOutcomeStale {
+		t.Fatalf("refresh during reconciliation = %v, want Stale", outcome.kind)
+	}
+	if phase := adapter.operationPhase(); phase != catalogOperationPhaseReconciling {
+		t.Fatalf("phase = %v, want Reconciling", phase)
+	}
+
+	outcome := adapter.acceptLoad(started.loadRequest.ID, []utils.GoVersion{{
+		Version:   "1.30.0",
+		Installed: true,
+		Path:      "/p/1.30.0",
+	}})
+	if outcome.kind != catalogProjectionOutcomeReconciled {
+		t.Fatalf("reconciliation outcome kind = %v, want Reconciled", outcome.kind)
+	}
+	if phase := adapter.operationPhase(); phase != catalogOperationPhaseIdle {
+		t.Fatalf("phase after reconciliation = %v, want Idle", phase)
+	}
+	if id := adapter.activeOperationID(); id != 0 {
+		t.Fatalf("active operation id after reconciliation = %d, want 0", id)
+	}
+}
+
 func TestCatalogProjectionAdapterStaleCompletionCannotOverwriteReconciliationReceipt(t *testing.T) {
 	tests := []struct {
 		name     string
