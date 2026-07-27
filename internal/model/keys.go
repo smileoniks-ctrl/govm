@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
@@ -522,9 +521,6 @@ func (m *Model) applyRuntimeTheme() tea.Cmd {
 	m.theme = t
 	m.Settings.ApplyTheme()
 	m.Spinner.Style = t.SpinnerStyle
-	m.Progress.FullColor = t.Primary
-	m.Progress.EmptyColor = t.Muted
-	m.Progress.PercentageStyle = lipgloss.NewStyle().Foreground(t.Info)
 	m.Deps.Table.SetStyles(tableStyles(t))
 	return m.projection.setTheme(t).cmd
 }

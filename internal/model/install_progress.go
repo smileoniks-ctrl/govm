@@ -6,12 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/bubbles/v2/progress"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/smileoniks-ctrl/govm/internal/install"
-	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -126,13 +124,6 @@ func (m *installProgressMailbox) snapshot() install.Progress {
 	return progress
 }
 
-func newInstallProgressModel(theme styles.Theme) progress.Model {
-	bar := progress.New(progress.WithColors(theme.Primary))
-	bar.EmptyColor = theme.Muted
-	bar.PercentageStyle = lipgloss.NewStyle().Foreground(theme.Info)
-	return bar
-}
-
 func (m *Model) installProgressVersionCmd(operationID uint64, v install.Request) tea.Cmd {
 	installFn := m.installWithProgress
 	fallbackInstall := m.installGo
@@ -227,21 +218,20 @@ func (m Model) renderDownloadStatus(progress install.Progress, width int) string
 		)
 	}
 
-	bar := m.Progress
-	bar.SetWidth(maxInt(8, minInt(28, available-lipgloss.Width(prefix)-lipgloss.Width(bytesText)-2)))
-	full := fmt.Sprintf("%s %s %s", prefix, bar.ViewAs(ratio), bytesText)
+	barWidth := installBarWidth(available - lipgloss.Width(prefix) - lipgloss.Width(bytesText) - 2)
+	full := fmt.Sprintf("%s %s %s", prefix, renderInstallProgressBar(m.theme, barWidth, ratio), bytesText)
 	if ansi.StringWidth(full) <= available {
 		return full
 	}
 
-	bar.SetWidth(maxInt(8, minInt(28, available-lipgloss.Width(prefix)-2)))
-	withoutBytes := fmt.Sprintf("%s %s", prefix, bar.ViewAs(ratio))
+	barWidth = installBarWidth(available - lipgloss.Width(prefix) - 2)
+	withoutBytes := fmt.Sprintf("%s %s", prefix, renderInstallProgressBar(m.theme, barWidth, ratio))
 	if ansi.StringWidth(withoutBytes) <= available {
 		return withoutBytes
 	}
 
-	bar.SetWidth(maxInt(1, available-lipgloss.Width(prefix)-1))
-	return fmt.Sprintf("%s %s", prefix, bar.ViewAs(ratio))
+	barWidth = maxInt(1, available-lipgloss.Width(prefix)-1)
+	return fmt.Sprintf("%s %s", prefix, renderInstallProgressBar(m.theme, barWidth, ratio))
 }
 
 func formatInstallBytes(value int64) string {

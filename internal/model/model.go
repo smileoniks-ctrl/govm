@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
@@ -34,7 +33,6 @@ type Model struct {
 	initialLoad catalogLoadRequest
 
 	Spinner    spinner.Model
-	Progress   progress.Model
 	CurrentTab int
 	// Status owns the status triplet (text, kind, scope) as the
 	// StatusLine value-type module. Reads go through Text/Kind/Scope;
@@ -163,7 +161,6 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 		projection:      projection,
 		initialLoad:     initialLoad,
 		Spinner:         sp,
-		Progress:        newInstallProgressModel(theme),
 		Layout:          styles.LayoutNormal,
 		theme:           theme,
 		Deps:            NewDepsState(moduleDir, depTable),
