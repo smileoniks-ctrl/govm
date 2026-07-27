@@ -17,11 +17,6 @@ import (
 
 const installProgressUpdateInterval = 100 * time.Millisecond
 
-type installProgressState struct {
-	operationID uint64
-	progress    install.Progress
-}
-
 type installProgressMsg struct {
 	operationID uint64
 	progress    install.Progress
@@ -171,29 +166,17 @@ func (m *Model) installVersionProgressCmd(operationID uint64, v utils.GoVersion)
 }
 
 func (m *Model) handleInstallProgress(msg installProgressMsg) tea.Cmd {
-	if msg.session == nil ||
-		msg.operationID != m.projection.activeOperationID() ||
-		msg.progress.Version != m.projection.activityState().version {
+	if msg.session == nil || !m.projection.applyProgress(msg.operationID, msg.progress) {
 		return nil
-	}
-	m.installProgress = installProgressState{
-		operationID: msg.operationID,
-		progress:    msg.progress,
 	}
 	return msg.session.wait(false)
 }
 
 func (m *Model) handleInstallProgressPoll(msg installProgressPollMsg) tea.Cmd {
-	if msg.session == nil || msg.session.operationID != m.projection.activeOperationID() {
+	if msg.session == nil || !m.projection.isActiveOperation(msg.session.operationID) {
 		return nil
 	}
 	return msg.session.wait(false)
-}
-
-func (m *Model) clearInstallProgress(operationID uint64) {
-	if m.installProgress.operationID == operationID {
-		m.installProgress = installProgressState{}
-	}
 }
 
 func (m Model) installStageStatus(progress install.Progress, width int) string {

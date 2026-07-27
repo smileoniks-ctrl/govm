@@ -121,12 +121,11 @@ func TestRenderDownloadStatusFitsNarrowWidth(t *testing.T) {
 func TestInstallProgressIgnoresStaleOperation(t *testing.T) {
 	m := newVersionCacheTestModel(t)
 	operation := m.projection.startMutation(catalogMutationInstall, "1.25.0")
-	m.installProgress = installProgressState{
-		operationID: operation.id,
-		progress: install.Progress{
-			Version: "1.25.0",
-			Stage:   install.StageDownload,
-		},
+	if !m.projection.applyProgress(operation.id, install.Progress{
+		Version: "1.25.0",
+		Stage:   install.StageDownload,
+	}) {
+		t.Fatal("applyProgress() = false, want the measurement recorded")
 	}
 
 	cmd := m.handleInstallProgress(installProgressMsg{
@@ -140,7 +139,8 @@ func TestInstallProgressIgnoresStaleOperation(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("stale progress should not schedule another poll")
 	}
-	if got := m.installProgress.progress.Stage; got != install.StageDownload {
+	progress, _ := m.projection.activityState().installProgress()
+	if got := progress.Stage; got != install.StageDownload {
 		t.Fatalf("stage = %s, want stale event to be ignored", got)
 	}
 }
@@ -148,13 +148,12 @@ func TestInstallProgressIgnoresStaleOperation(t *testing.T) {
 func TestComposeStatusUsesInstallProgressStage(t *testing.T) {
 	m := newVersionCacheTestModel(t)
 	operation := m.projection.startMutation(catalogMutationInstall, "1.25.0")
-	m.installProgress = installProgressState{
-		operationID: operation.id,
-		progress: install.Progress{
-			Version:       "1.25.0",
-			Stage:         install.StageIntegrity,
-			BytesReceived: 10,
-		},
+	if !m.projection.applyProgress(operation.id, install.Progress{
+		Version:       "1.25.0",
+		Stage:         install.StageIntegrity,
+		BytesReceived: 10,
+	}) {
+		t.Fatal("applyProgress() = false, want the measurement recorded")
 	}
 
 	status, kind := m.composeStatus()

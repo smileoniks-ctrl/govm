@@ -624,3 +624,123 @@ func TestCatalogProjectionAdapterRejectsSecondMutationWithoutChangingActivity(t 
 		})
 	}
 }
+
+func TestCatalogProjectionAdapterRejectsProgressOfOtherOperation(t *testing.T) {
+	adapter := newCatalogProjectionAdapter(testTheme())
+	operation := adapter.startMutation(catalogMutationInstall, "1.30.0")
+	accepted := install.Progress{
+		Version:       "1.30.0",
+		Stage:         install.StageDownload,
+		BytesReceived: 10,
+		BytesTotal:    100,
+	}
+	if !adapter.applyProgress(operation.id, accepted) {
+		t.Fatal("applyProgress() = false for the active operation, want true")
+	}
+
+	if adapter.applyProgress(operation.id+1, install.Progress{
+		Version: "1.30.0",
+		Stage:   install.StageVerify,
+	}) {
+		t.Fatal("applyProgress() = true for a foreign operation, want false")
+	}
+
+	got, ok := adapter.activityState().installProgress()
+	if !ok || got != accepted {
+		t.Fatalf("progress = %+v (ok = %v), want the accepted measurement unchanged", got, ok)
+	}
+}
+
+func TestCatalogProjectionAdapterProgressLifetime(t *testing.T) {
+	measurement := install.Progress{
+		Version:       "1.30.0",
+		Stage:         install.StageDownload,
+		BytesReceived: 10,
+		BytesTotal:    100,
+	}
+	tests := []struct {
+		name         string
+		act          func(*catalogProjectionAdapter)
+		wantProgress install.Progress
+		wantOK       bool
+		wantKind     catalogActivityKind
+	}{
+		{
+			name:     "cleared when the operation ends",
+			act:      func(adapter *catalogProjectionAdapter) { adapter.toIdle() },
+			wantKind: catalogActivityIdle,
+		},
+		{
+			name:     "cleared when the operation is reconciled",
+			act:      func(adapter *catalogProjectionAdapter) { adapter.beginReconcile() },
+			wantKind: catalogActivityReconciling,
+		},
+		{
+			name: "kept while the catalog refreshes",
+			act: func(adapter *catalogProjectionAdapter) {
+				adapter.startLoad(catalogLoadPurposeRefresh)
+			},
+			wantProgress: measurement,
+			wantOK:       true,
+			wantKind:     catalogActivityInstalling,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adapter := newCatalogProjectionAdapter(testTheme())
+			operation := adapter.startMutation(catalogMutationInstall, "1.30.0")
+			if !adapter.applyProgress(operation.id, measurement) {
+				t.Fatal("applyProgress() = false, want the measurement recorded")
+			}
+
+			tt.act(&adapter)
+
+			activity := adapter.activityState()
+			if activity.kind != tt.wantKind {
+				t.Fatalf("activity kind = %v, want %v", activity.kind, tt.wantKind)
+			}
+			got, ok := activity.installProgress()
+			if ok != tt.wantOK || got != tt.wantProgress {
+				t.Fatalf("progress = %+v (ok = %v), want %+v (ok = %v)", got, ok, tt.wantProgress, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestCatalogProjectionAdapterReportsNoProgressBeforeFirstMeasurement(t *testing.T) {
+	adapter := newCatalogProjectionAdapter(testTheme())
+	adapter.startMutation(catalogMutationInstall, "1.30.0")
+
+	activity := adapter.activityState()
+	if activity.kind != catalogActivityInstalling {
+		t.Fatalf("activity kind = %v, want Installing", activity.kind)
+	}
+	if got, ok := activity.installProgress(); ok {
+		t.Fatalf("installProgress() = %+v, ok = true, want ok = false before the first measurement", got)
+	}
+}
+
+// beginLoad is reachable with a live measurement only through the phase it
+// sets, so the retained progress is asserted on the state rather than through
+// activityState. Clearing it here would blank the progress bar on a refresh
+// pressed during an install.
+func TestCatalogProjectionAdapterKeepsProgressAcrossBeginLoad(t *testing.T) {
+	adapter := newCatalogProjectionAdapter(testTheme())
+	operation := adapter.startMutation(catalogMutationInstall, "1.30.0")
+	measurement := install.Progress{
+		Version:       "1.30.0",
+		Stage:         install.StageDownload,
+		BytesReceived: 10,
+		BytesTotal:    100,
+	}
+	if !adapter.applyProgress(operation.id, measurement) {
+		t.Fatal("applyProgress() = false, want the measurement recorded")
+	}
+
+	adapter.beginLoad()
+
+	if got := adapter.state.progress; got != measurement {
+		t.Fatalf("progress = %+v, want %+v kept across beginLoad()", got, measurement)
+	}
+}

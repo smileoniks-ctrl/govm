@@ -28,8 +28,20 @@ const (
 )
 
 type catalogActivity struct {
-	kind    catalogActivityKind
-	version string
+	kind     catalogActivityKind
+	version  string
+	progress install.Progress
+}
+
+// installProgress returns the latest measurement reported by the active
+// install, or ok == false when the operation has not reported one yet. The
+// comma-ok form keeps the render layer from reading a measurement without
+// first asking whether one exists.
+func (a catalogActivity) installProgress() (install.Progress, bool) {
+	if a.kind != catalogActivityInstalling || a.progress.Stage == install.StageUnknown {
+		return install.Progress{}, false
+	}
+	return a.progress, true
 }
 
 type catalogOperationPhase int
@@ -93,12 +105,19 @@ type catalogProjectionOutcome struct {
 // already in flight.
 //
 // Invariants held by the type: phase == Reconciling implies operation.id != 0,
-// because reconciliation continues the operation that started it. Loading is
-// a parallel axis and lives outside this value: a catalog refresh may run
-// while a mutation is in flight, and then the phase stays mutational.
+// because reconciliation continues the operation that started it; a progress
+// measurement implies phase == Mutating on an install, because that is the
+// only operation reporting one. Loading is a parallel axis and lives outside
+// this value: a catalog refresh may run while a mutation is in flight, and
+// then the phase stays mutational.
+//
+// The progress belongs here rather than on catalogOperation because the
+// operation doubles as a receipt that outlives the flight, while progress is
+// telemetry that is meaningless once the operation ends.
 type catalogOperationState struct {
 	phase     catalogOperationPhase
 	operation catalogOperation
+	progress  install.Progress
 }
 
 type catalogProjectionPendingRestore struct {
@@ -467,9 +486,31 @@ func (a *catalogProjectionAdapter) beginMutation(kind catalogMutationKind, versi
 }
 
 // beginReconcile keeps the operation being verified: it takes no version, so
-// the phase cannot drift away from the operation it reconciles.
+// the phase cannot drift away from the operation it reconciles. The install
+// itself is over by now, so its progress is dropped.
 func (a *catalogProjectionAdapter) beginReconcile() {
 	a.state.phase = catalogOperationPhaseReconciling
+	a.state.progress = install.Progress{}
+}
+
+// isActiveOperation reports whether operationID identifies the operation
+// currently in flight. It is the one implementation of the correlation rule
+// that used to be spelled out at every progress-handling site.
+func (a *catalogProjectionAdapter) isActiveOperation(operationID uint64) bool {
+	return a.state.operation.id != 0 && a.state.operation.id == operationID
+}
+
+// applyProgress records a measurement for the active install and reports
+// whether it was accepted. A measurement outside a running install is
+// dropped, which is what keeps the progress invariant of the state.
+func (a *catalogProjectionAdapter) applyProgress(operationID uint64, p install.Progress) bool {
+	if !a.isActiveOperation(operationID) ||
+		a.state.phase != catalogOperationPhaseMutating ||
+		a.state.operation.kind != catalogMutationInstall {
+		return false
+	}
+	a.state.progress = p
+	return true
 }
 
 func (a *catalogProjectionAdapter) hasActiveMutation() bool {
@@ -767,8 +808,9 @@ func (a *catalogProjectionAdapter) activityState() catalogActivity {
 		}
 	case catalogOperationPhaseMutating:
 		activity := catalogActivity{
-			kind:    catalogActivityIdle,
-			version: a.state.operation.version,
+			kind:     catalogActivityIdle,
+			version:  a.state.operation.version,
+			progress: a.state.progress,
 		}
 		switch a.state.operation.kind {
 		case catalogMutationInstall:

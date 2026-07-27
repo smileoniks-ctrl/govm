@@ -266,7 +266,6 @@ func (m *Model) handleCatalogOutcome(outcome catalogProjectionOutcome) (tea.Mode
 }
 
 func (m *Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd) {
-	m.clearInstallProgress(msg.OperationID)
 	outcome := m.projection.completeInstall(
 		msg.OperationID,
 		msg.Version,
@@ -278,7 +277,6 @@ func (m *Model) handleInstallSuccess(msg installSuccessMsg) (tea.Model, tea.Cmd)
 }
 
 func (m *Model) handleInstallFailure(msg installFailureMsg) (tea.Model, tea.Cmd) {
-	m.clearInstallProgress(msg.OperationID)
 	outcome := m.projection.failMutation(msg.OperationID, msg.Err)
 	if outcome.kind == catalogProjectionOutcomeStale {
 		return m, nil

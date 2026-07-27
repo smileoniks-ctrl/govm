@@ -33,10 +33,9 @@ type Model struct {
 	projection  catalogProjectionAdapter
 	initialLoad catalogLoadRequest
 
-	Spinner         spinner.Model
-	Progress        progress.Model
-	installProgress installProgressState
-	CurrentTab      int
+	Spinner    spinner.Model
+	Progress   progress.Model
+	CurrentTab int
 	// Status owns the status triplet (text, kind, scope) as the
 	// StatusLine value-type module. Reads go through Text/Kind/Scope;
 	// mutations go through SetTab/SetGlobal/Clear/ClearTab.

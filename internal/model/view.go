@@ -171,9 +171,8 @@ func (m Model) composeStatus() (string, string) {
 		statusType = "info"
 		switch activity.kind {
 		case catalogActivityInstalling:
-			if m.installProgress.operationID == m.projection.activeOperationID() &&
-				m.installProgress.progress.Version == activity.version {
-				status = m.installStageStatus(m.installProgress.progress, m.viewWidth())
+			if p, ok := activity.installProgress(); ok {
+				status = m.installStageStatus(p, m.viewWidth())
 			} else {
 				status = fmt.Sprintf("%s Preparing Go %s", m.Spinner.View(), activity.version)
 			}
