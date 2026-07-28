@@ -413,7 +413,7 @@ func readActive(path string) (string, bool, error) {
 func logicalSize(ctx context.Context, root string) (int64, []Warning) {
 	var total int64
 	var warnings []Warning
-	var seen []fs.FileInfo
+	var seen hardLinkSet
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -439,10 +439,9 @@ func logicalSize(ctx context.Context, root string) (int64, []Warning) {
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-		if seenFile(info, seen) {
+		if seen.observe(info) {
 			return nil
 		}
-		seen = append(seen, info)
 		total += info.Size()
 		return nil
 	})
@@ -465,7 +464,7 @@ func matchingDownloadSize(ctx context.Context, root string) (int64, []Warning) {
 	}
 	var total int64
 	var warnings []Warning
-	var seen []fs.FileInfo
+	var seen hardLinkSet
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			warnings = append(warnings, Warning{Path: root, Err: err})
@@ -484,21 +483,70 @@ func matchingDownloadSize(ctx context.Context, root string) (int64, []Warning) {
 		if !info.Mode().IsRegular() {
 			continue
 		}
-		if seenFile(info, seen) {
+		if seen.observe(info) {
 			continue
 		}
-		seen = append(seen, info)
 		total += info.Size()
 	}
 	return total, warnings
 }
 
-func seenFile(info fs.FileInfo, seen []fs.FileInfo) bool {
-	for _, previous := range seen {
-		if os.SameFile(info, previous) {
-			return true
+// fileIdentity identifies one file on disk. Two directory entries
+// sharing an identity are hard links to the same data, which logical
+// size accounting must count exactly once. Platform-specific identify
+// functions fill it in.
+type fileIdentity struct {
+	device uint64
+	inode  uint64
+	links  uint64
+}
+
+// hardLinkSet remembers which physical files a walk has already
+// counted.
+//
+// A directory tree of an installed toolchain holds on the order of
+// 14,000 files, and DiskUsage walks every installed toolchain at once.
+// Comparing each file against every previously seen one made that walk
+// quadratic and held one fs.FileInfo per file for its whole duration;
+// with a handful of toolchains installed that ran for seconds and
+// churned over a hundred megabytes on every install.
+//
+// Where the platform exposes file identity the set stores only files
+// that actually have more than one link — an unlinked file cannot
+// collide with anything, so the common case costs no memory at all.
+// Elsewhere it falls back to the pairwise os.SameFile comparison.
+type hardLinkSet struct {
+	linked       map[fileIdentity]struct{}
+	unidentified []fs.FileInfo
+}
+
+// observe reports whether info was already counted, recording it when
+// it was not.
+func (s *hardLinkSet) observe(info fs.FileInfo) bool {
+	id, ok := identify(info)
+	if !ok {
+		for _, previous := range s.unidentified {
+			if os.SameFile(info, previous) {
+				return true
+			}
 		}
+		s.unidentified = append(s.unidentified, info)
+		return false
 	}
+	if id.links <= 1 {
+		return false
+	}
+	// Identity is the hard-link key; the link count is not part of it,
+	// since a concurrent link or unlink would otherwise let the same
+	// file be counted twice.
+	key := fileIdentity{device: id.device, inode: id.inode}
+	if s.linked == nil {
+		s.linked = make(map[fileIdentity]struct{})
+	}
+	if _, duplicate := s.linked[key]; duplicate {
+		return true
+	}
+	s.linked[key] = struct{}{}
 	return false
 }
 
