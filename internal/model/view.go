@@ -103,13 +103,25 @@ func (m Model) View() tea.View {
 	return v
 }
 
+// renderInstalledSummary reports the disk footprint of the managed
+// toolchains.
+//
+// Interrupted downloads are reported only when some exist. A finished
+// install leaves none behind — the archive is streamed to a .part file
+// that is removed on success, on failure, and again by the next
+// install's orphan sweep — so a permanent field would read "0 B" in
+// every situation a user can observe, and say nothing about the one
+// situation that matters: a crash left debris on disk.
 func renderInstalledSummary(summary prune.Summary) string {
-	return fmt.Sprintf(
-		"Installed: %s  Downloads: %s  Reclaimable: %s",
+	line := fmt.Sprintf(
+		"Installed: %s  Reclaimable: %s",
 		prune.FormatBytes(summary.InstalledBytes),
-		prune.FormatBytes(summary.DownloadBytes),
 		prune.FormatBytes(summary.ReclaimableBytes),
 	)
+	if summary.DownloadBytes > 0 {
+		line += fmt.Sprintf("  Interrupted: %s", prune.FormatBytes(summary.DownloadBytes))
+	}
+	return line
 }
 
 func renderPruneDialog(t styles.Theme, result prune.Result, width int) string {
