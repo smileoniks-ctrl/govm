@@ -95,13 +95,21 @@ func detectArchiveFormat(archivePath string) (string, error) {
 	return "", fmt.Errorf("extract: unsupported archive type %q", archivePath)
 }
 
+// copyBufferSize is the streaming window used to move one entry's bytes
+// to disk. One buffer serves the whole extraction: a Go toolchain holds
+// roughly 14,000 files, so a per-entry buffer would churn hundreds of
+// megabytes of garbage for every install.
+const copyBufferSize = 32 * 1024
+
 // guard tracks extraction state: the set of committed paths (for duplicate and
-// collision detection), the set of filesystem entries created in this run, and
-// the running totals used to enforce size and count ceilings.
+// collision detection), the set of filesystem entries created in this run, the
+// running totals used to enforce size and count ceilings, and the copy buffer
+// shared by every entry.
 type guard struct {
 	dest    string
 	seen    map[string]entryKind
 	made    map[string]bool
+	buf     []byte
 	total   int64
 	entries int
 	lim     limits
@@ -113,6 +121,7 @@ func newGuard(dest string, lim limits) *guard {
 		dest: dest,
 		seen: make(map[string]entryKind),
 		made: make(map[string]bool),
+		buf:  make([]byte, copyBufferSize),
 		lim:  lim,
 	}
 }
@@ -272,7 +281,7 @@ func (g *guard) makeFile(ctx context.Context, cleaned string, mode os.FileMode, 
 		}
 		return fmt.Errorf("extract: create %q: %w", cleaned, err)
 	}
-	copyErr := copyOut(ctx, f, src, cleaned, &g.total, g.lim)
+	copyErr := copyOut(ctx, f, src, cleaned, &g.total, g.lim, g.buf)
 	closeErr := f.Close()
 	if copyErr != nil {
 		return copyErr
@@ -289,10 +298,10 @@ func (g *guard) makeFile(ctx context.Context, cleaned string, mode os.FileMode, 
 
 // copyOut streams src into dst while enforcing the per-file and total size
 // limits against the actual bytes transferred (never trusting headers) and
-// honoring context cancellation between and during reads.
-func copyOut(ctx context.Context, dst io.Writer, src io.Reader, name string, total *int64, lim limits) error {
+// honoring context cancellation between and during reads. It borrows the
+// guard's buffer, so extracting one more entry costs no extra memory.
+func copyOut(ctx context.Context, dst io.Writer, src io.Reader, name string, total *int64, lim limits, buf []byte) error {
 	cr := &ctxReader{ctx: ctx, r: src}
-	buf := make([]byte, 32*1024)
 	var fileWritten int64
 	for {
 		n, rerr := cr.Read(buf)

@@ -585,7 +585,7 @@ func TestExtractArchive_ContextCancellation(t *testing.T) {
 		dst := &bytes.Buffer{}
 		done := make(chan error, 1)
 		go func() {
-			done <- copyOut(ctx, dst, &foreverReader{ctx: ctx}, "blocked", &total, defaultLimits)
+			done <- copyOut(ctx, dst, &foreverReader{ctx: ctx}, "blocked", &total, defaultLimits, make([]byte, copyBufferSize))
 		}()
 		cancel()
 		select {
