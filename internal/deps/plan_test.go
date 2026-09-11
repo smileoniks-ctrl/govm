@@ -280,7 +280,7 @@ func TestListDependencyArgsAddsVersionsOnlyOnline(t *testing.T) {
 	if !reflect.DeepEqual(offline, []string{"list", "-mod=readonly", "-m", "-json", "all"}) {
 		t.Fatalf("offline args = %v", offline)
 	}
-	if !reflect.DeepEqual(online, []string{"list", "-mod=readonly", "-m", "-json", "-u", "-versions", "all"}) {
+	if !reflect.DeepEqual(online, []string{"list", "-mod=readonly", "-m", "-json", "-e", "-u", "-versions", "all"}) {
 		t.Fatalf("online args = %v", online)
 	}
 }

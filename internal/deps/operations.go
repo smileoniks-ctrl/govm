@@ -265,11 +265,15 @@ func restoreDependencyBackup(
 
 // listDependencyArgs builds the `go list` argv for loading the module
 // graph. Online checks add -u (Latest) and -versions (candidate list
-// for patch/minor targets, ADR 0003) in one call.
+// for patch/minor targets, ADR 0003) in one call. -versions queries
+// every module in `all`, including the main module, so -e keeps a
+// lookup failure (a main module path without a dot, an unpublished
+// path, an unreachable proxy) inside that module's Error field
+// instead of aborting the whole listing.
 func listDependencyArgs(checkUpdates bool) []string {
 	args := []string{"list", "-mod=readonly", "-m", "-json"}
 	if checkUpdates {
-		args = append(args, "-u", "-versions")
+		args = append(args, "-e", "-u", "-versions")
 	}
 	return append(args, "all")
 }

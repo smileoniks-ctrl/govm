@@ -235,3 +235,24 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 		t.Fatal("expected pre-restore backup to remain after restore failure")
 	}
 }
+
+// TestLoadDependencies_ToleratesUnresolvableMainModule guards the
+// online `go list` invocation against main modules that cannot be
+// looked up in a proxy (a local path without a dot, or an unpublished
+// one). `-versions` queries every module in `all`, including the main
+// module, so without `-e` a lookup failure aborts the whole listing.
+func TestLoadDependencies_ToleratesUnresolvableMainModule(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module temp-logger\n\ngo 1.26\n")
+	writeFile(t, root, "main.go", "package main\n\nfunc main() {}\n")
+	t.Setenv("GOPROXY", "off")
+	t.Setenv("GOFLAGS", "")
+
+	deps, err := loadDependencies(root, true)
+	if err != nil {
+		t.Fatalf("loadDependencies with unresolvable main module: %v", err)
+	}
+	if len(deps) != 0 {
+		t.Fatalf("expected no dependencies, got %v", deps)
+	}
+}
