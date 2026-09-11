@@ -3,7 +3,9 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
@@ -159,6 +161,12 @@ type catalogProjectionAdapter struct {
 func newCatalogProjectionAdapter(theme styles.Theme) catalogProjectionAdapter {
 	available := list.New([]list.Item{}, listDefaultDelegate(theme), 0, 0)
 	available.Title = "Available Versions"
+	available.FilterInput.Prompt = "Find: "
+	// The widget opens its filter on "/" by default; govm exposes the
+	// feature as "f" (see handleFilterKey). The default NextPage binding
+	// also lists "f" and is matched first, so it must drop the key.
+	available.KeyMap.Filter = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "find"))
+	available.KeyMap.NextPage = key.NewBinding(key.WithKeys("right", "l", "pgdown"), key.WithHelp("→/l/pgdn", "next page"))
 	available.SetShowTitle(false)
 	available.SetShowStatusBar(false)
 	available.SetShowHelp(false)
@@ -718,6 +726,25 @@ func (a *catalogProjectionAdapter) updateInstalled(msg tea.Msg) tea.Cmd {
 
 func (a *catalogProjectionAdapter) update(msg tea.Msg) tea.Cmd {
 	return tea.Batch(a.updateAvailable(msg), a.updateInstalled(msg))
+}
+
+// availableSettingFilter reports whether the Available list's filter
+// input currently has focus (the widget calls this "setting the
+// filter"). While true, keys routed to the list reach the input.
+func (a *catalogProjectionAdapter) availableSettingFilter() bool {
+	return a.list.SettingFilter()
+}
+
+// availableFilterApplied reports whether a committed filter is
+// narrowing the Available list.
+func (a *catalogProjectionAdapter) availableFilterApplied() bool {
+	return a.list.FilterState() == list.FilterApplied
+}
+
+// availableFilterSummary returns the committed filter query and the
+// visible/total item counts for the applied-filter indicator line.
+func (a *catalogProjectionAdapter) availableFilterSummary() (query string, visible, total int) {
+	return strings.TrimSpace(a.list.FilterInput.Value()), len(a.list.VisibleItems()), len(a.list.Items())
 }
 
 func (a *catalogProjectionAdapter) setAvailableFilteringEnabled(enabled bool) {

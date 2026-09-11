@@ -300,6 +300,7 @@ func buildAvailable(theme styles.Theme, vs []utils.GoVersion) []list.Item {
 			Name:            v.Version,
 			DescriptionText: v.DisplayDescription(),
 			RenderedTitle:   styles.RenderItemTitle(theme, v.Version, v.Installed, v.Active),
+			RenderedBadges:  styles.RenderItemBadges(theme, v.Installed, v.Active),
 		}
 	}
 	return items

@@ -19,7 +19,7 @@ func TestViewUsesModernZones(t *testing.T) {
 
 	view := stripANSI(m.View().Content)
 
-	for _, want := range []string{"GoVM", "Go Version Manager", "v9.9.9-test", "● Available", "○ Installed", "✓ Successfully installed Go 1.24.4", "i install", "u use", "d delete", "r refresh", "? help", "q / ctrl+c quit"} {
+	for _, want := range []string{"GoVM", "Go Version Manager", "v9.9.9-test", "● Available", "○ Installed", "✓ Successfully installed Go 1.24.4", "i install", "u use", "d delete", "r refresh", "f find", "? help", "q / ctrl+c quit"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("expected view to contain %q, got:\n%s", want, view)
 		}
@@ -119,7 +119,6 @@ func TestSettingsTabRendersRowsAndHelp(t *testing.T) {
 		"Distribution source: https://go.dev/dl/",
 		"↑/↓",
 		"enter",
-		"tab",
 		"q",
 	} {
 		if !strings.Contains(view, want) {

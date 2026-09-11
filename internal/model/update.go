@@ -46,7 +46,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.HelpVisible {
 			return m.handleHelpOverlayKey(msg)
 		}
-		if msg.String() == "?" && !m.inMinimumViewport() {
+		if msg.String() == "?" && !m.filterInputActive() && !m.inMinimumViewport() {
 			m.HelpVisible = true
 			return m, nil
 		}

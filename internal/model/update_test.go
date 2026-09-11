@@ -19,6 +19,7 @@ func TestUpdateKeyStartsFreshPreflight(t *testing.T) {
 	m.Deps.Dependencies = []deps.ModuleDependency{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
 	}
+	m.updateDependencyTable()
 	var issued deps.Intent
 	m.Deps.ExecuteIntent = func(intent deps.Intent) tea.Cmd {
 		issued = intent

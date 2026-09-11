@@ -13,6 +13,7 @@ GoVM is a modern tool for managing multiple Go versions on your system. It featu
 
 - Beautiful TUI built with [Charm Bubbletea v2](https://charm.land/bubbletea/v2) with a responsive layout that adapts to your terminal size (normal and wide breakpoints) and a minimum viewport of 64x20
 - Keyboard shortcut overlay (`?`) that lists every binding of the current context, including the ones the one-line hint bar has no room for
+- Inline fuzzy filter on the Available tab (`f`): type to narrow the version list fzf-style; `enter` applies, `esc` clears
 - Version string shown in the TUI header and CLI help output
 - Command-line interface for quick operations
 - Install any available Go version directly from go.dev
@@ -119,9 +120,12 @@ The TUI header shows the GoVM version so you always know which build is running.
 | `Tab` | Cycle forward between Available, Installed, Deps, and Settings tabs |
 | `Shift+Tab` | Cycle backward to the previous tab (wraps from Available to Settings) |
 | `i` | Install the selected version (Available tab) |
-| `u` | Switch to the selected version (Available tab) or update direct dependencies (Deps tab) |
+| `u` | Switch to the selected version (Available tab) or open the dependency update dialog (Deps tab) |
+| `space` | Mark / unmark the dependency under the cursor for the next update (Deps tab) |
+| `a` | Mark every listed dependency, or clear all marks when any is marked (Deps tab) |
 | `d` | Delete the selected installed version with confirmation (Available/Installed tabs) |
 | `r` | Refresh available versions from go.dev (Available tab) or check for dependency updates online (Deps tab) |
+| `f` | Find in the Available list: type to narrow it live with fuzzy matching, `enter` to apply, `esc` to clear |
 | `b` | List saved dependency backups and choose one to restore (Deps tab) |
 | `↑/↓`, `k/j` | Move the cursor between settings (Settings tab) or between dependency backups in the restore dialog |
 | `enter`/`space` | Toggle the highlighted setting (Settings tab); on the Deps backups row it opens a numeric input dialog |
@@ -129,6 +133,8 @@ The TUI header shows the GoVM version so you always know which build is running.
 | `q`, `ctrl+c` | Quit |
 
 When deleting a version, you will be prompted to confirm with `y` or cancel with `n`. The active version cannot be deleted.
+
+While the filter input is open, every key you type goes into it — including `q` and `?` — so commands, help, and quit are suspended until you press `enter` (apply) or `esc` (clear the filter). `ctrl+c` still quits, and `Tab`/`Shift+Tab` still switch tabs; the filter survives the round trip. An applied filter shows an indicator line (`find: "1.2" · 12/100 · esc clear`) above the list, and commands then act on the filtered selection. Filtering is unavailable while a delete or prune confirmation is pending.
 
 Confirmation dialogs (for dependency updates, post-update checks, and rollback) use the following keys:
 
@@ -186,14 +192,31 @@ The Deps table mirrors the data in the **Installed** tab, which shows three colu
 
 | Key | Action |
 |---|---|
-| `r` | Check for available updates online (runs `go list -u`) |
-| `u` | Open the dependency update confirmation dialog |
+| `r` | Check for available updates online (runs `go list -u -versions`) |
+| `space` | Mark / unmark the dependency under the cursor (`●` = marked, `○` = not marked) |
+| `a` | Mark every listed dependency; if anything is already marked, clear all marks instead |
+| `u` | Open the update dialog. The **scope** starts at `Marked` when anything is marked and at `All` otherwise; `space` inside the dialog switches between them |
 | `b` | List saved dependency backups and choose one to restore |
 
-Pressing `u` on the Deps tab opens a confirmation dialog that lists every direct dependency that will be upgraded, e.g.:
+Marks belong to the module, not to the row: they survive `r`, theme changes and the
+`Direct only` / `All` display toggle, and they are cleared once an update finishes.
+Cancelling the dialog keeps them. Marking an indirect dependency (visible with
+`Deps display: All`) is allowed; `a` marks whatever rows the display mode shows.
+Marked modules that are already current are simply left out of the plan.
+
+Pressing `u` runs a fresh online check and opens a confirmation dialog with the
+**update plan**. `↑/↓` (or `k/j`) cycle the **update level**: `Patch` keeps the
+same major.minor, `Minor` keeps the same major, `Latest` (the default) takes
+whatever `go list -u` reports. `space` toggles the **update scope**: `All`
+covers every direct dependency, `Marked (n)` only the marked ones (or
+`Current`, the dependency under the cursor, when nothing is marked). The list
+is recomputed as you switch either one:
 
 ```
 ⚠ Warning
+
+Level:  Patch   Minor  [Latest]
+Scope: [All]    Marked (2)
 
 3 direct dependencies will be updated:
   github.com/foo/bar: v1.2.3 -> v1.3.0
@@ -204,10 +227,14 @@ go.mod and go.sum will be modified.
 A snapshot is taken before the update so changes can be rolled back.
 ```
 
+If nothing qualifies at the chosen level and scope the dialog says so;
+confirming then ends without changes. Pre-release versions are only offered when the current
+version is itself a pre-release.
+
 Once you confirm, GoVM:
 
 1. Snapshots `go.mod` and `go.sum`.
-2. Runs `go get` for each direct dependency that has an update, then `go mod tidy`.
+2. Runs `go get module@version` for each entry of the plan, then `go mod tidy`.
 3. Refreshes the dependency list and shows a **Run checks?** dialog with the default choice set to **Yes**:
    ```
    ✓ Run checks?
@@ -238,9 +265,26 @@ govm deps list
 # Check for available updates (no changes)
 govm deps check
 
+# Check only for patch (or minor) updates
+govm deps check --patch
+
 # Interactively update direct dependencies, run checks, and roll back
 # on failure (mirrors the TUI Deps tab)
 govm deps update
+
+# Update only the named modules: a full module path or a unique
+# trailing suffix (spf13/cobra, cobra). Indirect modules are allowed.
+govm deps update spf13/cobra golang.org/x/text
+
+# Only patch / only minor updates (same as the TUI level selector)
+govm deps update --patch
+govm deps update --minor cobra
+
+# Print the update plan and stop; nothing is changed, nobody is asked
+govm deps update --dry-run --patch
+
+# Answer yes to every prompt (apply, run checks, roll back on failure)
+govm deps update -y cobra
 
 # List saved dependency backups for the current module
 govm deps backups
@@ -251,7 +295,13 @@ govm deps restore <file>
 
 `govm deps update` prompts for confirmation before each step. The default
 for every prompt is `Y` (yes), including the rollback prompt, matching
-the TUI behaviour where the safe option is the default.
+the TUI behaviour where the safe option is the default. `--yes` / `-y`
+takes those defaults without asking; `--dry-run` wins over `--yes`.
+Flags may appear anywhere on the line; `--patch` and `--minor` are
+mutually exclusive. A named module that is already up to date is not an
+error (exit code 0); an unknown or ambiguous module name is (exit code 1),
+and the ambiguity message lists the candidates. `deps` subcommands exit
+non-zero on any failure, including when run outside a Go module.
 
 Backup filenames are listed by `govm deps backups` and are stored under
 `~/.govm/deps_backup` in a module-specific directory. Before restoring a

@@ -16,19 +16,31 @@ import (
 // in handleUpdateConfirmKey and short-circuits this path.
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "ctrl+c":
 		return m, tea.Quit
+	case "q":
+		// While the filter input has focus, q is ordinary input and
+		// must reach the input instead of quitting.
+		if !m.filterInputActive() {
+			return m, tea.Quit
+		}
 	case "tab":
 		return m.handleTabKey()
 	case "shift+tab":
 		return m.handleShiftTabKey()
+	}
+	// The filter input owns the keyboard while it has focus: every
+	// remaining key is delivered to the list, which forwards it to
+	// the input. Commands stay unreachable until the input closes.
+	if m.filterInputActive() {
+		return m, m.projection.updateAvailable(msg)
 	}
 	if m.CurrentTab == SettingsTab {
 		return m.handleSettingsKey(msg)
 	}
 	if m.CurrentTab == DepsTab && m.Deps.operationInProgress() {
 		switch msg.String() {
-		case "u", "r", "b":
+		case "u", "r", "b", "space", "a":
 			return m, nil
 		}
 	}
@@ -51,6 +63,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleDeleteKey()
 	case "p":
 		return m.handlePruneKey()
+	case "f":
+		return m.handleFilterKey(msg)
+	case "esc":
+		return m.handleFilterClearKey(msg)
 	case "y", "Y":
 		if m.Prune.Confirming() {
 			return m.handlePruneConfirmYes()
@@ -81,6 +97,14 @@ func (m *Model) handleHelpOverlayKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.CurrentTab == DepsTab {
+		switch msg.String() {
+		case "space":
+			return m.handleMarkKey()
+		case "a":
+			return m.handleMarkAllKey()
+		}
+	}
 	switch msg.String() {
 	case "up", "down", "k", "j":
 	default:
@@ -96,6 +120,43 @@ func (m *Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cm
 		var cmd tea.Cmd
 		m.Deps.Table, cmd = m.Deps.Table.Update(msg)
 		return m, cmd
+	}
+	return m, nil
+}
+
+// filterInputActive reports whether the Available tab's filter input
+// has focus. The input is a keyboard-owning mode: while active, every
+// ordinary key (including q and ?) is filter text rather than a
+// command. Switching tabs suspends, but does not cancel, the mode.
+//
+// The pointer receiver is deliberate: this runs on every key press,
+// and a value receiver would copy the entire Model each time.
+func (m *Model) filterInputActive() bool {
+	return m.CurrentTab == AvailableTab && m.projection.availableSettingFilter()
+}
+
+// handleFilterKey opens the Available list's inline filter input by
+// handing the key to the list widget (its Filter binding, rebound to "f"). The key is
+// inert off the Available tab, while an inline confirmation is pending
+// (it owns the keyboard until answered), and below the minimum
+// terminal size where the input would not render. An empty catalog
+// needs no guard of its own: the widget disables its filter binding.
+func (m *Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.CurrentTab != AvailableTab ||
+		m.ConfirmingDelete ||
+		m.Prune.Confirming() ||
+		m.inMinimumViewport() {
+		return m, nil
+	}
+	return m, m.projection.updateAvailable(msg)
+}
+
+// handleFilterClearKey routes esc to the list while a committed filter
+// narrows it, clearing the filter. esc is inert on the main surface in
+// every other state, so the key is claimed only here.
+func (m *Model) handleFilterClearKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.CurrentTab == AvailableTab && m.projection.availableFilterApplied() {
+		return m, m.projection.updateAvailable(msg)
 	}
 	return m, nil
 }
@@ -194,18 +255,54 @@ func (m *Model) handleUseKey() (tea.Model, tea.Cmd) {
 		return m, m.activateVersionCmd(operation.id, v.Version)
 	}
 	if m.CurrentTab == DepsTab && m.Deps.Loaded {
-		return m.startUpdateCycle()
+		selection, ok := m.Deps.updateSelection()
+		if !ok {
+			m.Status.SetTab("Nothing to update.", "warning")
+			return m, nil
+		}
+		return m.startUpdateCycle(selection)
 	}
 	return m, nil
 }
 
-// startUpdateCycle begins a fresh dependency update cycle: it creates a
-// new Cycle, feeds StartEvent, and returns the tea.Cmd that runs the
-// initial check-updates intent through the execution seam. The update
-// confirmation dialog only opens after the fresh check completes.
-func (m *Model) startUpdateCycle() (tea.Model, tea.Cmd) {
+// handleMarkKey toggles the Mark on the module under the cursor.
+func (m *Model) handleMarkKey() (tea.Model, tea.Cmd) {
+	if !m.Deps.Loaded {
+		return m, nil
+	}
+	d, ok := m.Deps.cursorDependency()
+	if !ok {
+		return m, nil
+	}
+	m.Deps.ToggleMark(d.Path)
+	m.updateDependencyTable()
+	return m, nil
+}
+
+// handleMarkAllKey marks every listed dependency, or clears all marks
+// when any exist.
+func (m *Model) handleMarkAllKey() (tea.Model, tea.Cmd) {
+	if !m.Deps.Loaded {
+		return m, nil
+	}
+	added := m.Deps.ToggleMarkAll()
+	m.updateDependencyTable()
+	if n := len(m.Deps.MarkedPaths()); added {
+		m.Status.SetTab(fmt.Sprintf("Marked %d %s.", n, deps.Pluralize(n, "dependency", "dependencies")), "info")
+	} else {
+		m.Status.SetTab("Marks cleared.", "info")
+	}
+	return m, nil
+}
+
+// startUpdateCycle begins a fresh dependency update cycle for the
+// given selection: it creates a new Cycle, feeds StartEvent, and
+// returns the tea.Cmd that runs the initial check-updates intent
+// through the execution seam. The update confirmation dialog only
+// opens after the fresh check completes.
+func (m *Model) startUpdateCycle(selection deps.UpdateSelection) (tea.Model, tea.Cmd) {
 	m.Deps.Cycle = deps.NewUpdateCycle()
-	next, intent, err := m.Deps.Cycle.Handle(deps.StartEvent{ModuleDir: m.Deps.ModuleDir})
+	next, intent, err := m.Deps.Cycle.Handle(deps.StartEvent{ModuleDir: m.Deps.ModuleDir, Selection: selection})
 	if err != nil {
 		m.Status.SetTab("Could not start update.", "error")
 		return m, nil

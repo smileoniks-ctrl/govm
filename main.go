@@ -117,7 +117,9 @@ func handleCommandLine(app *cli.App) int {
 			app.DepsCommand("help")
 			return 0
 		}
-		app.DepsCommand(os.Args[2:]...)
+		if !app.DepsCommand(os.Args[2:]...) {
+			return 1
+		}
 	case "help":
 		printUsage()
 	default:
@@ -138,8 +140,8 @@ func printUsage() {
 	fmt.Println("  govm prune [options]   Remove inactive versions and temporary downloads")
 	fmt.Println("  govm source <url>      Change the toolchain distribution source")
 	fmt.Println("  govm deps list         List current module dependencies")
-	fmt.Println("  govm deps check        Check for available dependency updates")
-	fmt.Println("  govm deps update       Update direct dependencies (interactive)")
+	fmt.Println("  govm deps check        Check for available dependency updates (--patch, --minor)")
+	fmt.Println("  govm deps update       Update dependencies (interactive; see 'govm deps help')")
 	fmt.Println("  govm deps backups      List saved dependency backups")
 	fmt.Println("  govm deps restore <file> Restore a saved dependency backup")
 	fmt.Println("  govm help              Show this help message")
@@ -147,6 +149,7 @@ func printUsage() {
 	fmt.Println("  govm install 1.21      Install Go 1.21.x (latest)")
 	fmt.Println("  govm use 1.20          Switch to Go 1.20.x (latest)")
 	fmt.Println("  govm deps update       Update direct deps in the current module")
+	fmt.Println("  govm deps update --patch spf13/cobra   Patch-update one dependency")
 }
 
 func loadTUISettings(stderr io.Writer, load func() (string, config.Settings, error)) (string, config.Settings) {

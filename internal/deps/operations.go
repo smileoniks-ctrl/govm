@@ -263,14 +263,19 @@ func restoreDependencyBackup(
 	}, nil
 }
 
-func loadDependencies(moduleDir string, checkUpdates bool) ([]ModuleDependency, error) {
+// listDependencyArgs builds the `go list` argv for loading the module
+// graph. Online checks add -u (Latest) and -versions (candidate list
+// for patch/minor targets, ADR 0003) in one call.
+func listDependencyArgs(checkUpdates bool) []string {
 	args := []string{"list", "-mod=readonly", "-m", "-json"}
 	if checkUpdates {
-		args = append(args, "-u")
+		args = append(args, "-u", "-versions")
 	}
-	args = append(args, "all")
+	return append(args, "all")
+}
 
-	cmd := exec.Command("go", args...)
+func loadDependencies(moduleDir string, checkUpdates bool) ([]ModuleDependency, error) {
+	cmd := exec.Command("go", listDependencyArgs(checkUpdates)...)
 	cmd.Dir = moduleDir
 
 	output, err := cmd.Output()
@@ -298,6 +303,7 @@ func loadDependencies(moduleDir string, checkUpdates bool) ([]ModuleDependency, 
 			Update *struct {
 				Version string
 			}
+			Versions []string
 		}
 		if err := dec.Decode(&raw); err != nil {
 			return nil, fmt.Errorf("failed to parse go list output: %w", err)
@@ -323,6 +329,9 @@ func loadDependencies(moduleDir string, checkUpdates bool) ([]ModuleDependency, 
 
 		if raw.Update != nil {
 			d.Latest = raw.Update.Version
+		}
+		if len(raw.Versions) > 0 {
+			d.Versions = raw.Versions
 		}
 
 		deps = append(deps, d)

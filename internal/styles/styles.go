@@ -15,6 +15,12 @@ type Item struct {
 	Name            string
 	DescriptionText string
 	RenderedTitle   string
+	// RenderedBadges holds the pre-rendered status badges alone (no
+	// version name). The Available list delegate appends it to a
+	// freshly highlighted Name while a filter is active, because match
+	// highlighting must never run over RenderedTitle: its ANSI codes
+	// would be split mid-sequence.
+	RenderedBadges string
 }
 
 // Title returns the pre-rendered title. bubbles/list.DefaultDelegate
@@ -41,7 +47,20 @@ func (i Item) Description() string {
 // applicable. It is the single owner of the title format and is
 // called once per item per list rebuild, not per frame.
 func RenderItemTitle(t Theme, name string, installed, active bool) string {
-	parts := []string{t.ItemVersionStyle.Render(name)}
+	title := t.ItemVersionStyle.Render(name)
+	if badges := RenderItemBadges(t, installed, active); badges != "" {
+		title += " " + badges
+	}
+	return title
+}
+
+// RenderItemBadges produces the styled "active" / "installed" badges
+// for a list row, space-separated, or "" when neither applies. It is
+// the badge half of RenderItemTitle so the list delegate can rebuild a
+// title around a highlighted version name without re-deriving the
+// badge format.
+func RenderItemBadges(t Theme, installed, active bool) string {
+	var parts []string
 	if active {
 		parts = append(parts, t.ActiveBadgeStyle.Render("active"))
 	}

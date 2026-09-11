@@ -30,12 +30,15 @@ type helpSection struct {
 
 // globalKeyBindings lists the keys that work on every tab. They are
 // appended to every tab's Help overlay and (when short) to every
-// tab's hint bar.
+// tab's hint bar. Tab is overlay-only: with the Available filter key
+// in the bar, showing "tab next tab" too would push the quit hint out
+// of an 80-column terminal, and Tab navigation is standard TUI
+// convention the overlay still documents.
 func globalKeyBindings() helpSection {
 	return helpSection{
 		title: "Global",
 		bindings: []keyBinding{
-			{keys: "tab", desc: "next tab", short: true},
+			{keys: "tab", desc: "next tab"},
 			{keys: "shift+tab", desc: "previous tab"},
 			{keys: "?", desc: "help", short: true},
 			{keys: "q / ctrl+c", desc: "quit", short: true},
@@ -71,6 +74,7 @@ func tabKeyBindings(tab int) helpSection {
 				{keys: "u", desc: "use", short: true},
 				{keys: "d", desc: "delete", short: true},
 				{keys: "r", desc: "refresh", short: true},
+				{keys: "f", desc: "find", short: true},
 				move,
 			},
 		}
@@ -89,6 +93,8 @@ func tabKeyBindings(tab int) helpSection {
 			title: "Deps",
 			bindings: []keyBinding{
 				{keys: "r", desc: "check updates", short: true},
+				{keys: "space", desc: "mark", short: true},
+				{keys: "a", desc: "mark all / none", short: true},
 				{keys: "u", desc: "update", short: true},
 				{keys: "b", desc: "backups", short: true},
 				move,
@@ -119,6 +125,10 @@ func dialogKeyBindings(dialog ConfirmDialog) helpSection {
 	switch dialog.Kind {
 	case DialogUpdate:
 		title = "Update dependencies"
+		bindings = append(bindings, keyBinding{keys: "↑/↓ k/j", desc: "level", short: true})
+		if dialog.CanToggleScope() {
+			bindings = append(bindings, keyBinding{keys: "space", desc: "scope", short: true})
+		}
 	case DialogChecks:
 		title = "Run checks"
 		escDesc = "skip"
@@ -187,6 +197,23 @@ func editingKeyBindings(editingSource bool) helpSection {
 		bindings: []keyBinding{
 			{keys: "enter", desc: "save", short: true},
 			{keys: "esc", desc: "cancel", short: true},
+		},
+	}
+}
+
+// filterInputKeyBindings is the bar-only section shown while the
+// Available list's filter input has focus. q and ? are deliberately
+// absent: they are ordinary input characters while typing. The Help
+// overlay cannot open in this state (? is ordinary input there), so these
+// bindings never appear in the overlay.
+func filterInputKeyBindings() helpSection {
+	return helpSection{
+		title: "Find input",
+		bindings: []keyBinding{
+			{keys: "enter", desc: "apply", short: true},
+			{keys: "esc", desc: "clear", short: true},
+			{keys: "tab", desc: "next tab", short: true},
+			{keys: "ctrl+c", desc: "quit", short: true},
 		},
 	}
 }

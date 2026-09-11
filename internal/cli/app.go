@@ -11,6 +11,7 @@ import (
 
 	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
 	"github.com/smileoniks-ctrl/govm/internal/application"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
@@ -325,29 +326,50 @@ func pruneRemovedBytes(result prune.Result) int64 {
 	return total
 }
 
-// DepsCommand routes `govm deps <subcommand>`.
-func (a *App) DepsCommand(args ...string) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(a.out, "❌ Error getting working directory: %v\n", err)
-		return
-	}
+// DepsCommand routes `govm deps <subcommand>` and reports whether it
+// succeeded so the caller can map failure to a non-zero exit code.
+func (a *App) DepsCommand(args ...string) bool {
 	subcommand := "help"
 	if len(args) > 0 {
 		subcommand = args[0]
 	}
+	switch subcommand {
+	case "help", "-h", "--help":
+		printDepsUsage(a.out)
+		return true
+	case "list", "check", "update", "backups", "restore":
+	default:
+		fmt.Fprintf(a.out, "Unknown deps subcommand: %s\n", subcommand)
+		fmt.Fprintln(a.out, "Run 'govm deps help' for usage.")
+		return false
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(a.out, "❌ Error getting working directory: %v\n", err)
+		return false
+	}
 	service, err := NewDepsService(cwd, a.out, a.in)
 	if err != nil {
 		fmt.Fprintf(a.out, "❌ Error: %v\n", err)
-		return
+		return false
 	}
 	switch subcommand {
 	case "list":
 		err = service.RunList()
 	case "check":
-		err = service.RunCheck()
+		level, parseErr := parseDepsCheckArgs(args[1:])
+		if parseErr != nil {
+			fmt.Fprintf(a.out, "Error: %v\n", parseErr)
+			return false
+		}
+		err = service.RunCheck(level)
 	case "update":
-		err = service.RunUpdate()
+		opts, parseErr := parseDepsUpdateArgs(args[1:])
+		if parseErr != nil {
+			fmt.Fprintf(a.out, "Error: %v\n", parseErr)
+			return false
+		}
+		err = service.RunUpdate(opts)
 	case "backups":
 		err = service.RunBackups()
 	case "restore":
@@ -356,20 +378,109 @@ func (a *App) DepsCommand(args ...string) {
 			name = args[1]
 		}
 		err = service.RunRestore(name)
-	case "help", "-h", "--help":
-		fmt.Fprintln(a.out, "Usage:")
-		fmt.Fprintln(a.out, "  govm deps list              List current module dependencies")
-		fmt.Fprintln(a.out, "  govm deps check             Check for available dependency updates")
-		fmt.Fprintln(a.out, "  govm deps update            Update direct dependencies (interactive)")
-		fmt.Fprintln(a.out, "  govm deps backups           List dependency backups")
-		fmt.Fprintln(a.out, "  govm deps restore <file>    Restore dependency backup")
-		return
-	default:
-		fmt.Fprintf(a.out, "Unknown deps subcommand: %s\n", subcommand)
-		fmt.Fprintln(a.out, "Run 'govm deps help' for usage.")
-		return
 	}
 	if err != nil {
 		fmt.Fprintf(a.out, "❌ %s\n", err)
+		return false
 	}
+	return true
+}
+
+func printDepsUsage(out io.Writer) {
+	fmt.Fprintln(out, "Usage:")
+	fmt.Fprintln(out, "  govm deps list                          List current module dependencies")
+	fmt.Fprintln(out, "  govm deps check [--patch|--minor]       Check for available dependency updates")
+	fmt.Fprintln(out, "  govm deps update [options] [module...]  Update dependencies (interactive)")
+	fmt.Fprintln(out, "  govm deps backups                       List dependency backups")
+	fmt.Fprintln(out, "  govm deps restore <file>                Restore dependency backup")
+	fmt.Fprintln(out, "")
+	fmt.Fprintln(out, "Update options:")
+	fmt.Fprintln(out, "  --patch        Only patch updates (same major.minor)")
+	fmt.Fprintln(out, "  --minor        Only minor and patch updates (same major)")
+	fmt.Fprintln(out, "  --dry-run      Print the update plan without changing anything")
+	fmt.Fprintln(out, "  -y, --yes      Answer yes to every prompt (apply, checks, rollback)")
+	fmt.Fprintln(out, "  module...      Update only these modules (full path or unique suffix,")
+	fmt.Fprintln(out, "                 e.g. spf13/cobra); without modules every direct dependency")
+}
+
+// parseDepsUpdateArgs parses `govm deps update` options and module
+// queries. Flags may appear anywhere; --patch and --minor are mutually
+// exclusive.
+func parseDepsUpdateArgs(args []string) (UpdateOptions, error) {
+	var opts UpdateOptions
+	level, modules, err := parseDepsLevelArgs(args, func(arg string) (bool, error) {
+		switch arg {
+		case "--dry-run":
+			opts.DryRun = true
+		case "--yes", "-y":
+			opts.Yes = true
+		case "--help", "-h":
+			return false, errors.New("usage: govm deps update [--patch|--minor] [--dry-run] [--yes] [module...]")
+		default:
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		return UpdateOptions{}, err
+	}
+	opts.Level = level
+	opts.Modules = modules
+	return opts, nil
+}
+
+// parseDepsCheckArgs parses `govm deps check` options (level only).
+func parseDepsCheckArgs(args []string) (deps.UpdateLevel, error) {
+	level, modules, err := parseDepsLevelArgs(args, func(arg string) (bool, error) {
+		if arg == "--help" || arg == "-h" {
+			return false, errors.New("usage: govm deps check [--patch|--minor]")
+		}
+		return false, nil
+	})
+	if err != nil {
+		return deps.LevelLatest, err
+	}
+	if len(modules) > 0 {
+		return deps.LevelLatest, fmt.Errorf("unexpected argument %q", modules[0])
+	}
+	return level, nil
+}
+
+// parseDepsLevelArgs handles the shared --patch/--minor flags, hands
+// every other dash-prefixed argument to extra, and collects the rest
+// as positional module queries.
+func parseDepsLevelArgs(args []string, extra func(string) (bool, error)) (deps.UpdateLevel, []string, error) {
+	level := deps.LevelLatest
+	levelSet := false
+	var modules []string
+	setLevel := func(l deps.UpdateLevel) error {
+		if levelSet && l != level {
+			return errors.New("--patch and --minor are mutually exclusive")
+		}
+		level, levelSet = l, true
+		return nil
+	}
+	for _, arg := range args {
+		switch {
+		case arg == "--patch":
+			if err := setLevel(deps.LevelPatch); err != nil {
+				return deps.LevelLatest, nil, err
+			}
+		case arg == "--minor":
+			if err := setLevel(deps.LevelMinor); err != nil {
+				return deps.LevelLatest, nil, err
+			}
+		case strings.HasPrefix(arg, "-"):
+			handled, err := extra(arg)
+			if err != nil {
+				return deps.LevelLatest, nil, err
+			}
+			if !handled {
+				return deps.LevelLatest, nil, fmt.Errorf("unknown deps option %q", arg)
+			}
+		default:
+			modules = append(modules, arg)
+		}
+	}
+	return level, modules, nil
 }

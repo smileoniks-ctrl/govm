@@ -65,6 +65,7 @@ func TestDepsTabGlobalUOpensUpdateConfirmationForDirectUpdate(t *testing.T) {
 	m.Deps.Dependencies = []coredeps.ModuleDependency{
 		{Path: "example.com/direct", Version: "v1.0.0", Latest: "v1.1.0"},
 	}
+	m.updateDependencyTable()
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)

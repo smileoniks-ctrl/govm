@@ -11,10 +11,13 @@ import (
 )
 
 func TestRenderDependencyUpdateDialogContainsWarning(t *testing.T) {
-	dialog := stripANSI(ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}.
-		Render(testTheme(), DepsState{}, viewportSize{Width: 64, Height: 20}))
+	dialog := stripANSI(ConfirmDialog{
+		Kind:          DialogUpdate,
+		ChoiceYes:     true,
+		UpdateEntries: []coredeps.DependencyUpdateEntry{{Path: "example.com/lib", OldVersion: "v1.0.0", NewVersion: "v1.1.0"}},
+	}.Render(testTheme(), DepsState{}, viewportSize{Width: 64, Height: 20}))
 
-	for _, want := range []string{"Warning", "will be updated", "Yes", "No"} {
+	for _, want := range []string{"Warning", "Level:", "Patch", "Minor", "Latest", "Scope:", "All", "will be updated", "Yes", "No"} {
 		if !strings.Contains(dialog, want) {
 			t.Fatalf("expected dialog to contain %q, got:\n%s", want, dialog)
 		}

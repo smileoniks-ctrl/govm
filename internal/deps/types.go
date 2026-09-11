@@ -10,6 +10,10 @@ type ModuleDependency struct {
 	Indirect   bool
 	Deprecated string
 	Error      string
+	// Versions lists the known versions of the module (from
+	// `go list -m -versions`), used to resolve patch/minor targets.
+	// Empty when the list was loaded offline.
+	Versions []string
 }
 
 // DependencyUpdateResult describes a completed direct-dependency update.
@@ -63,20 +67,11 @@ type DependencySnapshot struct {
 	Updatable []DependencyUpdateEntry
 }
 
-// DirectDependencyUpdateEntries returns immutable update entries for
-// direct dependencies that have an available update.
+// DirectDependencyUpdateEntries returns update entries for every
+// direct dependency that has an available update at LevelLatest. It is
+// BuildUpdatePlan with an empty selection.
 func DirectDependencyUpdateEntries(deps []ModuleDependency) []DependencyUpdateEntry {
-	var entries []DependencyUpdateEntry
-	for _, d := range deps {
-		if d.Indirect || d.Error != "" || d.Latest == "" || d.Latest == d.Version {
-			continue
-		}
-		entries = append(entries, DependencyUpdateEntry{
-			Path:       d.Path,
-			OldVersion: d.Version,
-			NewVersion: d.Latest,
-		})
-	}
+	entries, _ := BuildUpdatePlan(deps, UpdateSelection{})
 	return entries
 }
 

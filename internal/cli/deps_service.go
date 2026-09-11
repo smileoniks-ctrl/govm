@@ -152,10 +152,10 @@ func (s *DepsService) RunList() error {
 	return nil
 }
 
-// RunCheck prints the dependencies and marks available updates. The
-// check is performed through the ExecuteIntent seam so RunCheck and
-// RunUpdate share the same deps.Executor.
-func (s *DepsService) RunCheck() error {
+// RunCheck prints the dependencies and marks available updates at the
+// given level. The check is performed through the ExecuteIntent seam
+// so RunCheck and RunUpdate share the same deps.Executor.
+func (s *DepsService) RunCheck(level deps.UpdateLevel) error {
 	event, err := s.ExecuteIntent(deps.IntentCheckUpdates{})
 	if err != nil {
 		return fmt.Errorf("failed to check dependencies: %w", err)
@@ -168,7 +168,7 @@ func (s *DepsService) RunCheck() error {
 		return fmt.Errorf("failed to check dependencies: %w", done.Err)
 	}
 	mods := done.Dependencies
-	updates := countDirectUpdates(mods)
+	updates := countDirectUpdates(mods, level)
 	fmt.Fprintf(s.Stdout, "🔍 Checking available updates in %s...\n\n", s.ModuleDir)
 	if len(mods) == 0 {
 		fmt.Fprintln(s.Stdout, "  (no dependencies)")
@@ -176,26 +176,38 @@ func (s *DepsService) RunCheck() error {
 		for _, d := range mods {
 			status := "current"
 			version := d.Version
+			target := deps.TargetVersion(d, level)
 			switch {
 			case d.Error != "":
 				status = "error: " + d.Error
-			case d.Deprecated != "" && d.Latest != "" && d.Latest != d.Version:
+			case d.Deprecated != "" && target != "":
 				status = "update available (deprecated)"
-			case d.Latest != "" && d.Latest != d.Version:
+				version = fmt.Sprintf("%s → %s", d.Version, target)
+			case target != "":
 				status = "update available"
-				version = fmt.Sprintf("%s → %s", d.Version, d.Latest)
+				version = fmt.Sprintf("%s → %s", d.Version, target)
 			case d.Deprecated != "":
 				status = "deprecated"
 			}
 			fmt.Fprintf(s.Stdout, "  %s\t%s\t%s\n", d.Path, version, status)
 		}
 	}
+	suffix := levelSuffix(level)
 	if updates == 0 {
-		fmt.Fprintln(s.Stdout, "\n✅ 0 direct updates available.")
+		fmt.Fprintf(s.Stdout, "\n✅ 0 direct updates available%s.\n", suffix)
 	} else {
-		fmt.Fprintf(s.Stdout, "\n📦 %d direct update(s) available.\n", updates)
+		fmt.Fprintf(s.Stdout, "\n📦 %d direct update(s) available%s.\n", updates, suffix)
 	}
 	return nil
+}
+
+// levelSuffix renders the level qualifier appended to summary lines
+// ("" for latest, " (patch)" otherwise).
+func levelSuffix(level deps.UpdateLevel) string {
+	if level == deps.LevelLatest {
+		return ""
+	}
+	return fmt.Sprintf(" (%s)", level)
 }
 
 // RunBackups prints saved dependency backups for the current module.
@@ -248,8 +260,25 @@ func (s *DepsService) RunRestore(name string) error {
 	return nil
 }
 
-func countDirectUpdates(mods []deps.ModuleDependency) int {
-	return len(deps.DirectDependencyUpdateEntries(mods))
+func countDirectUpdates(mods []deps.ModuleDependency, level deps.UpdateLevel) int {
+	entries, _ := deps.BuildUpdatePlan(mods, deps.UpdateSelection{Level: level})
+	return len(entries)
+}
+
+// UpdateOptions configures RunUpdate. Modules narrows the plan to the
+// named dependencies (exact path or unique suffix; empty = every
+// direct dependency). Level bounds the target versions. DryRun prints
+// the plan and stops before any prompt or change. Yes answers every
+// prompt (apply, checks, rollback) with yes; DryRun wins over Yes.
+type UpdateOptions struct {
+	Modules []string
+	Level   deps.UpdateLevel
+	DryRun  bool
+	Yes     bool
+}
+
+func (o UpdateOptions) selection() deps.UpdateSelection {
+	return deps.UpdateSelection{Modules: o.Modules, Level: o.Level}
 }
 
 // RunUpdate drives the full Dependency Update Cycle synchronously:
@@ -257,21 +286,40 @@ func countDirectUpdates(mods []deps.ModuleDependency) int {
 // The pure deps.UpdateCycle owns all transition logic and outcome
 // classification; this method renders user-facing output and threads
 // confirmations and operational execution through its seams.
-func (s *DepsService) RunUpdate() error {
+func (s *DepsService) RunUpdate(opts UpdateOptions) error {
 	fmt.Fprintf(s.Stdout, "🔍 Checking available updates in %s...\n", s.ModuleDir)
+	confirm := s.Confirm
+	if opts.Yes && !opts.DryRun {
+		confirm = func(string, bool) (bool, error) { return true, nil }
+	}
 	cycle := deps.NewUpdateCycle()
-	c, intent, err := cycle.Handle(deps.StartEvent{ModuleDir: s.ModuleDir})
+	c, intent, err := cycle.Handle(deps.StartEvent{ModuleDir: s.ModuleDir, Selection: opts.selection()})
 	if err != nil {
 		return err
 	}
 	for !c.IsTerminal() {
-		next, nextIntent, advErr := s.advance(c, intent)
+		if confirmApply, ok := intent.(deps.IntentConfirmApply); ok && opts.DryRun {
+			s.renderDryRun(confirmApply)
+			return nil
+		}
+		next, nextIntent, advErr := s.advance(c, intent, confirm)
 		if advErr != nil {
 			return advErr
 		}
 		c, intent = next, nextIntent
 	}
-	return s.renderOutcome(c)
+	return s.renderOutcome(c, opts)
+}
+
+// renderDryRun prints the plan in the `deps check` row format and a
+// summary line, without prompting or applying.
+func (s *DepsService) renderDryRun(i deps.IntentConfirmApply) {
+	fmt.Fprintln(s.Stdout)
+	for _, e := range i.Entries {
+		fmt.Fprintf(s.Stdout, "  %s\t%s → %s\tupdate available\n", e.Path, e.OldVersion, e.NewVersion)
+	}
+	fmt.Fprintf(s.Stdout, "\n📦 %d %s would be updated%s (dry run).\n",
+		len(i.Entries), deps.Pluralize(len(i.Entries), "dependency", "dependencies"), levelSuffix(i.Level))
 }
 
 // advance processes a single intent produced by the cycle.
@@ -279,13 +327,13 @@ func (s *DepsService) RunUpdate() error {
 // operational intents are executed through ExecuteIntent. The
 // returned cycle/intent pair is the result of feeding the resolved
 // event back into deps.UpdateCycle.Handle.
-func (s *DepsService) advance(c deps.UpdateCycle, intent deps.Intent) (deps.UpdateCycle, deps.Intent, error) {
+func (s *DepsService) advance(c deps.UpdateCycle, intent deps.Intent, confirm func(string, bool) (bool, error)) (deps.UpdateCycle, deps.Intent, error) {
 	switch i := intent.(type) {
 	case deps.NoIntent:
 		return c, intent, fmt.Errorf("deps: cycle stalled in phase %s with no intent", c.Phase())
 	case deps.IntentConfirmApply:
 		s.renderApplyConfirm(i)
-		yes, err := s.Confirm("\nApply these updates?", i.DefaultYes)
+		yes, err := confirm("\nApply these updates?", i.DefaultYes)
 		if err != nil {
 			return c, intent, err
 		}
@@ -294,14 +342,14 @@ func (s *DepsService) advance(c deps.UpdateCycle, intent deps.Intent) (deps.Upda
 		updated := i.UpdatedCount
 		fmt.Fprintf(s.Stdout, "✅ Updated %d direct %s.\n",
 			updated, deps.Pluralize(updated, "dependency", "dependencies"))
-		yes, err := s.Confirm("\n🧪 Run checks (go test ./... and go vet ./...)?", i.DefaultYes)
+		yes, err := confirm("\n🧪 Run checks (go test ./... and go vet ./...)?", i.DefaultYes)
 		if err != nil {
 			return c, intent, err
 		}
 		return c.Handle(deps.ConfirmChecksEvent{Yes: yes})
 	case deps.IntentConfirmRollback:
 		s.renderCheckFailure(i)
-		yes, err := s.Confirm("\nRoll back to pre-update state?", i.DefaultYes)
+		yes, err := confirm("\nRoll back to pre-update state?", i.DefaultYes)
 		if err != nil {
 			return c, intent, err
 		}
@@ -321,8 +369,12 @@ func (s *DepsService) advance(c deps.UpdateCycle, intent deps.Intent) (deps.Upda
 // renderApplyConfirm prints the list of entries that will be updated
 // before asking the user to confirm the apply.
 func (s *DepsService) renderApplyConfirm(i deps.IntentConfirmApply) {
-	fmt.Fprintf(s.Stdout, "\n⚠️  %d direct %s will be updated:\n",
-		len(i.Entries), deps.Pluralize(len(i.Entries), "dependency", "dependencies"))
+	kind := "direct "
+	if i.Explicit {
+		kind = ""
+	}
+	fmt.Fprintf(s.Stdout, "\n⚠️  %d %s%s will be updated%s:\n",
+		len(i.Entries), kind, deps.Pluralize(len(i.Entries), "dependency", "dependencies"), levelSuffix(i.Level))
 	for _, e := range i.Entries {
 		fmt.Fprintf(s.Stdout, "  - %s  %s → %s\n", e.Path, e.OldVersion, e.NewVersion)
 	}
@@ -350,10 +402,14 @@ func (s *DepsService) renderCheckFailure(i deps.IntentConfirmRollback) {
 // operational error preserved by the cycle; recovery outcomes also
 // surface the persistent backup metadata so the user can recover
 // manually.
-func (s *DepsService) renderOutcome(c deps.UpdateCycle) error {
+func (s *DepsService) renderOutcome(c deps.UpdateCycle, opts UpdateOptions) error {
 	switch c.Outcome() {
 	case deps.OutcomeNoUpdates:
-		fmt.Fprintln(s.Stdout, "ℹ️  No direct dependency updates available.")
+		if len(opts.Modules) > 0 {
+			fmt.Fprintf(s.Stdout, "ℹ️  Already up to date%s: %s\n", levelSuffix(opts.Level), strings.Join(opts.Modules, ", "))
+			return nil
+		}
+		fmt.Fprintf(s.Stdout, "ℹ️  No direct dependency updates available%s.\n", levelSuffix(opts.Level))
 		return nil
 	case deps.OutcomeApplyCanceled:
 		fmt.Fprintln(s.Stdout, "🛑 Update canceled.")

@@ -37,8 +37,51 @@ func (m *Model) handleDialogKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.applyDialogConfirm()
 	case DialogCancel:
 		return m.applyDialogCancel()
+	case DialogChangeLevel:
+		return m.applyDialogLevelChange()
+	case DialogChangeScope:
+		return m.applyDialogScopeChange()
 	}
 	return m, nil
+}
+
+// applyDialogLevelChange asks the Cycle to rebuild the plan at the
+// level the dialog now shows. The re-emitted IntentConfirmApply
+// replaces the dialog contents; the dialog stays open.
+func (m *Model) applyDialogLevelChange() (tea.Model, tea.Cmd) {
+	if m.Deps.Dialog.Kind != DialogUpdate {
+		return m, nil
+	}
+	return m.rebuildDialogPlan(deps.ChangeLevelEvent{Level: m.Deps.Dialog.Level})
+}
+
+// applyDialogScopeChange asks the Cycle to rebuild the plan for the
+// Update scope the dialog now shows: the explicit module set, or
+// every direct dependency.
+func (m *Model) applyDialogScopeChange() (tea.Model, tea.Cmd) {
+	if m.Deps.Dialog.Kind != DialogUpdate {
+		return m, nil
+	}
+	var modules []string
+	if m.Deps.Dialog.Explicit {
+		modules = m.Deps.Dialog.ExplicitModules
+	}
+	return m.rebuildDialogPlan(deps.ChangeScopeEvent{Modules: modules})
+}
+
+// rebuildDialogPlan feeds a plan-changing event into the Cycle while
+// the update dialog is open. The re-emitted IntentConfirmApply
+// replaces the dialog contents; the dialog stays open.
+func (m *Model) rebuildDialogPlan(event deps.Event) (tea.Model, tea.Cmd) {
+	next, intent, err := m.Deps.Cycle.Handle(event)
+	if err != nil {
+		m.Deps.Cycle = deps.NewUpdateCycle()
+		m.resetDialog()
+		m.Status.SetGlobal(err.Error(), "error")
+		return m, nil
+	}
+	m.Deps.Cycle = next
+	return m.applyCycleIntent(intent)
 }
 
 // applyDialogConfirm dispatches the confirm action. Update/checks/

@@ -43,7 +43,16 @@ func (m Model) View() tea.View {
 
 	switch m.CurrentTab {
 	case AvailableTab:
-		components = append(components, renderContentCanvas(m.projection.availableView(), width, height))
+		content := m.projection.availableView()
+		if filterLine := m.renderAppliedFilterLine(t, width); filterLine != "" {
+			// The indicator borrows one row from the content canvas
+			// so the overall layout height is unchanged.
+			components = append(components, filterLine)
+			content = renderContentCanvas(content, width, maxInt(0, height-1))
+		} else {
+			content = renderContentCanvas(content, width, height)
+		}
+		components = append(components, content)
 	case InstalledTab:
 		components = append(components, renderContentCanvas(m.projection.installedView(), width, height))
 		if m.diskUsage != nil {
@@ -73,6 +82,9 @@ func (m Model) View() tea.View {
 		help = renderKeyHints(t, shortHints([]helpSection{editingKeyBindings(false)}), width)
 	} else if m.Settings.EditingDistributionSource {
 		help = renderKeyHints(t, shortHints([]helpSection{editingKeyBindings(true)}), width)
+	}
+	if m.filterInputActive() {
+		help = renderKeyHints(t, shortHints([]helpSection{filterInputKeyBindings()}), width)
 	}
 	if m.HelpVisible {
 		help = renderKeyHints(t, shortHints([]helpSection{helpOverlayBarBindings()}), width)
@@ -204,6 +216,23 @@ func (m Model) composeStatus() (string, string) {
 		}
 	}
 	return status, statusType
+}
+
+// renderAppliedFilterLine renders the indicator shown while a
+// committed filter narrows the Available list: the query, the visible
+// share of the catalog, and the key that clears it. The widget's own
+// status bar (its default indicator) is hidden, so without this line
+// a shortened list would be indistinguishable from the full catalog.
+func (m Model) renderAppliedFilterLine(t styles.Theme, width int) string {
+	if !m.projection.availableFilterApplied() {
+		return ""
+	}
+	query, visible, total := m.projection.availableFilterSummary()
+	if query == "" {
+		return ""
+	}
+	text := fmt.Sprintf("find: %q · %d/%d · esc clear", query, visible, total)
+	return t.HelpTextStyle.Width(width).Render(text)
 }
 
 func renderHeader(t styles.Theme, width int) string {

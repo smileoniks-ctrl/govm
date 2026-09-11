@@ -34,6 +34,13 @@ type DepsState struct {
 	Backups      []deps.DependencyBackupInfo
 	Dialog       ConfirmDialog
 	Cycle        deps.UpdateCycle
+	// Marks holds the module paths the user marked for the next
+	// update (see CONTEXT.md "Mark"). Keyed by path, never by row,
+	// because the table hides indirect rows and is rebuilt often.
+	Marks map[string]bool
+	// RowPaths maps table row index to module path, refreshed by
+	// updateDependencyTable, so the cursor can be resolved to a module.
+	RowPaths []string
 	// ExecuteIntent is the injectable execution seam that maps an
 	// operational deps.Intent to a tea.Cmd. nil in production (the
 	// adapter builds a real deps.Executor per operation from the
@@ -93,4 +100,96 @@ func (s DepsState) SpinnerText() string {
 // Cycle; cycle errors are handled by the cycle adapter.
 func (s *DepsState) Reset() {
 	s.Phase = OpIdle
+}
+
+// Marked reports whether the module at path carries a Mark.
+func (s DepsState) Marked(path string) bool { return s.Marks[path] }
+
+// ToggleMark flips the Mark on path.
+func (s *DepsState) ToggleMark(path string) {
+	if s.Marks == nil {
+		s.Marks = map[string]bool{}
+	}
+	if s.Marks[path] {
+		delete(s.Marks, path)
+		return
+	}
+	s.Marks[path] = true
+}
+
+// ClearMarks removes every Mark.
+func (s *DepsState) ClearMarks() { s.Marks = nil }
+
+// MarkedPaths returns the marked module paths in dependency-list
+// order. Marks on modules that are no longer listed are ignored.
+func (s DepsState) MarkedPaths() []string {
+	if len(s.Marks) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(s.Marks))
+	for _, d := range s.Dependencies {
+		if s.Marks[d.Path] {
+			paths = append(paths, d.Path)
+		}
+	}
+	return paths
+}
+
+// ToggleMarkAll clears every mark when any exists, otherwise marks
+// every listed row (the rows the current display mode shows). It
+// reports whether marks were added. Whether a marked module actually
+// moves is decided by the update plan.
+func (s *DepsState) ToggleMarkAll() bool {
+	if len(s.MarkedPaths()) > 0 || len(s.RowPaths) == 0 {
+		s.ClearMarks()
+		return false
+	}
+	s.Marks = make(map[string]bool, len(s.RowPaths))
+	for _, p := range s.RowPaths {
+		s.Marks[p] = true
+	}
+	return true
+}
+
+// cursorDependency resolves the table cursor to its module, mapping
+// through RowPaths because hidden indirect rows shift indices.
+func (s DepsState) cursorDependency() (deps.ModuleDependency, bool) {
+	i := s.Table.Cursor()
+	if i < 0 || i >= len(s.RowPaths) {
+		return deps.ModuleDependency{}, false
+	}
+	path := s.RowPaths[i]
+	for _, d := range s.Dependencies {
+		if d.Path == path {
+			return d, true
+		}
+	}
+	return deps.ModuleDependency{}, false
+}
+
+// explicitModules returns the module set behind the explicit Update
+// scope: the marked modules, or the module under the cursor when
+// nothing is marked. nil when neither exists.
+func (s DepsState) explicitModules() []string {
+	if paths := s.MarkedPaths(); len(paths) > 0 {
+		return paths
+	}
+	if d, found := s.cursorDependency(); found {
+		return []string{d.Path}
+	}
+	return nil
+}
+
+// updateSelection builds the selection `u` starts the cycle with. The
+// initial Update scope is "marked" when marks exist and "all direct
+// dependencies" otherwise; the dialog lets the user switch between
+// the two. ok is false when the list is empty.
+func (s DepsState) updateSelection() (sel deps.UpdateSelection, ok bool) {
+	if paths := s.MarkedPaths(); len(paths) > 0 {
+		return deps.UpdateSelection{Modules: paths}, true
+	}
+	if len(s.RowPaths) == 0 {
+		return deps.UpdateSelection{}, false
+	}
+	return deps.UpdateSelection{}, true
 }

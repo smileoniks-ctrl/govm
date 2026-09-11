@@ -122,8 +122,12 @@ type Event interface {
 	eventName() string
 }
 
+// StartEvent begins a cycle. Selection decides which modules the plan
+// covers and at which level; the zero value means "all direct
+// dependencies to Latest".
 type StartEvent struct {
 	ModuleDir string
+	Selection UpdateSelection
 }
 
 func (StartEvent) isEvent()          {}
@@ -143,6 +147,28 @@ type ConfirmApplyEvent struct {
 
 func (ConfirmApplyEvent) isEvent()          {}
 func (ConfirmApplyEvent) eventName() string { return "confirm-apply" }
+
+// ChangeLevelEvent switches the update level while the apply
+// confirmation is pending. The plan is rebuilt from the dependencies
+// already checked and IntentConfirmApply is emitted again, possibly
+// with no entries.
+type ChangeLevelEvent struct {
+	Level UpdateLevel
+}
+
+func (ChangeLevelEvent) isEvent()          {}
+func (ChangeLevelEvent) eventName() string { return "change-level" }
+
+// ChangeScopeEvent switches the update scope while the apply
+// confirmation is pending: Modules names the explicit set to cover,
+// nil means every direct dependency. The level is kept and the plan
+// is rebuilt from the dependencies already checked.
+type ChangeScopeEvent struct {
+	Modules []string
+}
+
+func (ChangeScopeEvent) isEvent()          {}
+func (ChangeScopeEvent) eventName() string { return "change-scope" }
 
 type ApplyUpdatesDoneEvent struct {
 	Snapshot     *DependencySnapshot
@@ -216,10 +242,14 @@ func (IntentCheckUpdates) isIntent()          {}
 func (IntentCheckUpdates) intentName() string { return "check-updates" }
 
 // IntentConfirmApply asks the consumer to confirm applying updates.
-// DefaultYes is always true. Entries is a defensive copy.
+// DefaultYes is always true. Entries is a defensive copy. Level is
+// the update level the entries were built for; Explicit reports
+// whether the selection named specific modules.
 type IntentConfirmApply struct {
 	Entries    []DependencyUpdateEntry
 	DefaultYes bool
+	Level      UpdateLevel
+	Explicit   bool
 }
 
 func (IntentConfirmApply) isIntent()          {}
@@ -303,6 +333,7 @@ type UpdateCycle struct {
 	phase        Phase
 	outcome      Outcome
 	failure      error
+	selection    UpdateSelection
 	dependencies []ModuleDependency
 	entries      []DependencyUpdateEntry
 	snapshot     *DependencySnapshot
@@ -324,6 +355,13 @@ func (c UpdateCycle) IsTerminal() bool { return c.phase == PhaseTerminal }
 // outcomes (OutcomeFailed, OutcomeUpdateFailedRestored,
 // OutcomeRecoveryRequired), or nil otherwise.
 func (c UpdateCycle) Failure() error { return c.failure }
+
+// Selection returns a defensive copy of the selection the cycle was
+// started with (level updated by ChangeLevelEvent, modules by
+// ChangeScopeEvent).
+func (c UpdateCycle) Selection() UpdateSelection {
+	return cloneSelection(c.selection)
+}
 
 func (c UpdateCycle) Dependencies() []ModuleDependency {
 	return cloneDeps(c.dependencies)
@@ -367,6 +405,10 @@ func (c UpdateCycle) Handle(event Event) (UpdateCycle, Intent, error) {
 		return c.handleCheckUpdatesDone(e)
 	case ConfirmApplyEvent:
 		return c.handleConfirmApply(e)
+	case ChangeLevelEvent:
+		return c.handleChangeLevel(e)
+	case ChangeScopeEvent:
+		return c.handleChangeScope(e)
 	case ApplyUpdatesDoneEvent:
 		return c.handleApplyUpdatesDone(e)
 	case CompensateDoneEvent:
@@ -394,6 +436,7 @@ func (c UpdateCycle) handleStart(e StartEvent) (UpdateCycle, Intent, error) {
 	}
 	next := c
 	next.phase = PhaseChecking
+	next.selection = cloneSelection(e.Selection)
 	return next, IntentCheckUpdates{}, nil
 }
 
@@ -408,16 +451,70 @@ func (c UpdateCycle) handleCheckUpdatesDone(e CheckUpdatesDoneEvent) (UpdateCycl
 	}
 	next := c
 	next.dependencies = cloneDeps(e.Dependencies)
-	entries := DirectDependencyUpdateEntries(e.Dependencies)
+	entries, err := BuildUpdatePlan(e.Dependencies, c.selection)
+	if err != nil {
+		next = next.terminal(OutcomeFailed)
+		next.failure = err
+		return next, NoIntent{}, nil
+	}
 	next.entries = cloneEntries(entries)
 	if len(entries) == 0 {
 		return next.terminal(OutcomeNoUpdates), NoIntent{}, nil
 	}
 	next.phase = PhaseConfirmApply
-	return next, IntentConfirmApply{
-		Entries:    cloneEntries(entries),
+	return next, next.confirmApplyIntent(), nil
+}
+
+func (c UpdateCycle) confirmApplyIntent() IntentConfirmApply {
+	return IntentConfirmApply{
+		Entries:    cloneEntries(c.entries),
 		DefaultYes: true,
-	}, nil
+		Level:      c.selection.Level,
+		Explicit:   c.selection.Explicit(),
+	}
+}
+
+// handleChangeLevel rebuilds the plan at a new level while the apply
+// confirmation is pending. The dependency list was already checked,
+// so no IO is needed. The plan may become empty; confirming an empty
+// plan ends the cycle with OutcomeNoUpdates.
+func (c UpdateCycle) handleChangeLevel(e ChangeLevelEvent) (UpdateCycle, Intent, error) {
+	if c.phase != PhaseConfirmApply {
+		return c, NoIntent{}, InvalidTransitionError{Phase: c.phase, Event: "change-level"}
+	}
+	sel := cloneSelection(c.selection)
+	sel.Level = e.Level
+	return c.rebuildPlan(sel)
+}
+
+// handleChangeScope rebuilds the plan for a different module set while
+// the apply confirmation is pending, keeping the level.
+func (c UpdateCycle) handleChangeScope(e ChangeScopeEvent) (UpdateCycle, Intent, error) {
+	if c.phase != PhaseConfirmApply {
+		return c, NoIntent{}, InvalidTransitionError{Phase: c.phase, Event: "change-scope"}
+	}
+	sel := cloneSelection(c.selection)
+	sel.Modules = nil
+	if len(e.Modules) > 0 {
+		sel.Modules = make([]string, len(e.Modules))
+		copy(sel.Modules, e.Modules)
+	}
+	return c.rebuildPlan(sel)
+}
+
+// rebuildPlan replaces the selection and rebuilds the plan from the
+// checked dependencies, re-emitting IntentConfirmApply.
+func (c UpdateCycle) rebuildPlan(sel UpdateSelection) (UpdateCycle, Intent, error) {
+	next := c
+	next.selection = sel
+	entries, err := BuildUpdatePlan(c.dependencies, sel)
+	if err != nil {
+		next = next.terminal(OutcomeFailed)
+		next.failure = err
+		return next, NoIntent{}, nil
+	}
+	next.entries = cloneEntries(entries)
+	return next, next.confirmApplyIntent(), nil
 }
 
 func (c UpdateCycle) handleConfirmApply(e ConfirmApplyEvent) (UpdateCycle, Intent, error) {
@@ -426,6 +523,9 @@ func (c UpdateCycle) handleConfirmApply(e ConfirmApplyEvent) (UpdateCycle, Inten
 	}
 	if !e.Yes {
 		return c.terminal(OutcomeApplyCanceled), NoIntent{}, nil
+	}
+	if len(c.entries) == 0 {
+		return c.terminal(OutcomeNoUpdates), NoIntent{}, nil
 	}
 	next := c
 	next.phase = PhaseApplying

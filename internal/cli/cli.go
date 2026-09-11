@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/install"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -180,7 +181,7 @@ func DepsCheck(moduleDir string) {
 		fmt.Printf("❌ %s\n", err)
 		return
 	}
-	if err := svc.RunCheck(); err != nil {
+	if err := svc.RunCheck(deps.LevelLatest); err != nil {
 		fmt.Printf("❌ %s\n", err)
 	}
 }
@@ -192,7 +193,7 @@ func DepsUpdate(moduleDir string) {
 		fmt.Printf("❌ %s\n", err)
 		return
 	}
-	if err := svc.RunUpdate(); err != nil {
+	if err := svc.RunUpdate(UpdateOptions{}); err != nil {
 		fmt.Printf("❌ %s\n", err)
 	}
 }

@@ -202,7 +202,7 @@ func TestRunCheckShowsUpdates(t *testing.T) {
 		ExecuteIntent: fx.Execute,
 	}
 
-	if err := svc.RunCheck(); err != nil {
+	if err := svc.RunCheck(deps.LevelLatest); err != nil {
 		t.Fatalf("RunCheck: %v", err)
 	}
 	want := "🔍 Checking available updates in /tmp/m...\n\n" +
@@ -228,7 +228,7 @@ func TestRunCheckExecutorEventError(t *testing.T) {
 		Stdout:        &bytes.Buffer{},
 		ExecuteIntent: fx.Execute,
 	}
-	err := svc.RunCheck()
+	err := svc.RunCheck(deps.LevelLatest)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -248,7 +248,7 @@ func TestRunCheckExecuteIntentError(t *testing.T) {
 			return nil, errors.New("boom")
 		},
 	}
-	err := svc.RunCheck()
+	err := svc.RunCheck(deps.LevelLatest)
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("expected boom error, got: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestRunUpdateNoDirectUpdates(t *testing.T) {
 		return deps.CheckUpdatesDoneEvent{Dependencies: currentDeps()}
 	}
 
-	if err := svc.RunUpdate(); err != nil {
+	if err := svc.RunUpdate(UpdateOptions{}); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "No direct dependency updates available") {
@@ -372,7 +372,7 @@ func TestRunUpdateDeclineUpdate(t *testing.T) {
 	svc.Stdin = strings.NewReader("n\n")
 	svc.Confirm = defaultConfirm(svc.Stdin, stdout)
 
-	if err := svc.RunUpdate(); err != nil {
+	if err := svc.RunUpdate(UpdateOptions{}); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
 	want := "🔍 Checking available updates in /tmp/m...\n\n" +
@@ -394,7 +394,7 @@ func TestRunUpdateAcceptUpdateDeclineChecks(t *testing.T) {
 		return confirmCalls == 1, nil // accept apply, decline checks
 	})
 
-	if err := svc.RunUpdate(); err != nil {
+	if err := svc.RunUpdate(UpdateOptions{}); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
 	out := stdout.String()
@@ -413,7 +413,7 @@ func TestRunUpdateAcceptUpdateDeclineChecks(t *testing.T) {
 func TestRunUpdateRunChecksSuccess(t *testing.T) {
 	svc, fx, stdout := newUpdateService(func(string, bool) (bool, error) { return true, nil })
 
-	if err := svc.RunUpdate(); err != nil {
+	if err := svc.RunUpdate(UpdateOptions{}); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "Checks passed") {
@@ -431,7 +431,7 @@ func TestRunUpdateChecksFailAcceptRollback(t *testing.T) {
 		return deps.ChecksDoneEvent{Result: deps.DependencyCheckResult{OK: false, Command: "go test ./...", Output: "FAIL: x"}}
 	}
 
-	if err := svc.RunUpdate(); err != nil {
+	if err := svc.RunUpdate(UpdateOptions{}); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
 	out := stdout.String()
@@ -455,7 +455,7 @@ func TestRunUpdateChecksFailDeclineRollback(t *testing.T) {
 		return deps.ChecksDoneEvent{Result: deps.DependencyCheckResult{OK: false, Command: "go test ./...", Output: "FAIL: x"}}
 	}
 
-	if err := svc.RunUpdate(); err != nil {
+	if err := svc.RunUpdate(UpdateOptions{}); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "Update kept. Failed checks were not rolled back") {
@@ -475,7 +475,7 @@ func TestRunUpdateCheckError(t *testing.T) {
 		return deps.CheckUpdatesDoneEvent{Err: errors.New("boom")}
 	}
 
-	err := svc.RunUpdate()
+	err := svc.RunUpdate(UpdateOptions{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -501,7 +501,7 @@ func TestRunUpdateApplyErrorBeforeMutation(t *testing.T) {
 		return deps.ApplyUpdatesDoneEvent{Err: errors.New("go get failed")}
 	}
 
-	if err := svc.RunUpdate(); err == nil {
+	if err := svc.RunUpdate(UpdateOptions{}); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if fx.checksCalls != 0 || fx.rollbackCalls != 0 || fx.compensateCalls != 0 {
@@ -519,7 +519,7 @@ func TestRunUpdateRollbackErrorRecoveryRequired(t *testing.T) {
 		return deps.RollbackDoneEvent{Err: errors.New("disk full")}
 	}
 
-	err := svc.RunUpdate()
+	err := svc.RunUpdate(UpdateOptions{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -548,7 +548,7 @@ func TestRunUpdateChecksInconclusivePromptsRollback(t *testing.T) {
 		return deps.ChecksDoneEvent{Err: errors.New("resolve failed")}
 	}
 
-	if err := svc.RunUpdate(); err != nil {
+	if err := svc.RunUpdate(UpdateOptions{}); err != nil {
 		t.Fatalf("RunUpdate: %v", err)
 	}
 	out := stdout.String()
@@ -573,7 +573,7 @@ func TestRunUpdateCompensationRestoredIsError(t *testing.T) {
 		}
 	}
 
-	err := svc.RunUpdate()
+	err := svc.RunUpdate(UpdateOptions{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -605,7 +605,7 @@ func TestRunUpdateRecoveryRequiredCompensationFailed(t *testing.T) {
 		return deps.CompensateDoneEvent{Err: errors.New("restore failed")}
 	}
 
-	err := svc.RunUpdate()
+	err := svc.RunUpdate(UpdateOptions{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -631,7 +631,7 @@ func TestRunUpdateExecutorError(t *testing.T) {
 	})
 	fx.execErr = errors.New("executor unavailable")
 
-	err := svc.RunUpdate()
+	err := svc.RunUpdate(UpdateOptions{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

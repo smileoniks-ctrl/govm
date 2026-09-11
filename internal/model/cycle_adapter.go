@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
@@ -36,10 +37,24 @@ func (m *Model) applyCycleIntent(intent deps.Intent) (tea.Model, tea.Cmd) {
 		deps.IntentCompensate, deps.IntentRunChecks, deps.IntentRollback:
 		return m.applyCycleOperational(i)
 	case deps.IntentConfirmApply:
+		choice := i.DefaultYes
+		// The explicit set (marks, else the cursor module) is frozen
+		// for the whole cycle: keys that change marks are inert while
+		// the cycle runs, so reading it here is stable.
+		explicitModules := m.Deps.explicitModules()
+		if m.Deps.Dialog.Kind == DialogUpdate {
+			// A level or scope change re-emits the intent: keep the
+			// button the user had highlighted and the captured set.
+			choice = m.Deps.Dialog.ChoiceYes
+			explicitModules = m.Deps.Dialog.ExplicitModules
+		}
 		m.Deps.Dialog = ConfirmDialog{
-			Kind:          DialogUpdate,
-			ChoiceYes:     i.DefaultYes,
-			UpdateEntries: i.Entries,
+			Kind:            DialogUpdate,
+			ChoiceYes:       choice,
+			UpdateEntries:   i.Entries,
+			Level:           i.Level,
+			Explicit:        i.Explicit,
+			ExplicitModules: explicitModules,
 		}
 		m.Status.Clear()
 		return m, nil
@@ -90,12 +105,19 @@ func (m *Model) applyCycleOperational(intent deps.Intent) (tea.Model, tea.Cmd) {
 // syncs the dependency table, and resets the Cycle to idle.
 func (m *Model) applyCycleTerminal() (tea.Model, tea.Cmd) {
 	c := m.Deps.Cycle
+	// Marks describe the next update; once a cycle has run its course
+	// they are spent. Cancelling in the apply dialog keeps them so the
+	// user can adjust and retry.
+	if c.Outcome() != deps.OutcomeApplyCanceled {
+		m.Deps.ClearMarks()
+		m.updateDependencyTable()
+	}
 	if c.Outcome() != deps.OutcomeRecoveryRequired && c.Outcome() != deps.OutcomeFailed {
 		m.syncDepsFromCycle()
 	}
 	switch c.Outcome() {
 	case deps.OutcomeNoUpdates:
-		m.Status.SetTab("No direct dependency updates available.", "warning")
+		m.Status.SetTab(noUpdatesMessage(c.Selection()), "warning")
 	case deps.OutcomeApplyCanceled:
 		m.Status.SetTab("Update canceled.", "info")
 	case deps.OutcomeUpdatedUnchecked:
@@ -119,6 +141,26 @@ func (m *Model) applyCycleTerminal() (tea.Model, tea.Cmd) {
 	}
 	m.Deps.Cycle = deps.NewUpdateCycle()
 	return m, nil
+}
+
+// noUpdatesMessage renders the no-updates outcome: bulk selections
+// report on direct dependencies, explicit ones name the modules.
+func noUpdatesMessage(sel deps.UpdateSelection) string {
+	suffix := ""
+	if sel.Level != deps.LevelLatest {
+		suffix = fmt.Sprintf(" at the %s level", sel.Level)
+	}
+	if !sel.Explicit() {
+		return fmt.Sprintf("No direct dependency updates available%s.", suffix)
+	}
+	const maxNamed = 3
+	names := sel.Modules
+	extra := ""
+	if len(names) > maxNamed {
+		extra = fmt.Sprintf(" …and %d more", len(names)-maxNamed)
+		names = names[:maxNamed]
+	}
+	return fmt.Sprintf("Already up to date%s: %s%s", suffix, strings.Join(names, ", "), extra)
 }
 
 func cycleUpdateFailedRestoredMessage(c deps.UpdateCycle) string {
