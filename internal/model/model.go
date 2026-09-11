@@ -43,6 +43,10 @@ type Model struct {
 	ShimPathWarning  string
 	ConfirmingDelete bool
 	DeleteVersion    string
+	// HelpVisible reports whether the Help overlay (opened with "?")
+	// is showing. While it is open every key except ?, esc, and
+	// ctrl+c is swallowed, so no action fires underneath it.
+	HelpVisible bool
 	// Prune owns the prune flow (phase plus the plan awaiting
 	// confirmation) as the PruneState value-type module.
 	Prune      PruneState
@@ -224,6 +228,17 @@ func (m Model) viewHeight() int {
 		return available.Height()
 	}
 	return 24
+}
+
+// inMinimumViewport mirrors the View() condition that replaces the
+// whole UI with the minimum-size warning. The Help overlay does not
+// open there: it would not render, and silently remembering an open
+// overlay across a resize would be surprising.
+func (m Model) inMinimumViewport() bool {
+	if m.TermWidth > 0 || m.TermHeight > 0 || (m.Width == 1 && m.Height == 1) {
+		return m.TermWidth < styles.MinTermWidth || m.TermHeight < styles.MinTermHeight
+	}
+	return false
 }
 
 func (m Model) viewWidth() int {

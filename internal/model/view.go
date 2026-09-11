@@ -67,23 +67,15 @@ func (m Model) View() tea.View {
 		width,
 	)
 	if m.Prune.Confirming() {
-		help = renderKeyHints(t, [][2]string{
-			{"y", "confirm"},
-			{"n", "cancel"},
-			{"q", "quit"},
-		}, width)
+		help = renderKeyHints(t, shortHints([]helpSection{confirmPruneKeyBindings(), dialogGlobalKeyBindings()}), width)
 	}
 	if m.Settings.EditingDepsBackupLimit {
-		help = renderKeyHints(t, [][2]string{
-			{"enter", "save"},
-			{"esc", "cancel"},
-		}, width)
+		help = renderKeyHints(t, shortHints([]helpSection{editingKeyBindings(false)}), width)
 	} else if m.Settings.EditingDistributionSource {
-		help = renderKeyHints(t, [][2]string{
-			{"enter", "check and save"},
-			{"r", "reset"},
-			{"esc", "cancel"},
-		}, width)
+		help = renderKeyHints(t, shortHints([]helpSection{editingKeyBindings(true)}), width)
+	}
+	if m.HelpVisible {
+		help = renderKeyHints(t, shortHints([]helpSection{helpOverlayBarBindings()}), width)
 	}
 	components = append(components, help)
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
@@ -96,6 +88,9 @@ func (m Model) View() tea.View {
 		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(t, m.Deps, viewport), viewport)
 	} else if m.Prune.Confirming() {
 		rendered = overlayDialog(rendered, renderPruneDialog(t, m.Prune.Plan(), viewport.Width), viewport)
+	}
+	if m.HelpVisible {
+		rendered = overlayDialog(rendered, renderHelpOverlay(t, m, viewport), viewport)
 	}
 
 	v := tea.NewView(rendered)
@@ -303,88 +298,21 @@ func themeLabel(name config.ThemeName) string {
 	return "Current"
 }
 
+// renderHelp produces the one-line hint bar from the keybinding
+// registry: the short-flagged bindings of the active input context
+// (dependency dialog, delete confirmation, or tab) followed by the
+// short global bindings. The overlay and every other hint variant
+// render from the same registry, so the two can never drift apart.
 func renderHelp(t styles.Theme, currentTab int, confirmingDelete bool, dialog ConfirmDialog, width int) string {
-	var hints [][2]string
-
-	switch dialog.Kind {
-	case DialogUpdate:
-		hints = [][2]string{
-			{"←/→", "choose"},
-			{"enter", "confirm"},
-			{"esc", "cancel"},
-			{"q", "quit"},
-		}
-		return renderKeyHints(t, hints, width)
-	case DialogChecks:
-		hints = [][2]string{
-			{"←/→", "choose"},
-			{"enter", "confirm"},
-			{"esc", "skip"},
-			{"q", "quit"},
-		}
-		return renderKeyHints(t, hints, width)
-	case DialogRollback:
-		hints = [][2]string{
-			{"←/→", "choose"},
-			{"enter", "confirm"},
-			{"q", "quit"},
-		}
-		return renderKeyHints(t, hints, width)
-	case DialogRestore:
-		action := "cancel"
-		if dialog.ChoiceYes {
-			action = "restore"
-		}
-		hints = [][2]string{
-			{"↑/↓", "select"},
-			{"←/→", "choose"},
-			{"enter", action},
-			{"esc", "cancel"},
-		}
-		return renderKeyHints(t, hints, width)
-	}
-
-	if confirmingDelete {
-		hints = [][2]string{
-			{"y", "confirm"},
-			{"n", "cancel"},
-			{"q", "quit"},
-		}
-	} else if currentTab == AvailableTab {
-		hints = [][2]string{
-			{"i", "install"},
-			{"u", "use"},
-			{"d", "delete"},
-			{"r", "refresh"},
-			{"tab", "switch"},
-			{"q", "quit"},
-		}
-	} else if currentTab == DepsTab {
-		hints = [][2]string{
-			{"r", "check updates"},
-			{"u", "update"},
-			{"b", "backups"},
-			{"tab", "switch"},
-			{"q", "quit"},
-		}
-	} else if currentTab == SettingsTab {
-		hints = [][2]string{
-			{"↑/↓", "move"},
-			{"enter", "toggle"},
-			{"tab", "switch"},
-			{"q", "quit"},
-		}
+	var sections []helpSection
+	if dialog.Active() {
+		sections = []helpSection{dialogKeyBindings(dialog), dialogGlobalKeyBindings()}
+	} else if confirmingDelete {
+		sections = []helpSection{confirmDeleteKeyBindings(), dialogGlobalKeyBindings()}
 	} else {
-		hints = [][2]string{
-			{"u", "use"},
-			{"d", "delete"},
-			{"p", "prune"},
-			{"tab", "switch"},
-			{"q", "quit"},
-		}
+		sections = []helpSection{tabKeyBindings(currentTab), globalKeyBindings()}
 	}
-
-	return renderKeyHints(t, hints, width)
+	return renderKeyHints(t, shortHints(sections), width)
 }
 
 func renderKeyHints(t styles.Theme, hints [][2]string, width int) string {

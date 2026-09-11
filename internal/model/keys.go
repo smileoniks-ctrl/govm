@@ -65,6 +65,21 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m.handleActiveComponentKey(msg)
 }
 
+// handleHelpOverlayKey owns the keyboard while the Help overlay is
+// open: ? and esc close it, ctrl+c still quits, and every other key
+// is swallowed so neither the tab underneath nor an open dialog
+// reacts while the overlay is showing.
+func (m *Model) handleHelpOverlayKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "?", "esc":
+		m.HelpVisible = false
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
 func (m *Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "down", "k", "j":

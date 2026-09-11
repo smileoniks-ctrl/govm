@@ -12,6 +12,7 @@ GoVM is a modern tool for managing multiple Go versions on your system. It featu
 ## Features
 
 - Beautiful TUI built with [Charm Bubbletea v2](https://charm.land/bubbletea/v2) with a responsive layout that adapts to your terminal size (normal and wide breakpoints) and a minimum viewport of 64x20
+- Keyboard shortcut overlay (`?`) that lists every binding of the current context, including the ones the one-line hint bar has no room for
 - Version string shown in the TUI header and CLI help output
 - Command-line interface for quick operations
 - Install any available Go version directly from go.dev
@@ -114,6 +115,7 @@ The TUI header shows the GoVM version so you always know which build is running.
 
 | Key | Action |
 |---|---|
+| `?` | Open the keyboard shortcut overlay (works on every tab and above open dialogs; `?` or `esc` closes it, all other keys are ignored while it is open) |
 | `Tab` | Cycle forward between Available, Installed, Deps, and Settings tabs |
 | `Shift+Tab` | Cycle backward to the previous tab (wraps from Available to Settings) |
 | `i` | Install the selected version (Available tab) |
@@ -136,6 +138,7 @@ Confirmation dialogs (for dependency updates, post-update checks, and rollback) 
 | `enter` | Confirm the highlighted choice |
 | `y` | Accept |
 | `n` / `esc` | Cancel or skip (context dependent) |
+| `?` | Open the keyboard shortcut overlay for the open dialog |
 
 ### Command Line Interface
 

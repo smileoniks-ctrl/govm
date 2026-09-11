@@ -43,6 +43,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		if m.HelpVisible {
+			return m.handleHelpOverlayKey(msg)
+		}
+		if msg.String() == "?" && !m.inMinimumViewport() {
+			m.HelpVisible = true
+			return m, nil
+		}
 		if m.Deps.Dialog.Active() {
 			return m.handleDialogKey(msg)
 		}
