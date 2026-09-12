@@ -42,6 +42,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		TargetOS:    "darwin",
 		GovmVersion: "test",
+		HTTPClient:  catalogDoer(),
 	}
 	return f
 }
@@ -148,7 +149,7 @@ func TestHealthyLayoutIsAllOK(t *testing.T) {
 	want := []string{
 		CheckShimInPath, CheckGoResolvesToShim, CheckActiveVersion,
 		CheckShimTargets, CheckGoVersion, CheckNoInterruptedOperation,
-		CheckSettings,
+		CheckSettings, CheckSource, CheckDisk,
 	}
 	if got := names(r); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("check order = %v, want %v", got, want)
@@ -707,8 +708,8 @@ func TestChecksRunIndependently(t *testing.T) {
 	f := newFixture(t)
 	// Nothing exists at all: every Check must still report.
 	r := run(t, f)
-	if len(r.Checks) != 7 {
-		t.Fatalf("got %d checks, want 7: %v", len(r.Checks), names(r))
+	if len(r.Checks) != 9 {
+		t.Fatalf("got %d checks, want 9: %v", len(r.Checks), names(r))
 	}
 	if !r.Failed() {
 		t.Fatal("Failed() = false with missing root")

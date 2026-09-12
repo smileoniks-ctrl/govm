@@ -1,7 +1,8 @@
 // Package doctor runs read-only diagnostics over a govm installation
 // and returns a Report the CLI renders. Every Check is a pure function
 // over the injected Deps: no state lock, no writes under the govm
-// root, no network. Checks run independently, so a failing Check
+// root. The only network access is the source-reachability Check,
+// which --offline skips. Checks run independently, so a failing Check
 // never hides the others.
 package doctor
 
@@ -10,12 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 
 	"github.com/smileoniks-ctrl/govm/internal/paths"
+	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -40,6 +43,8 @@ const (
 	CheckGoVersion              = "go-version"
 	CheckNoInterruptedOperation = "no-interrupted-operation"
 	CheckSettings               = "settings"
+	CheckSource                 = "source"
+	CheckDisk                   = "disk"
 )
 
 // Check is one named diagnostic result. Detail is a complete
@@ -109,6 +114,17 @@ type Deps struct {
 	TargetOS    string
 	Arch        string
 	GovmVersion string
+	// HTTPClient fetches the release catalog; the request timeout is
+	// applied through the context, not the client.
+	HTTPClient utils.Doer
+	// Source overrides the distribution source; empty reads
+	// settings.json and falls back to the go.dev default.
+	Source string
+	// Offline skips the source-reachability Check.
+	Offline bool
+	// DiskUsage reports the versions and downloads footprint; defaults
+	// to prune.Service.DiskUsage over Resolver.
+	DiskUsage func(context.Context) (prune.Summary, error)
 }
 
 // DefaultDeps returns the production dependencies.
@@ -153,10 +169,16 @@ func (d Deps) withDefaults() Deps {
 	if d.GovmVersion == "" {
 		d.GovmVersion = utils.GetVersion()
 	}
+	if d.HTTPClient == nil {
+		d.HTTPClient = &http.Client{}
+	}
+	if d.DiskUsage == nil {
+		d.DiskUsage = diskUsage(d.Resolver)
+	}
 	return d
 }
 
-// Run executes the local Checks in report order and returns the
+// Run executes the Checks in report order and returns the
 // Report. It never returns an error: every failure to observe the
 // environment is itself a Check result.
 func Run(ctx context.Context, deps Deps) Report {
@@ -168,13 +190,15 @@ func Run(ctx context.Context, deps Deps) Report {
 		Arch:        deps.Arch,
 		Root:        e.root,
 	}
-	for _, check := range localChecks {
+	for _, check := range checks {
 		report.Checks = append(report.Checks, check(ctx, e))
 	}
 	return report
 }
 
-var localChecks = []func(context.Context, *env) Check{
+// checks lists every Check in report order: cause before effect,
+// network and disk last.
+var checks = []func(context.Context, *env) Check{
 	checkShimInPath,
 	checkGoResolvesToShim,
 	checkActiveVersion,
@@ -182,4 +206,6 @@ var localChecks = []func(context.Context, *env) Check{
 	checkGoVersion,
 	checkNoInterruptedOperation,
 	checkSettings,
+	checkSource,
+	checkDisk,
 }
