@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -105,5 +107,44 @@ func sign(v int) int {
 		return 1
 	default:
 		return 0
+	}
+}
+
+func TestIsShimInPathToleratesTrailingSlash(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	shim := filepath.Join(home, ".govm", "shim")
+	sep := string(os.PathListSeparator)
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"exact", "/x" + sep + shim + sep + "/y", true},
+		{"trailing slash", "/x" + sep + shim + string(filepath.Separator) + sep + "/y", true},
+		{"dot segment", shim + string(filepath.Separator) + "." + sep + "/y", true},
+		{"absent", "/x" + sep + "/y", false},
+		{"prefix only", shim + "-other", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PATH", tc.path)
+			if got := IsShimInPath(); got != tc.want {
+				t.Fatalf("IsShimInPath() with PATH=%q = %t, want %t", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShimInPathList(t *testing.T) {
+	sep := string(os.PathListSeparator)
+	shim := filepath.Join("/home", "u", ".govm", "shim")
+	if !ShimInPathList(shim, "/x"+sep+shim+"/"+sep+"/y") {
+		t.Fatal("trailing slash entry not matched")
+	}
+	if ShimInPathList(shim, "") {
+		t.Fatal("empty PATH matched")
 	}
 }

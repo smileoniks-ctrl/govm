@@ -166,11 +166,18 @@ func IsShimInPath() bool {
 	if err != nil {
 		return false
 	}
-	currentPath := os.Getenv("PATH")
-	pathSeparator := string(os.PathListSeparator)
-	pathEntries := strings.Split(currentPath, pathSeparator)
-	for _, entry := range pathEntries {
-		if entry == shimDir {
+	return ShimInPathList(shimDir, os.Getenv("PATH"))
+}
+
+// ShimInPathList reports whether shimDir appears in pathList, a
+// PATH-style list split with filepath.SplitList. Entries are compared
+// after filepath.Clean so a trailing separator or a "." segment does
+// not hide an otherwise correct entry. It is the single comparison
+// shared by the TUI banner and `govm doctor`.
+func ShimInPathList(shimDir, pathList string) bool {
+	want := filepath.Clean(shimDir)
+	for _, entry := range filepath.SplitList(pathList) {
+		if entry != "" && filepath.Clean(entry) == want {
 			return true
 		}
 	}
