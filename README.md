@@ -83,6 +83,25 @@ setx PATH "%USERPROFILE%\.govm\shim;%PATH%"
 
 Then restart your terminal.
 
+### Diagnostics
+
+If `go` still does not switch after the PATH setup, run the read-only
+diagnostics and paste the output into a bug report:
+
+```bash
+govm doctor            # checks PATH, shims, the active version, settings, source and disk
+govm doctor --offline  # same, but skips the network check of the distribution source
+```
+
+Each line is `[ok]`, `[warn]` or `[fail]`, followed by a `hint:` when
+something needs attention, and the report ends with `N fail, M warn`
+or `all checks passed`. `fail` means switching versions will not
+work as expected and the command exits with status 1; `warn` means
+govm works but something is degraded (an interrupted operation, an
+unreachable source, leftover downloads) and does not change the exit
+code. `govm doctor` never writes under `~/.govm`, so a missing root or
+shim directory is reported instead of being created.
+
 ## Usage
 
 GoVM can be used in two ways: via the interactive TUI or through command-line commands.
@@ -165,6 +184,9 @@ govm list
 
 # Print govm version
 govm version
+
+# Diagnose PATH, shims and the active version (read-only; --offline skips the network check)
+govm doctor
 
 # Show help and version information
 govm help

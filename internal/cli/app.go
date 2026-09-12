@@ -12,6 +12,7 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
 	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
+	"github.com/smileoniks-ctrl/govm/internal/doctor"
 	"github.com/smileoniks-ctrl/govm/internal/lifecycle"
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
@@ -28,6 +29,10 @@ type deleteFunc func(context.Context, string) (lifecycle.DeletionResult, error)
 type prunePreviewFunc func(context.Context) (prune.Result, error)
 type pruneFunc func(context.Context) (prune.Result, error)
 type changeDistributionSourceFunc func(context.Context, string) (application.DistributionSourceResult, error)
+
+// doctorFunc runs the read-only diagnostics; offline skips the
+// source-reachability Check.
+type doctorFunc func(ctx context.Context, offline bool) doctor.Report
 
 // InstallVersion resolves and installs a Go version from the configured
 // distribution source.
@@ -56,6 +61,7 @@ type Operations struct {
 	Registry                 local.Registry
 	ShimInPath               func() bool
 	ChangeDistributionSource changeDistributionSourceFunc
+	Doctor                   doctorFunc
 }
 
 func (a *App) ChangeDistributionSource(source string) bool {

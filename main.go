@@ -1,11 +1,14 @@
 package main
 
 import (
-	tea "charm.land/bubbletea/v2"
+	"context"
 	"fmt"
+
+	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/cli"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/doctor"
 	"github.com/smileoniks-ctrl/govm/internal/model"
 	"github.com/smileoniks-ctrl/govm/internal/services"
 	"github.com/smileoniks-ctrl/govm/internal/setup"
@@ -21,6 +24,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		fmt.Printf("govm %s\n", utils.GetVersion())
 		os.Exit(0)
+	}
+	// doctor is read-only and runs before SetupShimDirectory so a
+	// missing root or shim directory stays observable.
+	if len(os.Args) > 1 && os.Args[1] == "doctor" {
+		os.Exit(runDoctor(os.Args[2:], os.Stdout))
 	}
 	if err := utils.SetupShimDirectory(); err != nil {
 		fmt.Printf("Warning: Failed to set up shim directory: %v\n", err)
@@ -60,6 +68,24 @@ func main() {
 	// handleCommandLine and TUI should never throw at the same time
 	launchTUI(runtime, distributionSource, settingsPath, settings)
 }
+
+// runDoctor wires the production diagnostics dependencies and renders
+// the Report. Exit status 1 when any Check failed or the arguments are
+// invalid.
+func runDoctor(args []string, out io.Writer) int {
+	app := cli.NewApp(cli.Operations{
+		Doctor: func(ctx context.Context, offline bool) doctor.Report {
+			deps := doctor.DefaultDeps()
+			deps.Offline = offline
+			return doctor.Run(ctx, deps)
+		},
+	}, os.Stdin, out, os.Stderr)
+	if !app.Doctor(args...) {
+		return 1
+	}
+	return 0
+}
+
 func handleCommandLine(app *cli.App) int {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -139,6 +165,7 @@ func printUsage() {
 	fmt.Println("  govm list              List installed Go versions")
 	fmt.Println("  govm prune [options]   Remove inactive versions and temporary downloads")
 	fmt.Println("  govm source <url>      Change the toolchain distribution source")
+	fmt.Println("  govm doctor [options]  Diagnose PATH, shims and the active version (read-only; --offline)")
 	fmt.Println("  govm deps list         List current module dependencies")
 	fmt.Println("  govm deps check        Check for available dependency updates (--patch, --minor)")
 	fmt.Println("  govm deps update       Update dependencies (interactive; see 'govm deps help')")

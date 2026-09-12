@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -68,6 +69,7 @@ func TestPrintUsageShowsVersion(t *testing.T) {
 	}
 
 	for _, want := range []string{
+		"govm doctor [options]",
 		"govm deps list",
 		"govm deps check",
 		"govm deps update",
@@ -160,5 +162,48 @@ func TestLoadTUISettingsMissingFileDoesNotWarn(t *testing.T) {
 	}
 	if stderr.String() != "" {
 		t.Fatalf("expected no warning for missing settings file, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunDoctorUnknownFlagIsUsageError(t *testing.T) {
+	var out bytes.Buffer
+	if code := runDoctor([]string{"--bogus"}, &out); code != 1 {
+		t.Fatalf("exit code = %d, want 1", code)
+	}
+	if strings.Contains(out.String(), "govm doctor  (") {
+		t.Fatalf("checks ran despite a usage error:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "usage: govm doctor [--offline]") {
+		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestRunDoctorMissingRootFailsWithoutCreatingIt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// An empty PATH keeps exec.LookPath deterministic on any host.
+	t.Setenv("PATH", t.TempDir())
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+		t.Setenv("APPDATA", t.TempDir())
+	}
+	root := filepath.Join(home, ".govm")
+
+	var out bytes.Buffer
+	code := runDoctor([]string{"--offline"}, &out)
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; output:\n%s", code, out.String())
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("doctor must not create %s (stat err = %v)", root, err)
+	}
+	lines := strings.Split(out.String(), "\n")
+	if len(lines) < 3 || !strings.HasPrefix(lines[2], "[fail] govm root "+root+" does not exist") {
+		t.Fatalf("first check should fail on the missing root:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "skipped (--offline)") {
+		t.Fatalf("expected the source check to be skipped:\n%s", out.String())
 	}
 }
