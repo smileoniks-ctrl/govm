@@ -68,17 +68,31 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		return m.handleFilterClearKey(msg)
 	case "y", "Y":
-		if m.Prune.Confirming() {
-			return m.handlePruneConfirmYes()
-		}
 		return m.handleDeleteConfirmYes()
 	case "n", "N":
-		if m.Prune.Confirming() {
-			return m.handlePruneConfirmNo()
-		}
 		return m.handleDeleteConfirmNo()
 	}
 	return m.handleActiveComponentKey(msg)
+}
+
+// handlePruneDialogKey owns the keyboard while the prune dialog awaits
+// its answer. It mirrors handleDialogKey: the shared Yes/No keys move
+// the highlight or commit a choice, and the per-kind confirm/cancel
+// paths run the transition.
+func (m *Model) handlePruneDialogKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	}
+	choiceYes, action := yesNoKeyAction(msg.String(), m.Prune.ChoiceYes())
+	m.Prune.SetChoiceYes(choiceYes)
+	switch action {
+	case DialogConfirm:
+		return m.handlePruneConfirmYes()
+	case DialogCancel:
+		return m.handlePruneConfirmNo()
+	}
+	return m, nil
 }
 
 // handleHelpOverlayKey owns the keyboard while the Help overlay is

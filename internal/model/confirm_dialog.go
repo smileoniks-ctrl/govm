@@ -118,19 +118,31 @@ func (d ConfirmDialog) Handle(msg tea.KeyPressMsg) (ConfirmDialog, DialogAction)
 		}
 	}
 
-	switch msg.String() {
+	var action DialogAction
+	d.ChoiceYes, action = yesNoKeyAction(msg.String(), d.ChoiceYes)
+	return d, action
+}
+
+// yesNoKeyAction is the key handling every Yes/No dialog shares: the
+// horizontal keys toggle the highlighted button, enter commits it, y
+// and n answer directly, esc declines. It returns the new choice and
+// the action the caller enacts. DialogConfirm is returned only when
+// the committed choice is Yes; enter on No cancels.
+func yesNoKeyAction(key string, choiceYes bool) (bool, DialogAction) {
+	switch key {
 	case "left", "right", "tab", "shift+tab", "h", "l":
-		d.ChoiceYes = !d.ChoiceYes
-		return d, DialogNoop
+		return !choiceYes, DialogNoop
 	case "enter":
-		return d, DialogConfirm
+		if choiceYes {
+			return choiceYes, DialogConfirm
+		}
+		return choiceYes, DialogCancel
 	case "y", "Y":
-		d.ChoiceYes = true
-		return d, DialogConfirm
+		return true, DialogConfirm
 	case "n", "N", "esc":
-		return d, DialogCancel
+		return false, DialogCancel
 	}
-	return d, DialogNoop
+	return choiceYes, DialogNoop
 }
 
 // Render composes the dialog's body (kind-specific), the shared Yes/No
@@ -146,13 +158,19 @@ func (d ConfirmDialog) Render(t styles.Theme, deps DepsState, viewport viewportS
 }
 
 func (d ConfirmDialog) renderButtons(t styles.Theme) string {
+	yesLabel, noLabel := buttonLabels(d.Kind)
+	return renderYesNoButtons(t, d.ChoiceYes, yesLabel, noLabel)
+}
+
+// renderYesNoButtons draws the shared button row of a Yes/No dialog
+// with the chosen button highlighted.
+func renderYesNoButtons(t styles.Theme, choiceYes bool, yesLabel, noLabel string) string {
 	yesBtn, noBtn := t.DialogInactiveStyle, t.DialogInactiveStyle
-	if d.ChoiceYes {
+	if choiceYes {
 		yesBtn = t.DialogActiveStyle
 	} else {
 		noBtn = t.DialogActiveStyle
 	}
-	yesLabel, noLabel := buttonLabels(d.Kind)
 	return lipgloss.JoinHorizontal(lipgloss.Center,
 		yesBtn.Render(yesLabel),
 		"  ",

@@ -53,6 +53,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.Deps.Dialog.Active() {
 			return m.handleDialogKey(msg)
 		}
+		if m.Prune.Confirming() {
+			return m.handlePruneDialogKey(msg)
+		}
 		return m.handleKey(msg)
 
 	case tea.WindowSizeMsg:
@@ -231,6 +234,16 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func pruneResultBytes(result prune.Result) int64 {
 	var total int64
 	for _, candidate := range result.Removed {
+		total += candidate.Bytes
+	}
+	return total
+}
+
+// pruneCandidateBytes sums the plan awaiting confirmation. The plan
+// carries Candidates only; Removed is filled in by the run.
+func pruneCandidateBytes(result prune.Result) int64 {
+	var total int64
+	for _, candidate := range result.Candidates {
 		total += candidate.Bytes
 	}
 	return total

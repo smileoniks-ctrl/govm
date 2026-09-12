@@ -99,7 +99,7 @@ func (m Model) View() tea.View {
 	} else if m.Deps.Dialog.Active() {
 		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(t, m.Deps, viewport), viewport)
 	} else if m.Prune.Confirming() {
-		rendered = overlayDialog(rendered, renderPruneDialog(t, m.Prune.Plan(), viewport.Width), viewport)
+		rendered = overlayDialog(rendered, renderPruneDialog(t, m.Prune, viewport), viewport)
 	}
 	if m.HelpVisible {
 		rendered = overlayDialog(rendered, renderHelpOverlay(t, m, viewport), viewport)
@@ -131,23 +131,36 @@ func renderInstalledSummary(summary prune.Summary) string {
 	return line
 }
 
-func renderPruneDialog(t styles.Theme, result prune.Result, width int) string {
+// renderPruneDialog draws the prune confirmation as a Dialog: the
+// shared warning title, the plan, and the Yes/No buttons, in the same
+// box as the Deps dialogs.
+func renderPruneDialog(t styles.Theme, state PruneState, viewport viewportSize) string {
+	result := state.Plan()
 	lines := []string{
-		"Prune inactive Go versions?",
-		fmt.Sprintf("Candidates: %d", len(result.Candidates)),
-		fmt.Sprintf("Reclaimable: %s", prune.FormatBytes(pruneResultBytes(result))),
+		t.DialogTitleStyle.Render(t.DialogWarningStyle.Render("⚠ Prune inactive Go versions?")),
+		"",
+		t.DialogBodyStyle.Render(fmt.Sprintf("Candidates: %d", len(result.Candidates))),
+		t.DialogBodyStyle.Render(fmt.Sprintf("Reclaimable: %s", prune.FormatBytes(pruneCandidateBytes(result)))),
 		"",
 	}
-	for _, candidate := range result.Candidates {
+	visible := result.Candidates
+	extra := 0
+	if len(visible) > maxDependencyListLines {
+		extra = len(visible) - maxDependencyListLines
+		visible = visible[:maxDependencyListLines]
+	}
+	for _, candidate := range visible {
 		label := candidate.Version
 		if label == "" {
 			label = candidate.Path
 		}
-		lines = append(lines, fmt.Sprintf("  %s  %s", label, prune.FormatBytes(candidate.Bytes)))
+		lines = append(lines, t.DialogBodyStyle.Render(fmt.Sprintf("  %s  %s", label, prune.FormatBytes(candidate.Bytes))))
 	}
-	lines = append(lines, "", "Press Y to confirm, N to cancel.")
-	content := strings.Join(lines, "\n")
-	return t.DialogBoxStyle.Width(maxInt(30, minInt(width-8, 72))).Render(content)
+	if extra > 0 {
+		lines = append(lines, t.DialogBodyStyle.Render(fmt.Sprintf("  …and %d more", extra)))
+	}
+	lines = append(lines, "", renderYesNoButtons(t, state.ChoiceYes(), "Yes", "No"))
+	return renderDialog(t, lipgloss.JoinVertical(lipgloss.Left, lines...), false, viewport)
 }
 
 func renderMinimumViewport(t styles.Theme, width, height int) string {

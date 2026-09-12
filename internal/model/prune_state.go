@@ -23,6 +23,10 @@ const (
 type PruneState struct {
 	phase prunePhase
 	plan  prune.Result
+	// choiceYes is the button highlighted in the confirmation dialog.
+	// Yes is preselected when the plan arrives, like every other
+	// Yes/No dialog in the TUI.
+	choiceYes bool
 }
 
 // Busy reports whether a prune flow is in progress in any phase.
@@ -34,6 +38,18 @@ func (s PruneState) Confirming() bool { return s.phase == prunePhaseConfirming }
 // Plan returns the plan awaiting confirmation. It is empty outside the
 // confirming phase.
 func (s PruneState) Plan() prune.Result { return s.plan }
+
+// ChoiceYes reports whether the Yes button is highlighted in the
+// confirmation dialog.
+func (s PruneState) ChoiceYes() bool { return s.choiceYes }
+
+// SetChoiceYes moves the highlight between the dialog's buttons. It is
+// inert outside the confirming phase.
+func (s *PruneState) SetChoiceYes(yes bool) {
+	if s.phase == prunePhaseConfirming {
+		s.choiceYes = yes
+	}
+}
 
 // BeginPreview moves idle -> previewing.
 func (s *PruneState) BeginPreview() bool {
@@ -60,6 +76,7 @@ func (s *PruneState) AcceptPreview(res prune.Result) bool {
 	}
 	s.phase = prunePhaseConfirming
 	s.plan = res
+	s.choiceYes = true
 	return true
 }
 
@@ -94,4 +111,5 @@ func (s *PruneState) Reset() { s.reset() }
 func (s *PruneState) reset() {
 	s.phase = prunePhaseIdle
 	s.plan = prune.Result{}
+	s.choiceYes = false
 }

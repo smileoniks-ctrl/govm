@@ -165,14 +165,16 @@ func confirmDeleteKeyBindings() helpSection {
 	}
 }
 
-// confirmPruneKeyBindings is the section shown while a prune awaits
-// its y/n confirmation.
+// confirmPruneKeyBindings is the section shown while the prune dialog
+// awaits its answer. It lists the same keys as the Deps dialogs.
 func confirmPruneKeyBindings() helpSection {
 	return helpSection{
 		title: "Confirm prune",
 		bindings: []keyBinding{
-			{keys: "y", desc: "confirm", short: true},
-			{keys: "n", desc: "cancel", short: true},
+			{keys: "←/→ h/l", desc: "choose", short: true},
+			{keys: "enter", desc: "confirm", short: true},
+			{keys: "y", desc: "accept"},
+			{keys: "n / esc", desc: "cancel", short: true},
 		},
 	}
 }
