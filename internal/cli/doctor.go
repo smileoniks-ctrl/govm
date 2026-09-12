@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/smileoniks-ctrl/govm/internal/doctor"
 )
 
@@ -50,9 +51,29 @@ func parseDoctorArgs(args []string) (offline bool, err error) {
 // indented past it so they sit under the Check detail.
 const verdictColumn = len("[warn]")
 
+// verdictStyles colours the "[verdict]" token: green for ok, yellow
+// for warn, red for fail. The basic ANSI colours are used on purpose so
+// the token follows the user's terminal palette.
+var verdictStyles = map[doctor.Verdict]lipgloss.Style{
+	doctor.VerdictOK:   lipgloss.NewStyle().Foreground(lipgloss.Green),
+	doctor.VerdictWarn: lipgloss.NewStyle().Foreground(lipgloss.Yellow),
+	doctor.VerdictFail: lipgloss.NewStyle().Foreground(lipgloss.Red),
+}
+
+// renderVerdict returns the coloured "[verdict]" token padded to
+// verdictColumn. The padding is computed from the plain token so the
+// escape sequences never disturb the column alignment.
+func renderVerdict(v doctor.Verdict) string {
+	token := "[" + string(v) + "]"
+	pad := strings.Repeat(" ", max(verdictColumn-len(token), 0))
+	return verdictStyles[v].Render(token) + pad
+}
+
 // renderDoctorReport prints the environment header, one padded
 // verdict line per Check with an indented hint for warn/fail, and the
-// summary line. No colours: the output is meant to be copied as-is.
+// summary line. Verdict tokens carry ANSI colours; the caller is
+// expected to hand in a colorprofile-aware writer that strips them
+// when the output is not a terminal, so pasted reports stay plain.
 func renderDoctorReport(out io.Writer, report doctor.Report) {
 	root := report.Root
 	if root == "" {
@@ -62,7 +83,7 @@ func renderDoctorReport(out io.Writer, report doctor.Report) {
 		report.GovmVersion, report.OS, report.Arch, root)
 	hintIndent := strings.Repeat(" ", verdictColumn+1)
 	for _, c := range report.Checks {
-		fmt.Fprintf(out, "%-*s %s\n", verdictColumn, "["+string(c.Verdict)+"]", c.Detail)
+		fmt.Fprintf(out, "%s %s\n", renderVerdict(c.Verdict), c.Detail)
 		if c.Verdict != doctor.VerdictOK && c.Hint != "" {
 			fmt.Fprintf(out, "%shint: %s\n", hintIndent, c.Hint)
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/cli"
 	"github.com/smileoniks-ctrl/govm/internal/config"
@@ -71,8 +72,11 @@ func main() {
 
 // runDoctor wires the production diagnostics dependencies and renders
 // the Report. Exit status 1 when any Check failed or the arguments are
-// invalid.
+// invalid. The writer is wrapped in a colorprofile.Writer so verdict
+// colours reach a terminal but are stripped when piped or when
+// NO_COLOR is set.
 func runDoctor(args []string, out io.Writer) int {
+	out = colorprofile.NewWriter(out, os.Environ())
 	app := cli.NewApp(cli.Operations{
 		Doctor: func(ctx context.Context, offline bool) doctor.Report {
 			deps := doctor.DefaultDeps()

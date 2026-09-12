@@ -6,17 +6,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/colorprofile"
 	"github.com/smileoniks-ctrl/govm/internal/doctor"
 )
 
-func newDoctorApp(report doctor.Report, calls *[]bool) (*App, *bytes.Buffer) {
+// newDoctorApp wires a fake Doctor operation. The output goes through
+// a colorprofile.Writer the way main does; a bytes.Buffer is not a
+// terminal, so the verdict colours are stripped and the expectations
+// below stay plain text. Pass an explicit profile to keep them.
+func newDoctorApp(report doctor.Report, calls *[]bool, profile ...colorprofile.Profile) (*App, *bytes.Buffer) {
 	var out bytes.Buffer
+	w := colorprofile.NewWriter(&out, nil)
+	if len(profile) > 0 {
+		w.Profile = profile[0]
+	}
 	app := NewApp(Operations{
 		Doctor: func(_ context.Context, offline bool) doctor.Report {
 			*calls = append(*calls, offline)
 			return report
 		},
-	}, nil, &out, &out)
+	}, nil, w, w)
 	return app, &out
 }
 
@@ -174,5 +183,48 @@ func TestDoctorHeaderWithoutRoot(t *testing.T) {
 	app.Doctor()
 	if !strings.HasPrefix(out.String(), "govm doctor  (govm dev, linux/amd64, root unknown)\n") {
 		t.Fatalf("output = %q", out.String())
+	}
+}
+
+func TestDoctorColoursVerdictsOnTerminal(t *testing.T) {
+	report := doctor.Report{
+		GovmVersion: "dev", OS: "linux", Arch: "amd64", Root: "/r",
+		Checks: []doctor.Check{
+			{Name: doctor.CheckShimInPath, Verdict: doctor.VerdictOK, Detail: "ok detail"},
+			{Name: doctor.CheckSource, Verdict: doctor.VerdictWarn, Detail: "warn detail", Hint: "h"},
+			{Name: doctor.CheckGoResolvesToShim, Verdict: doctor.VerdictFail, Detail: "fail detail", Hint: "h"},
+		},
+	}
+	var calls []bool
+	app, out := newDoctorApp(report, &calls, colorprofile.ANSI)
+	app.Doctor()
+
+	got := out.String()
+	for _, want := range []string{
+		"\x1b[32m[ok]\x1b[m   ok detail\n",
+		"\x1b[33m[warn]\x1b[m warn detail\n",
+		"\x1b[31m[fail]\x1b[m fail detail\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output lacks %q:\n%q", want, got)
+		}
+	}
+	if strings.Contains(got, "\x1b[") && !strings.Contains(got, "       hint: h\n") {
+		t.Errorf("hint lines must stay uncoloured and aligned:\n%q", got)
+	}
+}
+
+func TestDoctorStripsColoursWhenNotATerminal(t *testing.T) {
+	report := doctor.Report{
+		GovmVersion: "dev", OS: "linux", Arch: "amd64", Root: "/r",
+		Checks: []doctor.Check{
+			{Name: doctor.CheckGoResolvesToShim, Verdict: doctor.VerdictFail, Detail: "fail detail", Hint: "h"},
+		},
+	}
+	var calls []bool
+	app, out := newDoctorApp(report, &calls)
+	app.Doctor()
+	if strings.Contains(out.String(), "\x1b[") {
+		t.Fatalf("expected no escape sequences on a non-terminal writer:\n%q", out.String())
 	}
 }
