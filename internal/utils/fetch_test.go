@@ -134,3 +134,19 @@ func TestFetchGoDevReleases_ConnectionFailure(t *testing.T) {
 		t.Errorf("error should carry the function prefix, got: %v", err)
 	}
 }
+
+func TestFetchGoDevReleases_NonSuccessStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`[{"version":"go1.22.0","stable":true,"files":[]}]`))
+	}))
+	defer server.Close()
+
+	releases, err := fetchReleases(t, server.Client(), server.URL)
+	if err == nil {
+		t.Fatalf("expected error for HTTP 500, got %d releases", len(releases))
+	}
+	if !strings.Contains(err.Error(), "fetch go.dev releases") || !strings.Contains(err.Error(), "500") {
+		t.Errorf("error should carry the function prefix and status, got: %v", err)
+	}
+}

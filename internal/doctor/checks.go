@@ -38,6 +38,9 @@ type env struct {
 	// active is the canonical active version, empty when the
 	// active_version file is absent or invalid.
 	active string
+
+	// source is the distribution source the source Check probes.
+	source string
 }
 
 func probe(deps Deps) *env {
@@ -46,6 +49,7 @@ func probe(deps Deps) *env {
 	var err error
 	if e.root, err = r.RootDir(); err != nil {
 		e.layoutErr = err
+		e.source = resolveSource(deps, "")
 		return e
 	}
 	e.shim, _ = r.ShimDir()
@@ -57,6 +61,7 @@ func probe(deps Deps) *env {
 	if data, err := deps.FS.ReadFile(e.activeFile); err == nil && version.Validate(string(data)) == nil {
 		e.active = string(data)
 	}
+	e.source = resolveSource(deps, e.settingsFile)
 	return e
 }
 

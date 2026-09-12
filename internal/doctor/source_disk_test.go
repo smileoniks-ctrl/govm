@@ -59,7 +59,7 @@ func TestCheckSource(t *testing.T) {
 		f.deps.HTTPClient = srv.Client()
 		f.deps.Source = srv.URL + "/dl/"
 		c := checkByName(t, run(t, f), CheckSource)
-		assertCheck(t, c, VerdictWarn, "source "+srv.URL+"/dl/ unreachable", "check network or run with --offline")
+		assertCheck(t, c, VerdictWarn, "source "+srv.URL+"/dl/ unreachable: fetch go.dev releases: unexpected status 500", "check network or run with --offline")
 	})
 
 	t.Run("empty catalog is warn", func(t *testing.T) {
@@ -73,9 +73,6 @@ func TestCheckSource(t *testing.T) {
 	})
 
 	t.Run("hanging server times out with warn", func(t *testing.T) {
-		restore := sourceTimeout
-		sourceTimeout = 50 * time.Millisecond
-		t.Cleanup(func() { sourceTimeout = restore })
 		srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			<-r.Context().Done()
 		}))
@@ -84,6 +81,7 @@ func TestCheckSource(t *testing.T) {
 		f.healthy(t)
 		f.deps.HTTPClient = srv.Client()
 		f.deps.Source = srv.URL + "/dl/"
+		f.deps.SourceTimeout = 50 * time.Millisecond
 		c := checkByName(t, run(t, f), CheckSource)
 		assertCheck(t, c, VerdictWarn, "timeout after 50ms", "check network or run with --offline")
 	})
@@ -169,6 +167,18 @@ func TestCheckDisk(t *testing.T) {
 		assertCheck(t, c, VerdictWarn, "disk: 2 versions (", "run `govm prune`")
 		if !strings.Contains(c.Detail, "1 inactive") {
 			t.Fatalf("detail %q does not name the inactive version count", c.Detail)
+		}
+	})
+
+	t.Run("no active version counts every toolchain as inactive", func(t *testing.T) {
+		f := newFixture(t)
+		f.mkdirs(t)
+		f.install(t, "1.27.1")
+		f.install(t, "1.26.0")
+		c := checkByName(t, run(t, f), CheckDisk)
+		assertCheck(t, c, VerdictWarn, "2 versions (", "run `govm prune`")
+		if !strings.Contains(c.Detail, "2 inactive") {
+			t.Fatalf("detail %q does not count both versions as inactive", c.Detail)
 		}
 	})
 

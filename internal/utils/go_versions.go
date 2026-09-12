@@ -232,6 +232,9 @@ func FetchGoDevReleasesWithRequest(client Doer, req *http.Request) ([]GoDevRelea
 		return nil, fmt.Errorf("fetch go.dev releases: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("fetch go.dev releases: unexpected status %s", resp.Status)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("fetch go.dev releases: %w", err)

@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
@@ -122,6 +123,8 @@ type Deps struct {
 	Source string
 	// Offline skips the source-reachability Check.
 	Offline bool
+	// SourceTimeout bounds the catalog fetch; zero means 5 s.
+	SourceTimeout time.Duration
 	// DiskUsage reports the versions and downloads footprint; defaults
 	// to prune.Service.DiskUsage over Resolver.
 	DiskUsage func(context.Context) (prune.Summary, error)
@@ -171,6 +174,9 @@ func (d Deps) withDefaults() Deps {
 	}
 	if d.HTTPClient == nil {
 		d.HTTPClient = &http.Client{}
+	}
+	if d.SourceTimeout == 0 {
+		d.SourceTimeout = defaultSourceTimeout
 	}
 	if d.DiskUsage == nil {
 		d.DiskUsage = diskUsage(d.Resolver)
