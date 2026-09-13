@@ -92,10 +92,9 @@ func (s *depsTab) update(msg tea.Msg) (tea.Cmd, depsStatus) {
 	case tea.KeyPressMsg:
 		return s.handleKey(msg)
 	case dependenciesMsg:
-		s.dependencies = msg
 		s.loaded = true
 		s.phase = depsIdle
-		s.updateDependencyTable()
+		s.replaceDependencies(msg)
 		return nil, depsClearTabStatus
 	case dependencyBackupsMsg:
 		s.phase = depsIdle
@@ -132,6 +131,25 @@ func (s *depsTab) update(msg tea.Msg) (tea.Cmd, depsStatus) {
 	var cmd tea.Cmd
 	s.table, cmd = s.table.Update(msg)
 	return cmd, depsStatus{}
+}
+
+// replaceDependencies installs a fresh dependency list and drops the
+// Marks of modules that are no longer in it (see CONTEXT.md "Mark"):
+// a refresh, a restore or a finished cycle step is the only moment the
+// set of modules changes, so it is the only moment a mark can go
+// stale. How the list is displayed never touches marks.
+func (s *depsTab) replaceDependencies(list []deps.ModuleDependency) {
+	s.dependencies = list
+	listed := make(map[string]bool, len(list))
+	for _, d := range list {
+		listed[d.Path] = true
+	}
+	for path := range s.marks {
+		if !listed[path] {
+			delete(s.marks, path)
+		}
+	}
+	s.updateDependencyTable()
 }
 
 // isDepsMsg reports whether msg is one of the tab's own results, which

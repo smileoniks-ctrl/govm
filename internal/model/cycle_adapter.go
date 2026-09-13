@@ -201,9 +201,7 @@ func (s depsTab) cycleExecuteCmd(intent deps.Intent) tea.Cmd {
 // presentation table when the Cycle has one (post-check, post-apply,
 // post-rollback). It is a no-op when the Cycle has no dependencies.
 func (s *depsTab) syncDepsFromCycle() {
-	d := s.cycle.Dependencies()
-	if d != nil {
-		s.dependencies = d
-		s.updateDependencyTable()
+	if d := s.cycle.Dependencies(); d != nil {
+		s.replaceDependencies(d)
 	}
 }

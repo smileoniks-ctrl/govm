@@ -16,8 +16,7 @@ func (s *depsTab) resetDialog() {
 // the dependency table.
 func (s *depsTab) setUpdatedDependencies(modules []deps.ModuleDependency) {
 	s.phase = depsIdle
-	s.dependencies = modules
-	s.updateDependencyTable()
+	s.replaceDependencies(modules)
 }
 
 // handleDialogKey is the single entry point for key presses while a

@@ -16,26 +16,18 @@ const (
 	markEmpty  = "○ "
 )
 
+// updateDependencyTable re-renders the table from the dependency list
+// and the display setting. It is a pure projection: it never changes
+// the list or the Marks.
 func (s *depsTab) updateDependencyTable() {
 	rows := make([]table.Row, 0, len(s.dependencies))
 	paths := make([]string, 0, len(s.dependencies))
-	listed := make(map[string]bool, len(s.marks))
 	for _, d := range s.dependencies {
-		if s.marks[d.Path] {
-			listed[d.Path] = true
-		}
 		if s.display == config.DepsDisplayDirect && d.Indirect {
 			continue
 		}
 		rows = append(rows, table.Row{markPrefix(*s, d) + d.Path, d.Version, d.Latest, dependencyStatus(d)})
 		paths = append(paths, d.Path)
-	}
-	// Drop marks whose module disappeared from the list (e.g. after a
-	// tidy removed it) so they cannot poison a later selection.
-	for path := range s.marks {
-		if !listed[path] {
-			delete(s.marks, path)
-		}
 	}
 	s.table.SetRows(rows)
 	// The table parks its cursor at -1 once it has been given no

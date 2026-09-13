@@ -171,6 +171,27 @@ func TestMarksSurviveRefreshAndDisplayToggle(t *testing.T) {
 	}
 }
 
+func TestDisplayToggleNeverTouchesMarks(t *testing.T) {
+	m := marksFixture(t)
+	m.Settings.Values.DepsDisplay = config.DepsDisplayAll
+	m.syncDepsSettings()
+	// Mark the indirect module, then hide it again.
+	m = press(t, m, tea.KeyPressMsg{Code: 'j'}, tea.KeyPressMsg{Code: tea.KeySpace})
+	if !m.deps.marked("example.com/hidden") {
+		t.Fatalf("marks = %v, want hidden marked", m.deps.marks)
+	}
+	m.Settings.Values.DepsDisplay = config.DepsDisplayDirect
+	m.syncDepsSettings()
+	if !m.deps.marked("example.com/hidden") {
+		t.Fatal("hiding a marked module must not drop its mark")
+	}
+	// Only a refreshed list without the module drops the mark.
+	m = loadDeps(t, m, marksList()[:1])
+	if m.deps.marked("example.com/hidden") {
+		t.Fatal("a module that left the list must lose its mark")
+	}
+}
+
 func TestMarksClearedAfterCycleEndsButKeptOnCancel(t *testing.T) {
 	m := marksFixture(t)
 	fakeDepsExecutor{}.bind(&m)
