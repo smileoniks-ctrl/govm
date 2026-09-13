@@ -144,3 +144,27 @@ func standalonePhaseName(phase DepsOperation) string {
 		return "idle"
 	}
 }
+
+// A Model built without BindDepsOperations must degrade to a status
+// message, never a nil dereference: the unavailable executor fails
+// every operation and the ordinary error path renders it.
+func TestDepsOperationsUnavailableUntilBound(t *testing.T) {
+	m := newTestModel(t)
+	m = m.BindDepsOperations(DepsOperations{})
+	m.CurrentTab = InstalledTab
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = updated.(Model)
+	if m.CurrentTab != DepsTab || cmd == nil {
+		t.Fatalf("expected the tab switch to start the lazy load, tab=%d cmd=%v", m.CurrentTab, cmd)
+	}
+
+	updated, _ = m.Update(cmd())
+	m = updated.(Model)
+	if m.Status.Text() != errDepsUnavailable.Error() || m.Status.Kind() != "error" {
+		t.Fatalf("status = (%q, %q), want (%q, error)", m.Status.Text(), m.Status.Kind(), errDepsUnavailable)
+	}
+	if m.Deps.Phase != OpIdle {
+		t.Fatalf("phase = %v, want idle after the failed load", m.Deps.Phase)
+	}
+}

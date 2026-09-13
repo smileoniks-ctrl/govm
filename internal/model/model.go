@@ -217,6 +217,22 @@ func (m Model) BindVersionOperations(operations VersionOperations) Model {
 	return m
 }
 
+// DepsOperations is the process-composed seam of the Deps tab: the one
+// IO dependency the tab has. Executor returns the dependency executor
+// bound to the given backup limit; production wraps a single
+// deps.Executor, tests a fake.
+type DepsOperations struct {
+	Executor func(backupLimit int) DepsExecutor
+}
+
+// BindDepsOperations returns a copy of m bound to the given dependency
+// executor. Without it every dependency operation reports that it is
+// unavailable.
+func (m Model) BindDepsOperations(operations DepsOperations) Model {
+	m.Deps.Executor = operations.Executor
+	return m
+}
+
 func (m Model) Init() tea.Cmd {
 	var load tea.Cmd
 	if m.initialLoad.ID != 0 {

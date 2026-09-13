@@ -202,6 +202,9 @@ func newTestModel(t *testing.T) Model {
 	}})
 	m.Status.SetTab("Successfully installed Go 1.24.4", "success")
 	m.Layout = styles.LayoutWide
+	// A fake executor by default: no model test may reach the go
+	// toolchain, and tests that drive the cycle rebind their own.
+	fakeDepsExecutor{}.bind(&m)
 	return m
 }
 
@@ -227,5 +230,7 @@ func (fakeDepsExecutor) Restore(string) (deps.DependencyRestoreResult, error) {
 }
 
 func (f fakeDepsExecutor) bind(m *Model) {
-	m.Deps.Executor = func(int) depsExecutor { return f }
+	*m = m.BindDepsOperations(DepsOperations{
+		Executor: func(int) DepsExecutor { return f },
+	})
 }

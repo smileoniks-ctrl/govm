@@ -9,6 +9,7 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/cli"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/doctor"
 	"github.com/smileoniks-ctrl/govm/internal/model"
 	"github.com/smileoniks-ctrl/govm/internal/services"
@@ -226,6 +227,9 @@ func launchTUI(runtime *services.Runtime, distributionSource *application.Distri
 		os.Exit(1)
 	}
 
+	// The executor resolves the module lazily, so binding it here
+	// never touches the go toolchain before the Deps tab asks.
+	depsExecutor := deps.NewExecutor(moduleDir, nil)
 	initialModel := model.New(moduleDir, settingsPath, settings, shimPathWarning, theme).
 		BindVersionOperations(model.VersionOperations{
 			LoadCatalog:         runtime.Loader.LoadVersions,
@@ -239,6 +243,11 @@ func launchTUI(runtime *services.Runtime, distributionSource *application.Distri
 			PreviewPrune:        runtime.Prune.Preview,
 			Prune:               runtime.Prune.Prune,
 			DiskUsage:           runtime.Prune.DiskUsage,
+		}).
+		BindDepsOperations(model.DepsOperations{
+			Executor: func(backupLimit int) model.DepsExecutor {
+				return depsExecutor.WithBackupLimit(backupLimit)
+			},
 		})
 	p := tea.NewProgram(
 		model.NewProgramModel(initialModel),

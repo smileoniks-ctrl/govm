@@ -186,8 +186,12 @@ func cycleRecoveryRequiredMessage(c deps.UpdateCycle) string {
 }
 
 // depsExecutor returns the dependency executor bound to the current
-// Settings backup limit.
-func (m Model) depsExecutor() depsExecutor {
+// Settings backup limit, or the unavailable executor while none is
+// bound.
+func (m Model) depsExecutor() DepsExecutor {
+	if m.Deps.Executor == nil {
+		return unavailableDepsExecutor{}
+	}
 	return m.Deps.Executor(m.Settings.Values.DepsBackupLimit)
 }
 

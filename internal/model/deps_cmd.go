@@ -36,7 +36,7 @@ type DependencyErrMsg struct {
 // ListModuleDependenciesCmd lists current module dependencies without
 // checking for updates online. Used for the lazy load on first visit
 // to the Deps tab.
-func ListModuleDependenciesCmd(executor depsExecutor) tea.Cmd {
+func ListModuleDependenciesCmd(executor DepsExecutor) tea.Cmd {
 	return dependencyCmd(func() (DependenciesMsg, error) {
 		dependencies, err := executor.List()
 		return DependenciesMsg(dependencies), err
@@ -45,7 +45,7 @@ func ListModuleDependenciesCmd(executor depsExecutor) tea.Cmd {
 
 // CheckModuleDependencyUpdatesCmd lists module dependencies and checks
 // for available updates online. Used for the manual refresh action.
-func CheckModuleDependencyUpdatesCmd(executor depsExecutor) tea.Cmd {
+func CheckModuleDependencyUpdatesCmd(executor DepsExecutor) tea.Cmd {
 	return dependencyCmd(func() (DependenciesMsg, error) {
 		dependencies, err := executor.CheckUpdates()
 		return DependenciesMsg(dependencies), err
@@ -54,7 +54,7 @@ func CheckModuleDependencyUpdatesCmd(executor depsExecutor) tea.Cmd {
 
 // ListDependencyBackupsCmd lists saved dependency backups for the
 // current module, newest first.
-func ListDependencyBackupsCmd(executor depsExecutor) tea.Cmd {
+func ListDependencyBackupsCmd(executor DepsExecutor) tea.Cmd {
 	return dependencyCmd(func() (DependencyBackupsMsg, error) {
 		backups, err := executor.Backups()
 		return DependencyBackupsMsg(backups), err
@@ -63,7 +63,7 @@ func ListDependencyBackupsCmd(executor depsExecutor) tea.Cmd {
 
 // RestoreDependencyBackupCmd restores a saved dependency backup by
 // filename, saving the current files first as a pre-restore backup.
-func RestoreDependencyBackupCmd(executor depsExecutor, backupName string) tea.Cmd {
+func RestoreDependencyBackupCmd(executor DepsExecutor, backupName string) tea.Cmd {
 	return dependencyCmd(func() (DependenciesRestoredMsg, error) {
 		result, err := executor.Restore(backupName)
 		return DependenciesRestoredMsg(result), err

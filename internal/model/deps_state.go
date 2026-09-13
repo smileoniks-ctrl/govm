@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+
 	"charm.land/bubbles/v2/table"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
 )
@@ -42,15 +44,17 @@ type DepsState struct {
 	RowPaths []string
 	// Executor returns the dependency executor bound to the given
 	// backup limit. It is read before every operation so a mid-session
-	// limit change in Settings is honoured. Production binds a single
-	// deps.Executor for ModuleDir; tests inject a fake to drive the
-	// Cycle and the standalone operations without IO.
-	Executor func(backupLimit int) depsExecutor
+	// limit change in Settings is honoured. It is bound through
+	// Model.BindDepsOperations: main.go binds a single deps.Executor
+	// for ModuleDir; tests bind a fake to drive the Cycle and the
+	// standalone operations without IO. Unbound, every operation
+	// reports errDepsUnavailable through the ordinary error path.
+	Executor func(backupLimit int) DepsExecutor
 }
 
-// depsExecutor is the seam through which the Deps tab performs every
+// DepsExecutor is the seam through which the Deps tab performs every
 // side-effecting dependency operation. *deps.Executor satisfies it.
-type depsExecutor interface {
+type DepsExecutor interface {
 	Execute(intent deps.Intent) (deps.Event, error)
 	List() ([]deps.ModuleDependency, error)
 	CheckUpdates() ([]deps.ModuleDependency, error)
@@ -58,19 +62,40 @@ type depsExecutor interface {
 	Restore(backupName string) (deps.DependencyRestoreResult, error)
 }
 
+// errDepsUnavailable is what every dependency operation returns while
+// no DepsExecutor is bound. It surfaces as a status message instead of
+// a nil dereference, so a Model built without BindDepsOperations
+// degrades quietly rather than crashing the TUI.
+var errDepsUnavailable = errors.New("dependency operations are unavailable")
+
+// unavailableDepsExecutor is the DepsExecutor in force before
+// BindDepsOperations: every method fails with errDepsUnavailable.
+type unavailableDepsExecutor struct{}
+
+func (unavailableDepsExecutor) Execute(deps.Intent) (deps.Event, error) {
+	return nil, errDepsUnavailable
+}
+func (unavailableDepsExecutor) List() ([]deps.ModuleDependency, error) {
+	return nil, errDepsUnavailable
+}
+func (unavailableDepsExecutor) CheckUpdates() ([]deps.ModuleDependency, error) {
+	return nil, errDepsUnavailable
+}
+func (unavailableDepsExecutor) Backups() ([]deps.DependencyBackupInfo, error) {
+	return nil, errDepsUnavailable
+}
+func (unavailableDepsExecutor) Restore(string) (deps.DependencyRestoreResult, error) {
+	return deps.DependencyRestoreResult{}, errDepsUnavailable
+}
+
 // NewDepsState builds an empty DepsState with the given table model
-// and module directory. The Cycle is a fresh idle value. The executor
-// resolves the module lazily, so constructing the state never touches
-// the go toolchain.
+// and module directory. The Cycle is a fresh idle value. No executor
+// is bound yet: constructing the state never touches the go toolchain.
 func NewDepsState(moduleDir string, tbl table.Model) DepsState {
-	executor := deps.NewExecutor(moduleDir, nil)
 	return DepsState{
 		ModuleDir: moduleDir,
 		Table:     tbl,
 		Cycle:     deps.NewUpdateCycle(),
-		Executor: func(backupLimit int) depsExecutor {
-			return executor.WithBackupLimit(backupLimit)
-		},
 	}
 }
 
