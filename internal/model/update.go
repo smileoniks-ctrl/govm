@@ -6,7 +6,6 @@ import (
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
@@ -31,6 +30,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.updateSettingsInput(msg))
 	}
 
+	// The Deps tab's own results reach it whatever the current tab.
+	if isDepsMsg(msg) {
+		return m.delegateDeps(msg)
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		// ? opens the Help overlay above every choice mode, so it is
@@ -48,7 +52,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case inputHelpOverlay:
 			return m.handleHelpOverlayKey(msg)
 		case inputDepsDialog:
-			return m.handleDialogKey(msg)
+			// Quitting stays with the Model; every other key,
+			// including tab, belongs to the dialog.
+			switch msg.String() {
+			case "ctrl+c", "q":
+				return m, tea.Quit
+			}
+			return m.delegateDeps(msg)
 		case inputPruneConfirm:
 			return m.handlePruneDialogKey(msg)
 		}
@@ -145,56 +155,6 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case catalogProjectionRefilterMsg:
 		return m, m.projection.settleRefilter(msg)
 
-	case DependenciesMsg:
-		m.Deps.Dependencies = msg
-		m.Deps.Loaded = true
-		m.Deps.Phase = OpIdle
-		m.updateDependencyTable()
-		m.Status.ClearTab()
-		return m, nil
-
-	case DependencyBackupsMsg:
-		m.Deps.Phase = OpIdle
-		m.Deps.Backups = msg
-		if len(msg) == 0 {
-			m.Status.SetTab("No dependency backups found.", "warning")
-			return m, nil
-		}
-		m.Deps.Dialog = ConfirmDialog{
-			Kind:      DialogRestore,
-			ChoiceYes: true,
-			MaxCursor: len(msg) - 1,
-		}
-		m.Status.SetTab("Select a dependency backup to restore.", "info")
-		return m, nil
-
-	case deps.CheckUpdatesDoneEvent,
-		deps.ApplyUpdatesDoneEvent,
-		deps.CompensateDoneEvent,
-		deps.ChecksDoneEvent,
-		deps.RollbackDoneEvent:
-		return m.handleCycleEvent(msg.(deps.Event))
-
-	case DependenciesRestoredMsg:
-		m.setUpdatedDependencies(msg.Dependencies)
-		m.Status.SetGlobal(fmt.Sprintf("Restored dependencies from %s.", msg.BackupName), "success")
-		return m, nil
-
-	case dependencyExecutionErrMsg:
-		m.Deps.Cycle = deps.NewUpdateCycle()
-		m.resetDialog()
-		m.Status.SetGlobal(msg.Err.Error(), "error")
-		return m, nil
-
-	case DependencyErrMsg:
-		m.Deps.Reset()
-		if msg.Err != nil {
-			m.Status.SetGlobal(msg.Err.Error(), "error")
-			return m, nil
-		}
-		m.Status.SetGlobal("", "error")
-		return m, nil
-
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.Spinner, cmd = m.Spinner.Update(msg)
@@ -228,9 +188,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	cmds = append(cmds, m.projection.update(msg))
-	newDepsTableModel, depsTableCmd := m.Deps.Table.Update(msg)
-	m.Deps.Table = newDepsTableModel
-	cmds = append(cmds, depsTableCmd)
+	depsCmd, depsStatus := m.Deps.update(msg)
+	m.applyDepsStatus(depsStatus)
+	cmds = append(cmds, depsCmd)
 	return m, tea.Batch(cmds...)
 }
 

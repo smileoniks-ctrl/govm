@@ -59,7 +59,7 @@ func (m Model) View() tea.View {
 			components = append(components, renderInstalledSummary(m.DiskUsage))
 		}
 	case DepsTab:
-		components = append(components, renderContentCanvas(m.Deps.Table.View(), width, height))
+		components = append(components, renderContentCanvas(m.Deps.view(), width, height))
 	case SettingsTab:
 		components = append(components, renderContentCanvas(renderSettingsView(m.Settings), width, height))
 	}
@@ -81,7 +81,7 @@ func (m Model) View() tea.View {
 			rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(t, m.Settings, viewport), viewport)
 		}
 	case inputDepsDialog:
-		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(t, m.Deps, viewport), viewport)
+		rendered = overlayDialog(rendered, m.Deps.dialogView(t, viewport), viewport)
 	case inputPruneConfirm:
 		rendered = overlayDialog(rendered, renderPruneDialog(t, m.Prune, viewport), viewport)
 	}

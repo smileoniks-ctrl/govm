@@ -78,8 +78,9 @@ func TestUnknownCycleIntentReportsError(t *testing.T) {
 	m := newTestModel(t)
 	m.Deps.Cycle = mustCycleEvent(t, deps.NewUpdateCycle(), deps.StartEvent{ModuleDir: "/tmp/module"})
 
-	updated, _ := m.applyCycleIntent(nil)
-	got := *updated.(*Model)
+	_, status := m.Deps.applyCycleIntent(nil)
+	m.applyDepsStatus(status)
+	got := m
 	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
 		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
 	}
@@ -198,7 +199,7 @@ func TestApplyResultUpdatesStateAndOpensChecksDialog(t *testing.T) {
 func TestChecksPassedCompletesCycle(t *testing.T) {
 	m := modelAtConfirmChecks(t)
 	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmChecksEvent{Yes: true})
-	m.resetDialog()
+	m.Deps.resetDialog()
 
 	updated, _ := m.Update(deps.ChecksDoneEvent{
 		Result: deps.DependencyCheckResult{OK: true},

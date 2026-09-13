@@ -6,144 +6,137 @@ import (
 )
 
 // resetDialog closes any open dependency confirmation dialog.
-func (m *Model) resetDialog() {
-	m.Deps.Dialog = ConfirmDialog{}
+func (s *DepsState) resetDialog() {
+	s.Dialog = ConfirmDialog{}
 }
 
 // setUpdatedDependencies applies the shared bookkeeping for standalone
 // deps-result handlers (DependenciesMsg, DependenciesRestoredMsg):
 // reset the standalone phase, store the dependency list, and rebuild
 // the dependency table.
-func (m *Model) setUpdatedDependencies(modules []deps.ModuleDependency) {
-	m.Deps.Phase = OpIdle
-	m.Deps.Dependencies = modules
-	m.updateDependencyTable()
+func (s *DepsState) setUpdatedDependencies(modules []deps.ModuleDependency) {
+	s.Phase = OpIdle
+	s.Dependencies = modules
+	s.updateDependencyTable()
 }
 
 // handleDialogKey is the single entry point for key presses while a
 // dependency confirmation dialog is open. Pure key handling (choice
 // toggle, list navigation for restore) lives in ConfirmDialog.Handle;
 // this method enacts the returned DialogAction by delegating to the
-// per-kind apply* helpers.
-func (m *Model) handleDialogKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c", "q":
-		return m, tea.Quit
-	}
-	newDialog, action := m.Deps.Dialog.Handle(msg)
-	m.Deps.Dialog = newDialog
+// per-kind apply* helpers. Quitting is the Model's business and never
+// reaches here.
+func (s *DepsState) handleDialogKey(msg tea.KeyPressMsg) (tea.Cmd, depsStatus) {
+	newDialog, action := s.Dialog.Handle(msg)
+	s.Dialog = newDialog
 	switch action {
 	case DialogConfirm:
-		return m.applyDialogConfirm()
+		return s.applyDialogConfirm()
 	case DialogCancel:
-		return m.applyDialogCancel()
+		return s.applyDialogCancel()
 	case DialogChangeLevel:
-		return m.applyDialogLevelChange()
+		return s.applyDialogLevelChange()
 	case DialogChangeScope:
-		return m.applyDialogScopeChange()
+		return s.applyDialogScopeChange()
 	}
-	return m, nil
+	return nil, depsStatus{}
 }
 
 // applyDialogLevelChange asks the Cycle to rebuild the plan at the
 // level the dialog now shows. The re-emitted IntentConfirmApply
 // replaces the dialog contents; the dialog stays open.
-func (m *Model) applyDialogLevelChange() (tea.Model, tea.Cmd) {
-	if m.Deps.Dialog.Kind != DialogUpdate {
-		return m, nil
+func (s *DepsState) applyDialogLevelChange() (tea.Cmd, depsStatus) {
+	if s.Dialog.Kind != DialogUpdate {
+		return nil, depsStatus{}
 	}
-	return m.rebuildDialogPlan(deps.ChangeLevelEvent{Level: m.Deps.Dialog.Level})
+	return s.rebuildDialogPlan(deps.ChangeLevelEvent{Level: s.Dialog.Level})
 }
 
 // applyDialogScopeChange asks the Cycle to rebuild the plan for the
 // Update scope the dialog now shows: the explicit module set, or
 // every direct dependency.
-func (m *Model) applyDialogScopeChange() (tea.Model, tea.Cmd) {
-	if m.Deps.Dialog.Kind != DialogUpdate {
-		return m, nil
+func (s *DepsState) applyDialogScopeChange() (tea.Cmd, depsStatus) {
+	if s.Dialog.Kind != DialogUpdate {
+		return nil, depsStatus{}
 	}
 	var modules []string
-	if m.Deps.Dialog.Explicit {
-		modules = m.Deps.Dialog.ExplicitModules
+	if s.Dialog.Explicit {
+		modules = s.Dialog.ExplicitModules
 	}
-	return m.rebuildDialogPlan(deps.ChangeScopeEvent{Modules: modules})
+	return s.rebuildDialogPlan(deps.ChangeScopeEvent{Modules: modules})
 }
 
 // rebuildDialogPlan feeds a plan-changing event into the Cycle while
 // the update dialog is open. The re-emitted IntentConfirmApply
 // replaces the dialog contents; the dialog stays open.
-func (m *Model) rebuildDialogPlan(event deps.Event) (tea.Model, tea.Cmd) {
-	next, intent, err := m.Deps.Cycle.Handle(event)
+func (s *DepsState) rebuildDialogPlan(event deps.Event) (tea.Cmd, depsStatus) {
+	next, intent, err := s.Cycle.Handle(event)
 	if err != nil {
-		m.Deps.Cycle = deps.NewUpdateCycle()
-		m.resetDialog()
-		m.Status.SetGlobal(err.Error(), "error")
-		return m, nil
+		s.Cycle = deps.NewUpdateCycle()
+		s.resetDialog()
+		return nil, depsGlobalStatus(err.Error(), "error")
 	}
-	m.Deps.Cycle = next
-	return m.applyCycleIntent(intent)
+	s.Cycle = next
+	return s.applyCycleIntent(intent)
 }
 
 // applyDialogConfirm dispatches the confirm action. Update/checks/
 // rollback confirmations feed the user's choice to the Cycle as a
 // decision event; restore runs its own standalone command.
-func (m *Model) applyDialogConfirm() (tea.Model, tea.Cmd) {
-	switch m.Deps.Dialog.Kind {
+func (s *DepsState) applyDialogConfirm() (tea.Cmd, depsStatus) {
+	switch s.Dialog.Kind {
 	case DialogUpdate:
-		return m.feedCycleDecision(deps.ConfirmApplyEvent{Yes: m.Deps.Dialog.ChoiceYes})
+		return s.feedCycleDecision(deps.ConfirmApplyEvent{Yes: s.Dialog.ChoiceYes})
 	case DialogChecks:
-		return m.feedCycleDecision(deps.ConfirmChecksEvent{Yes: m.Deps.Dialog.ChoiceYes})
+		return s.feedCycleDecision(deps.ConfirmChecksEvent{Yes: s.Dialog.ChoiceYes})
 	case DialogRollback:
-		return m.feedCycleDecision(deps.ConfirmRollbackEvent{Yes: m.Deps.Dialog.ChoiceYes})
+		return s.feedCycleDecision(deps.ConfirmRollbackEvent{Yes: s.Dialog.ChoiceYes})
 	case DialogRestore:
-		return m.applyRestoreBackupChoice()
+		return s.applyRestoreBackupChoice()
 	}
-	m.resetDialog()
-	return m, nil
+	s.resetDialog()
+	return nil, depsStatus{}
 }
 
 // applyDialogCancel dispatches the cancel action. Update/checks/
 // rollback cancel feed a No decision to the Cycle; restore is torn
 // down locally.
-func (m *Model) applyDialogCancel() (tea.Model, tea.Cmd) {
-	switch m.Deps.Dialog.Kind {
+func (s *DepsState) applyDialogCancel() (tea.Cmd, depsStatus) {
+	switch s.Dialog.Kind {
 	case DialogUpdate:
-		return m.feedCycleDecision(deps.ConfirmApplyEvent{Yes: false})
+		return s.feedCycleDecision(deps.ConfirmApplyEvent{Yes: false})
 	case DialogChecks:
-		return m.feedCycleDecision(deps.ConfirmChecksEvent{Yes: false})
+		return s.feedCycleDecision(deps.ConfirmChecksEvent{Yes: false})
 	case DialogRollback:
-		return m.feedCycleDecision(deps.ConfirmRollbackEvent{Yes: false})
+		return s.feedCycleDecision(deps.ConfirmRollbackEvent{Yes: false})
 	case DialogRestore:
-		m.resetDialog()
-		m.Status.SetTab("Restore canceled.", "info")
-		return m, nil
+		s.resetDialog()
+		return nil, depsTabStatus("Restore canceled.", "info")
 	}
-	m.resetDialog()
-	return m, nil
+	s.resetDialog()
+	return nil, depsStatus{}
 }
 
 // feedCycleDecision closes the dialog and feeds a decision event into
 // the Cycle through the central adapter.
-func (m *Model) feedCycleDecision(event deps.Event) (tea.Model, tea.Cmd) {
-	m.resetDialog()
-	return m.handleCycleEvent(event)
+func (s *DepsState) feedCycleDecision(event deps.Event) (tea.Cmd, depsStatus) {
+	s.resetDialog()
+	return s.handleCycleEvent(event)
 }
 
-func (m *Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
-	if !m.Deps.Dialog.ChoiceYes {
-		m.resetDialog()
-		m.Status.SetTab("Restore canceled.", "info")
-		return m, nil
+func (s *DepsState) applyRestoreBackupChoice() (tea.Cmd, depsStatus) {
+	if !s.Dialog.ChoiceYes {
+		s.resetDialog()
+		return nil, depsTabStatus("Restore canceled.", "info")
 	}
-	if len(m.Deps.Backups) == 0 || m.Deps.Dialog.Cursor < 0 || m.Deps.Dialog.Cursor >= len(m.Deps.Backups) {
-		m.resetDialog()
-		m.Status.SetTab("Restore unavailable: no backup selected.", "error")
-		return m, nil
+	if len(s.Backups) == 0 || s.Dialog.Cursor < 0 || s.Dialog.Cursor >= len(s.Backups) {
+		s.resetDialog()
+		return nil, depsTabStatus("Restore unavailable: no backup selected.", "error")
 	}
 
-	backup := m.Deps.Backups[m.Deps.Dialog.Cursor]
-	m.resetDialog()
-	m.Deps.Phase = OpRestoringBackup
-	m.Status.SetGlobal("Restoring dependency backup...", "info")
-	return m, RestoreDependencyBackupCmd(m.depsExecutor(), backup.Name)
+	backup := s.Backups[s.Dialog.Cursor]
+	s.resetDialog()
+	s.Phase = OpRestoringBackup
+	return RestoreDependencyBackupCmd(s.executor(), backup.Name),
+		depsGlobalStatus("Restoring dependency backup...", "info")
 }

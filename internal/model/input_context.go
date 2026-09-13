@@ -82,7 +82,7 @@ func (m *Model) resolveInputContext(helpVisible bool) inputContext {
 		return inputSettingsInput
 	case helpVisible:
 		return inputHelpOverlay
-	case m.Deps.Dialog.Active():
+	case m.Deps.dialogActive():
 		return inputDepsDialog
 	case m.Prune.Confirming():
 		return inputPruneConfirm
@@ -123,7 +123,7 @@ func contextKeyBindings(m Model, ctx inputContext) []helpSection {
 	case inputHelpOverlay:
 		return []helpSection{helpOverlayBarBindings()}
 	case inputDepsDialog:
-		return []helpSection{dialogKeyBindings(m.Deps.Dialog), dialogGlobalKeyBindings()}
+		return []helpSection{m.Deps.dialogKeyBindings(), dialogGlobalKeyBindings()}
 	case inputPruneConfirm:
 		return []helpSection{confirmPruneKeyBindings(), dialogGlobalKeyBindings()}
 	case inputDeleteConfirm:

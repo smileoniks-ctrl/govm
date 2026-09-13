@@ -16,30 +16,41 @@ const (
 	markEmpty  = "○ "
 )
 
-func (m *Model) updateDependencyTable() {
-	rows := make([]table.Row, 0, len(m.Deps.Dependencies))
-	paths := make([]string, 0, len(m.Deps.Dependencies))
-	settings := m.normalizedSettings()
-	listed := make(map[string]bool, len(m.Deps.Marks))
-	for _, d := range m.Deps.Dependencies {
-		if m.Deps.Marks[d.Path] {
+func (s *DepsState) updateDependencyTable() {
+	rows := make([]table.Row, 0, len(s.Dependencies))
+	paths := make([]string, 0, len(s.Dependencies))
+	listed := make(map[string]bool, len(s.Marks))
+	for _, d := range s.Dependencies {
+		if s.Marks[d.Path] {
 			listed[d.Path] = true
 		}
-		if settings.DepsDisplay == config.DepsDisplayDirect && d.Indirect {
+		if s.display == config.DepsDisplayDirect && d.Indirect {
 			continue
 		}
-		rows = append(rows, table.Row{markPrefix(m.Deps, d) + d.Path, d.Version, d.Latest, dependencyStatus(d)})
+		rows = append(rows, table.Row{markPrefix(*s, d) + d.Path, d.Version, d.Latest, dependencyStatus(d)})
 		paths = append(paths, d.Path)
 	}
 	// Drop marks whose module disappeared from the list (e.g. after a
 	// tidy removed it) so they cannot poison a later selection.
-	for path := range m.Deps.Marks {
+	for path := range s.Marks {
 		if !listed[path] {
-			delete(m.Deps.Marks, path)
+			delete(s.Marks, path)
 		}
 	}
-	m.Deps.Table.SetRows(rows)
-	m.Deps.RowPaths = paths
+	s.Table.SetRows(rows)
+	// The table parks its cursor at -1 once it has been given no
+	// rows and never brings it back on its own; a listed table always
+	// has the cursor on a row.
+	if s.Table.Cursor() < 0 && len(rows) > 0 {
+		s.Table.SetCursor(0)
+	}
+	s.RowPaths = paths
+}
+
+// updateDependencyTable rebuilds the Deps table with the Model's
+// current Settings. Transitional: tests still call it.
+func (m *Model) updateDependencyTable() {
+	m.syncDepsSettings()
 }
 
 func markPrefix(state DepsState, d deps.ModuleDependency) string {

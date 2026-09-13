@@ -173,7 +173,7 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 	projection := newCatalogProjectionAdapter(theme)
 	initialLoad := projection.startLoad(catalogLoadPurposeInitial).loadRequest
 
-	return Model{
+	m := Model{
 		projection:      projection,
 		initialLoad:     initialLoad,
 		Spinner:         sp,
@@ -183,6 +183,8 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 		Settings:        NewSettingsState(settingsPath, settings),
 		ShimPathWarning: shimPathWarning,
 	}
+	m.syncDepsSettings()
+	return m
 }
 
 // VersionOperations contains the narrow process-composed seams used by the

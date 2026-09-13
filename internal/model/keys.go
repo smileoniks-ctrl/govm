@@ -7,7 +7,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
-	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
 
@@ -40,17 +39,15 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.CurrentTab == SettingsTab {
 		return m.handleSettingsKey(msg)
 	}
-	if m.CurrentTab == DepsTab && m.Deps.operationInProgress() {
-		switch msg.String() {
-		case "u", "r", "b", "space", "a":
-			return m, nil
-		}
-	}
 	if m.projection.operationPhase() == catalogOperationPhaseMutating {
 		switch msg.String() {
 		case "i", "u", "d", "p":
 			return m, nil
 		}
+	}
+	// The Deps tab owns every remaining key while it is current.
+	if m.CurrentTab == DepsTab {
+		return m.delegateDeps(msg)
 	}
 	switch msg.String() {
 	case "i":
@@ -59,8 +56,6 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleUseKey()
 	case "r":
 		return m.handleRefreshKey()
-	case "b":
-		return m.handleBackupsKey()
 	case "d":
 		return m.handleDeleteKey()
 	case "p":
@@ -113,14 +108,6 @@ func (m *Model) handleHelpOverlayKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.CurrentTab == DepsTab {
-		switch msg.String() {
-		case "space":
-			return m.handleMarkKey()
-		case "a":
-			return m.handleMarkAllKey()
-		}
-	}
 	switch msg.String() {
 	case "up", "down", "k", "j":
 	default:
@@ -132,10 +119,6 @@ func (m *Model) handleActiveComponentKey(msg tea.KeyPressMsg) (tea.Model, tea.Cm
 		return m, m.projection.updateAvailable(msg)
 	case InstalledTab:
 		return m, m.projection.updateInstalled(msg)
-	case DepsTab:
-		var cmd tea.Cmd
-		m.Deps.Table, cmd = m.Deps.Table.Update(msg)
-		return m, cmd
 	}
 	return m, nil
 }
@@ -185,10 +168,10 @@ func (m *Model) handleFilterClearKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *Model) switchTab(target int) (tea.Model, tea.Cmd) {
 	m.clearTabContext()
 	m.CurrentTab = target
-	// Lazy-load deps on first visit.
-	if m.CurrentTab == DepsTab && !m.Deps.Loaded {
-		m.Deps.Phase = OpChecking
-		return m, ListModuleDependenciesCmd(m.depsExecutor())
+	if m.CurrentTab == DepsTab {
+		cmd, status := m.Deps.enter()
+		m.applyDepsStatus(status)
+		return m, cmd
 	}
 	if m.CurrentTab == SettingsTab {
 		return m, tea.ClearScreen
@@ -268,75 +251,10 @@ func (m *Model) handleUseKey() (tea.Model, tea.Cmd) {
 		m.Status.SetGlobal(fmt.Sprintf("Switching to Go %s...", v.Version), "info")
 		return m, m.activateVersionCmd(operation.id, v.Version)
 	}
-	if m.CurrentTab == DepsTab && m.Deps.Loaded {
-		selection, ok := m.Deps.updateSelection()
-		if !ok {
-			m.Status.SetTab("Nothing to update.", "warning")
-			return m, nil
-		}
-		return m.startUpdateCycle(selection)
-	}
 	return m, nil
-}
-
-// handleMarkKey toggles the Mark on the module under the cursor.
-func (m *Model) handleMarkKey() (tea.Model, tea.Cmd) {
-	if !m.Deps.Loaded {
-		return m, nil
-	}
-	d, ok := m.Deps.cursorDependency()
-	if !ok {
-		return m, nil
-	}
-	m.Deps.ToggleMark(d.Path)
-	m.updateDependencyTable()
-	return m, nil
-}
-
-// handleMarkAllKey marks every listed dependency, or clears all marks
-// when any exist.
-func (m *Model) handleMarkAllKey() (tea.Model, tea.Cmd) {
-	if !m.Deps.Loaded {
-		return m, nil
-	}
-	added := m.Deps.ToggleMarkAll()
-	m.updateDependencyTable()
-	if n := len(m.Deps.MarkedPaths()); added {
-		m.Status.SetTab(fmt.Sprintf("Marked %d %s.", n, deps.Pluralize(n, "dependency", "dependencies")), "info")
-	} else {
-		m.Status.SetTab("Marks cleared.", "info")
-	}
-	return m, nil
-}
-
-// startUpdateCycle begins a fresh dependency update cycle for the
-// given selection: it creates a new Cycle, feeds StartEvent, and
-// returns the tea.Cmd that runs the initial check-updates intent
-// through the execution seam. The update confirmation dialog only
-// opens after the fresh check completes.
-func (m *Model) startUpdateCycle(selection deps.UpdateSelection) (tea.Model, tea.Cmd) {
-	m.Deps.Cycle = deps.NewUpdateCycle()
-	next, intent, err := m.Deps.Cycle.Handle(deps.StartEvent{ModuleDir: m.Deps.ModuleDir, Selection: selection})
-	if err != nil {
-		m.Status.SetTab("Could not start update.", "error")
-		return m, nil
-	}
-	m.Deps.Cycle = next
-	m.Status.Clear()
-	return m, m.cycleExecuteCmd(intent)
 }
 
 func (m *Model) handleRefreshKey() (tea.Model, tea.Cmd) {
-	if m.CurrentTab == DepsTab {
-		m.Deps.Phase = OpChecking
-		// Progress text comes from DepsState.SpinnerText() while the
-		// phase is in-flight, so we only need to clear any stale status
-		// here. Using Status.Clear (rather than Status.SetGlobal) keeps
-		// the scope tab-local, which lets the DependenciesMsg handler
-		// tear it down cleanly when the check finishes.
-		m.Status.Clear()
-		return m, CheckModuleDependencyUpdatesCmd(m.depsExecutor())
-	}
 	if m.refreshInFlight() {
 		return m, nil
 	}
@@ -350,20 +268,6 @@ func (m Model) refreshInFlight() bool {
 	return phase == catalogOperationPhaseLoading ||
 		phase == catalogOperationPhaseReconciling ||
 		m.projection.refilterPending
-}
-
-func (m *Model) handleBackupsKey() (tea.Model, tea.Cmd) {
-	if m.CurrentTab != DepsTab {
-		return m, nil
-	}
-	m.Deps.Phase = OpLoadingBackups
-	// Progress text comes from DepsState.SpinnerText() while the
-	// phase is in-flight, so we only need to clear any stale status
-	// here. Using Status.Clear (rather than Status.SetGlobal) keeps
-	// the scope tab-local, which lets the DependencyBackupsMsg
-	// handler tear it down cleanly when the load finishes.
-	m.Status.Clear()
-	return m, ListDependencyBackupsCmd(m.depsExecutor())
 }
 
 func (m *Model) handleDeleteKey() (tea.Model, tea.Cmd) {
@@ -569,7 +473,7 @@ func (m *Model) toggleSelectedSetting() tea.Cmd {
 		} else {
 			m.Settings.Values.DepsDisplay = config.DepsDisplayDirect
 		}
-		m.updateDependencyTable()
+		m.syncDepsSettings()
 	case 1:
 		if m.Settings.Values.Theme == config.ThemeCurrent {
 			m.Settings.Values.Theme = config.ThemeLight
@@ -598,6 +502,7 @@ func (m *Model) adjustDepsBackupLimit(delta int) {
 		limit = config.MinDepsBackupLimit
 	}
 	m.Settings.Values.DepsBackupLimit = limit
+	m.syncDepsSettings()
 	m.saveSettings()
 }
 

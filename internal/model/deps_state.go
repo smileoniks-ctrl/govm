@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"charm.land/bubbles/v2/table"
+	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
 )
 
@@ -50,6 +51,10 @@ type DepsState struct {
 	// standalone operations without IO. Unbound, every operation
 	// reports errDepsUnavailable through the ordinary error path.
 	Executor func(backupLimit int) DepsExecutor
+	// display and backupLimit are the Settings values the tab depends
+	// on, pushed through applySettings.
+	display     config.DepsDisplayMode
+	backupLimit int
 }
 
 // DepsExecutor is the seam through which the Deps tab performs every
