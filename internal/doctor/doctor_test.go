@@ -683,12 +683,13 @@ func TestCheckSettings(t *testing.T) {
 		hint    string
 	}{
 		{name: "no file", verdict: VerdictOK, detail: "defaults"},
-		{name: "valid", content: `{"depsDisplay":"all","theme":"light","depsBackupLimit":5,"distributionSource":"https://go.dev/dl/"}`, verdict: VerdictOK},
+		{name: "valid", content: `{"depsDisplay":"all","theme":"light","depsBackupLimit":5,"distributionSource":"https://go.dev/dl/","upgradeNotice":"off"}`, verdict: VerdictOK},
 		{name: "partial file uses defaults for missing fields", content: `{"theme":"light"}`, verdict: VerdictOK},
 		{name: "invalid JSON", content: `{"theme":`, verdict: VerdictWarn, detail: "not valid JSON", hint: "settings.json"},
 		{name: "invalid theme", content: `{"theme":"neon"}`, verdict: VerdictWarn, detail: "theme", hint: "settings.json"},
 		{name: "invalid limit", content: `{"depsBackupLimit":0}`, verdict: VerdictWarn, detail: "depsBackupLimit", hint: "settings.json"},
 		{name: "invalid source", content: `{"distributionSource":"ftp://x"}`, verdict: VerdictWarn, detail: "distributionSource", hint: "settings.json"},
+		{name: "invalid upgrade notice", content: `{"upgradeNotice":"maybe"}`, verdict: VerdictWarn, detail: "upgradeNotice", hint: "settings.json"},
 		{name: "two invalid fields", content: `{"depsDisplay":"some","theme":"neon"}`, verdict: VerdictWarn, detail: "depsDisplay, theme", hint: "settings.json"},
 	}
 	for _, tc := range cases {

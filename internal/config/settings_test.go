@@ -25,6 +25,9 @@ func TestDefaultSettings(t *testing.T) {
 	if got.DistributionSource != DefaultDistributionSource {
 		t.Fatalf("DistributionSource = %q, want %q", got.DistributionSource, DefaultDistributionSource)
 	}
+	if got.UpgradeNotice != UpgradeNoticeOn {
+		t.Fatalf("UpgradeNotice = %q, want %q", got.UpgradeNotice, UpgradeNoticeOn)
+	}
 }
 
 func TestValidateDepsBackupLimit(t *testing.T) {
@@ -112,6 +115,7 @@ func TestNormalizeUnknowns(t *testing.T) {
 				Theme:              ThemeLight,
 				DepsBackupLimit:    25,
 				DistributionSource: DefaultDistributionSource,
+				UpgradeNotice:      UpgradeNoticeOn,
 			},
 		},
 		{
@@ -126,6 +130,7 @@ func TestNormalizeUnknowns(t *testing.T) {
 				Theme:              ThemeCurrent,
 				DepsBackupLimit:    1,
 				DistributionSource: DefaultDistributionSource,
+				UpgradeNotice:      UpgradeNoticeOn,
 			},
 		},
 		{
@@ -140,6 +145,7 @@ func TestNormalizeUnknowns(t *testing.T) {
 				Theme:              ThemeLight,
 				DepsBackupLimit:    100,
 				DistributionSource: DefaultDistributionSource,
+				UpgradeNotice:      UpgradeNoticeOn,
 			},
 		},
 		{
@@ -153,6 +159,26 @@ func TestNormalizeUnknowns(t *testing.T) {
 				DepsDisplay:     DepsDisplayMode("transitive"),
 				Theme:           ThemeName("dark"),
 				DepsBackupLimit: 101,
+			},
+			want: DefaultSettings(),
+		},
+		{
+			name: "keeps upgrade notice off",
+			settings: Settings{
+				UpgradeNotice: UpgradeNoticeOff,
+			},
+			want: Settings{
+				DepsDisplay:        DepsDisplayDirect,
+				Theme:              ThemeCurrent,
+				DepsBackupLimit:    10,
+				DistributionSource: DefaultDistributionSource,
+				UpgradeNotice:      UpgradeNoticeOff,
+			},
+		},
+		{
+			name: "defaults unknown upgrade notice",
+			settings: Settings{
+				UpgradeNotice: UpgradeNoticeMode("maybe"),
 			},
 			want: DefaultSettings(),
 		},
@@ -236,6 +262,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		Theme:              ThemeLight,
 		DepsBackupLimit:    25,
 		DistributionSource: DefaultDistributionSource,
+		UpgradeNotice:      UpgradeNoticeOn,
 	}
 
 	if err := Save(path, settings); err != nil {
@@ -423,6 +450,7 @@ func TestLoadWithMigrationNewFilePresent(t *testing.T) {
 		Theme:              ThemeLight,
 		DepsBackupLimit:    10,
 		DistributionSource: DefaultDistributionSource,
+		UpgradeNotice:      UpgradeNoticeOn,
 	}
 	if gotSettings != want {
 		t.Fatalf("settings = %+v, want %+v", gotSettings, want)
@@ -481,6 +509,7 @@ func TestLoadWithMigrationMigratesLegacy(t *testing.T) {
 		Theme:              ThemeLight,
 		DepsBackupLimit:    10,
 		DistributionSource: DefaultDistributionSource,
+		UpgradeNotice:      UpgradeNoticeOn,
 	}
 	if gotSettings != want {
 		t.Fatalf("settings = %+v, want %+v", gotSettings, want)
