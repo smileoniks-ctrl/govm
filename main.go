@@ -230,6 +230,7 @@ func launchTUI(runtime *services.Runtime, distributionSource *application.Distri
 		BindVersionOperations(model.VersionOperations{
 			LoadCatalog:         runtime.Loader.LoadVersions,
 			DistributionSource:  distributionSource.Change,
+			CheckUpgrade:        runtime.Upgrade.Check,
 			Install:             runtime.Install.Install,
 			InstallWithProgress: runtime.Install.InstallWithProgress,
 			Activate:            runtime.Lifecycle.Activate,

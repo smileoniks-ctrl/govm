@@ -9,7 +9,7 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/config"
 )
 
-const settingsRowCount = 4
+const settingsRowCount = 5
 
 type SettingsState struct {
 	Values                      config.Settings

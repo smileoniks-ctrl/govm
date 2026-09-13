@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/smileoniks-ctrl/govm/internal/adapter/github"
 	"github.com/smileoniks-ctrl/govm/internal/adapter/godev"
 	"github.com/smileoniks-ctrl/govm/internal/adapter/local"
 	"github.com/smileoniks-ctrl/govm/internal/config"
@@ -17,6 +18,7 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/paths"
 	"github.com/smileoniks-ctrl/govm/internal/prune"
 	"github.com/smileoniks-ctrl/govm/internal/state"
+	"github.com/smileoniks-ctrl/govm/internal/upgrade"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
 
@@ -31,6 +33,9 @@ type Runtime struct {
 	Install   *install.Service
 	Prune     *prune.Service
 	Paths     *paths.Resolver
+	// Upgrade compares the running govm against the Latest release on
+	// GitHub. It shares the HTTP client with the catalog loader.
+	Upgrade *upgrade.Checker
 }
 
 // Loader wraps loader orchestration with production dependencies.
@@ -123,6 +128,10 @@ func NewRuntime(settings config.Settings) (*Runtime, error) {
 		return nil, fmt.Errorf("initialize lifecycle service: %w", err)
 	}
 
+	govmVersion := utils.GetVersion()
+	latestRelease := github.NewClient(httpClient, github.DefaultAPIBaseURL, utils.Repository, "govm/"+govmVersion)
+	upgradeChecker := upgrade.NewChecker(latestRelease, govmVersion)
+
 	installSvc := install.New(resolver, coordinator)
 	pruneSvc, err := prune.New(resolver, coordinator, lifecycleSvc)
 	if err != nil {
@@ -136,5 +145,6 @@ func NewRuntime(settings config.Settings) (*Runtime, error) {
 		Install:   installSvc,
 		Prune:     pruneSvc,
 		Paths:     resolver,
+		Upgrade:   upgradeChecker,
 	}, nil
 }

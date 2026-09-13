@@ -26,6 +26,18 @@ const (
 	ThemeLight   ThemeName = "light"
 )
 
+// UpgradeNoticeMode controls whether the TUI checks GitHub once per
+// session for a newer govm release and shows the Upgrade notice in
+// the header. It is a string enum rather than a bool so that a
+// missing key in settings.json normalises to "on" instead of the
+// zero value.
+type UpgradeNoticeMode string
+
+const (
+	UpgradeNoticeOn  UpgradeNoticeMode = "on"
+	UpgradeNoticeOff UpgradeNoticeMode = "off"
+)
+
 const (
 	tempFilePrefix            = ".settings-"
 	defaultDepsBackupLimit    = 10
@@ -35,10 +47,11 @@ const (
 )
 
 type Settings struct {
-	DepsDisplay        DepsDisplayMode `json:"depsDisplay"`
-	Theme              ThemeName       `json:"theme"`
-	DepsBackupLimit    int             `json:"depsBackupLimit"`
-	DistributionSource string          `json:"distributionSource"`
+	DepsDisplay        DepsDisplayMode   `json:"depsDisplay"`
+	Theme              ThemeName         `json:"theme"`
+	DepsBackupLimit    int               `json:"depsBackupLimit"`
+	DistributionSource string            `json:"distributionSource"`
+	UpgradeNotice      UpgradeNoticeMode `json:"upgradeNotice"`
 }
 
 func DefaultSettings() Settings {
@@ -47,6 +60,7 @@ func DefaultSettings() Settings {
 		Theme:              ThemeCurrent,
 		DepsBackupLimit:    defaultDepsBackupLimit,
 		DistributionSource: DefaultDistributionSource,
+		UpgradeNotice:      UpgradeNoticeOn,
 	}
 }
 
@@ -59,6 +73,9 @@ func Normalize(settings Settings) Settings {
 	}
 	if ValidateDepsBackupLimit(settings.DepsBackupLimit) != nil {
 		settings.DepsBackupLimit = defaultDepsBackupLimit
+	}
+	if settings.UpgradeNotice != UpgradeNoticeOn && settings.UpgradeNotice != UpgradeNoticeOff {
+		settings.UpgradeNotice = UpgradeNoticeOn
 	}
 	if strings.TrimSpace(settings.DistributionSource) == "" {
 		settings.DistributionSource = DefaultDistributionSource

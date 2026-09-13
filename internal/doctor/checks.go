@@ -525,6 +525,9 @@ func invalidSettingsFields(settings config.Settings, present map[string]json.Raw
 	if has("depsBackupLimit") && normalized.DepsBackupLimit != settings.DepsBackupLimit {
 		invalid = append(invalid, "depsBackupLimit")
 	}
+	if has("upgradeNotice") && normalized.UpgradeNotice != settings.UpgradeNotice {
+		invalid = append(invalid, "upgradeNotice")
+	}
 	// Normalize keeps an invalid source as-is rather than resetting it,
 	// so validate explicitly.
 	if has("distributionSource") {

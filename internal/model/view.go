@@ -34,7 +34,7 @@ func (m Model) View() tea.View {
 	}
 
 	components := make([]string, 0, 6)
-	components = append(components, renderHeader(t, width))
+	components = append(components, renderHeader(t, width, utils.GetVersion(), m.upgradeNotice))
 	components = append(components, renderTabs(t, m.CurrentTab))
 
 	if m.ShimPathWarning != "" {
@@ -248,10 +248,36 @@ func (m Model) renderAppliedFilterLine(t styles.Theme, width int) string {
 	return t.HelpTextStyle.Width(width).Render(text)
 }
 
-func renderHeader(t styles.Theme, width int) string {
+// renderHeader draws the title on the left and the version metadata on
+// the right. When notice is non-empty the Upgrade notice follows the
+// version. If the right side does not fit, the "Go Version Manager"
+// prefix is dropped first and the notice second; the version itself is
+// never truncated because it is what users paste into bug reports.
+func renderHeader(t styles.Theme, width int, version, notice string) string {
 	title := t.TitleStyle.Render("GoVM")
+	budget := width - lipgloss.Width(title) - 1
 
-	meta := t.HeaderMetaStyle.Render(fmt.Sprintf("Go Version Manager %s", utils.GetVersion()))
+	prefixed := "Go Version Manager " + version
+	var candidates []string
+	if notice != "" {
+		tail := t.HeaderMetaStyle.Render(" · ") + t.HeaderNoticeStyle.Render("↑ "+notice+" available")
+		candidates = append(candidates,
+			t.HeaderMetaStyle.Render(prefixed)+tail,
+			t.HeaderMetaStyle.Render(version)+tail,
+		)
+	}
+	candidates = append(candidates,
+		t.HeaderMetaStyle.Render(prefixed),
+		t.HeaderMetaStyle.Render(version),
+	)
+	meta := candidates[len(candidates)-1]
+	for _, candidate := range candidates {
+		if lipgloss.Width(candidate) <= budget {
+			meta = candidate
+			break
+		}
+	}
+
 	spacerWidth := maxInt(1, width-lipgloss.Width(title)-lipgloss.Width(meta))
 	return lipgloss.JoinHorizontal(lipgloss.Top, title, strings.Repeat(" ", spacerWidth), meta)
 }
@@ -305,6 +331,7 @@ func renderSettingsView(settings SettingsState) string {
 		fmt.Sprintf("Theme: %s", themeLabel(values.Theme)),
 		fmt.Sprintf("Deps backups: %d", values.DepsBackupLimit),
 		fmt.Sprintf("Distribution source: %s", truncateSettingValue(values.DistributionSource, 48)),
+		fmt.Sprintf("Upgrade notice: %s", upgradeNoticeLabel(values.UpgradeNotice)),
 	}
 	for i, row := range rows {
 		prefix := "  "
@@ -331,6 +358,13 @@ func depsDisplayLabel(mode config.DepsDisplayMode) string {
 		return "All"
 	}
 	return "Direct only"
+}
+
+func upgradeNoticeLabel(mode config.UpgradeNoticeMode) string {
+	if mode == config.UpgradeNoticeOff {
+		return "Off"
+	}
+	return "On"
 }
 
 func themeLabel(name config.ThemeName) string {

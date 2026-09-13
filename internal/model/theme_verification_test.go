@@ -70,7 +70,7 @@ func TestThemeIsTheOnlyStyleSource(t *testing.T) {
 	for _, banned := range []string{
 		"styles.Primary", "styles.Success", "styles.Error", "styles.Warning",
 		"styles.Info", "styles.Muted", "styles.Text", "styles.MinimumViewportBackground",
-		"styles.MinimumViewportText", "styles.TitleStyle", "styles.HeaderMetaStyle",
+		"styles.MinimumViewportText", "styles.TitleStyle", "styles.HeaderMetaStyle", "styles.HeaderNoticeStyle",
 		"styles.ActiveTabStyle", "styles.InactiveTabStyle", "styles.ActiveBadgeStyle",
 		"styles.InstalledBadgeStyle", "styles.ItemVersionStyle", "styles.MutedStyle",
 		"styles.StatusSuccessStyle", "styles.StatusErrorStyle", "styles.StatusWarningStyle",

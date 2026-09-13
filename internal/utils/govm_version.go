@@ -11,6 +11,11 @@ import (
 
 var Version = "dev"
 
+// Repository is the GitHub "owner/name" whose releases page publishes
+// govm itself. The TUI's Upgrade notice compares the running version
+// against the Latest release of this repository.
+const Repository = "smileoniks-ctrl/govm"
+
 func GetVersion() string {
 	// First priority: version set by ldflags (GoReleaser)
 	if Version != "dev" {
