@@ -68,37 +68,21 @@ func (m Model) View() tea.View {
 		components = append(components, renderStatus(t, statusType, status, width))
 	}
 
-	help := renderHelp(
-		t,
-		m.CurrentTab,
-		m.ConfirmingDelete,
-		m.Deps.Dialog,
-		width,
-	)
-	if m.Prune.Confirming() {
-		help = renderKeyHints(t, shortHints([]helpSection{confirmPruneKeyBindings(), dialogGlobalKeyBindings()}), width)
-	}
-	if m.Settings.EditingDepsBackupLimit {
-		help = renderKeyHints(t, shortHints([]helpSection{editingKeyBindings(false)}), width)
-	} else if m.Settings.EditingDistributionSource {
-		help = renderKeyHints(t, shortHints([]helpSection{editingKeyBindings(true)}), width)
-	}
-	if m.filterInputActive() {
-		help = renderKeyHints(t, shortHints([]helpSection{filterInputKeyBindings()}), width)
-	}
-	if m.HelpVisible {
-		help = renderKeyHints(t, shortHints([]helpSection{helpOverlayBarBindings()}), width)
-	}
-	components = append(components, help)
+	components = append(components, renderHelpBar(t, m, width))
 	rendered := appStyle.Render(lipgloss.JoinVertical(lipgloss.Left, components...))
 
-	if m.Settings.EditingDepsBackupLimit {
-		rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(t, m.Settings, viewport), viewport)
-	} else if m.Settings.EditingDistributionSource {
-		rendered = overlayDialog(rendered, renderDistributionSourceDialog(t, m.Settings, viewport), viewport)
-	} else if m.Deps.Dialog.Active() {
+	// The modal surface of the context beneath the Help overlay is
+	// drawn first; the overlay, when open, sits on top of it.
+	switch m.inputContextBeneathHelp() {
+	case inputSettingsInput:
+		if m.Settings.EditingDistributionSource {
+			rendered = overlayDialog(rendered, renderDistributionSourceDialog(t, m.Settings, viewport), viewport)
+		} else {
+			rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(t, m.Settings, viewport), viewport)
+		}
+	case inputDepsDialog:
 		rendered = overlayDialog(rendered, m.Deps.Dialog.Render(t, m.Deps, viewport), viewport)
-	} else if m.Prune.Confirming() {
+	case inputPruneConfirm:
 		rendered = overlayDialog(rendered, renderPruneDialog(t, m.Prune, viewport), viewport)
 	}
 	if m.HelpVisible {
@@ -379,16 +363,10 @@ func themeLabel(name config.ThemeName) string {
 // (dependency dialog, delete confirmation, or tab) followed by the
 // short global bindings. The overlay and every other hint variant
 // render from the same registry, so the two can never drift apart.
-func renderHelp(t styles.Theme, currentTab int, confirmingDelete bool, dialog ConfirmDialog, width int) string {
-	var sections []helpSection
-	if dialog.Active() {
-		sections = []helpSection{dialogKeyBindings(dialog), dialogGlobalKeyBindings()}
-	} else if confirmingDelete {
-		sections = []helpSection{confirmDeleteKeyBindings(), dialogGlobalKeyBindings()}
-	} else {
-		sections = []helpSection{tabKeyBindings(currentTab), globalKeyBindings()}
-	}
-	return renderKeyHints(t, shortHints(sections), width)
+// renderHelpBar renders the one-line hint bar for the active Input
+// context from the shared key binding registry (ADR-0001).
+func renderHelpBar(t styles.Theme, m Model, width int) string {
+	return renderKeyHints(t, shortHints(contextKeyBindings(m, m.inputContext())), width)
 }
 
 func renderKeyHints(t styles.Theme, hints [][2]string, width int) string {

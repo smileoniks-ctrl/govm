@@ -11,17 +11,19 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
 
-// handleKey processes a key press in the main TUI surface.
-// The dependency update confirmation modal is handled separately
-// in handleUpdateConfirmKey and short-circuits this path.
+// handleKey processes a key press in the main TUI surface: the Input
+// context is the tab, the filter input or the inline delete
+// confirmation. Dialogs, the prune confirmation, the Help overlay and
+// the Settings inputs are dispatched before this path by update().
 func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	ctx := m.inputContext()
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "q":
-		// While the filter input has focus, q is ordinary input and
-		// must reach the input instead of quitting.
-		if !m.filterInputActive() {
+		// In a text-entry context q is ordinary input and must reach
+		// the input instead of quitting.
+		if !ctx.textEntry() {
 			return m, tea.Quit
 		}
 	case "tab":
@@ -32,7 +34,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// The filter input owns the keyboard while it has focus: every
 	// remaining key is delivered to the list, which forwards it to
 	// the input. Commands stay unreachable until the input closes.
-	if m.filterInputActive() {
+	if ctx == inputFilter {
 		return m, m.projection.updateAvailable(msg)
 	}
 	if m.CurrentTab == SettingsTab {
@@ -151,15 +153,13 @@ func (m *Model) filterInputActive() bool {
 
 // handleFilterKey opens the Available list's inline filter input by
 // handing the key to the list widget (its Filter binding, rebound to "f"). The key is
-// inert off the Available tab, while an inline confirmation is pending
-// (it owns the keyboard until answered), and below the minimum
-// terminal size where the input would not render. An empty catalog
-// needs no guard of its own: the widget disables its filter binding.
+// inert off the Available tab and whenever no new mode may open:
+// while another Input context owns the keyboard (a pending inline
+// confirmation) and below the minimum terminal size where the input
+// would not render. An empty catalog needs no guard of its own: the
+// widget disables its filter binding.
 func (m *Model) handleFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.CurrentTab != AvailableTab ||
-		m.ConfirmingDelete ||
-		m.Prune.Confirming() ||
-		m.inMinimumViewport() {
+	if m.CurrentTab != AvailableTab || !m.canOpenMode() {
 		return m, nil
 	}
 	return m, m.projection.updateAvailable(msg)

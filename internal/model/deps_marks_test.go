@@ -365,7 +365,7 @@ func TestUpdateDialogEmptyPlanConfirmEndsAsNoUpdates(t *testing.T) {
 }
 
 func TestDepsHintBarAndOverlayDocumentMarkKeys(t *testing.T) {
-	bar := stripANSI(renderHelp(testTheme(), DepsTab, false, ConfirmDialog{}, 120))
+	bar := stripANSI(renderHelpBar(testTheme(), Model{CurrentTab: DepsTab}, 120))
 	for _, want := range []string{"space mark", "a mark all / none", "u update"} {
 		if !strings.Contains(bar, want) {
 			t.Fatalf("hint bar missing %q: %s", want, bar)
@@ -385,7 +385,7 @@ func TestDepsHintBarAndOverlayDocumentMarkKeys(t *testing.T) {
 	if !hasBinding(dialogKeyBindings(withScope), "space") {
 		t.Fatal("update dialog with an explicit set must document the scope key")
 	}
-	dialogBar := stripANSI(renderHelp(testTheme(), DepsTab, false, withScope, 120))
+	dialogBar := stripANSI(renderHelpBar(testTheme(), Model{CurrentTab: DepsTab, Deps: DepsState{Dialog: withScope}}, 120))
 	if !strings.Contains(dialogBar, "space scope") {
 		t.Fatalf("dialog hint bar missing scope key: %s", dialogBar)
 	}

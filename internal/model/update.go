@@ -22,38 +22,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	if m.Settings.EditingDistributionSource {
+	// A focused Settings input also receives non-key messages (cursor
+	// blink), which then continue to the ordinary handlers below.
+	if m.inputContext() == inputSettingsInput {
 		if key, ok := msg.(tea.KeyPressMsg); ok {
-			return m.handleDistributionSourceInputKey(key)
+			return m.handleSettingsInputKey(key)
 		}
-
-		var cmd tea.Cmd
-		m.Settings.DistributionSourceInput, cmd = m.Settings.DistributionSourceInput.Update(msg)
-		cmds = append(cmds, cmd)
-	}
-	if m.Settings.EditingDepsBackupLimit {
-		if key, ok := msg.(tea.KeyPressMsg); ok {
-			return m.handleDepsBackupLimitInputKey(key)
-		}
-
-		var cmd tea.Cmd
-		m.Settings.DepsBackupLimitInput, cmd = m.Settings.DepsBackupLimitInput.Update(msg)
-		cmds = append(cmds, cmd)
+		cmds = append(cmds, m.updateSettingsInput(msg))
 	}
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if m.HelpVisible {
-			return m.handleHelpOverlayKey(msg)
-		}
-		if msg.String() == "?" && !m.filterInputActive() && !m.inMinimumViewport() {
+		// ? opens the Help overlay above every choice mode, so it is
+		// claimed before the context's own handler sees the key;
+		// canOpenHelp keeps it ordinary input in text-entry contexts.
+		if msg.String() == "?" && m.canOpenHelp() {
 			m.HelpVisible = true
 			return m, nil
 		}
-		if m.Deps.Dialog.Active() {
+		// The Input context decides who handles the key; see
+		// input_context.go for the priority order.
+		switch m.inputContext() {
+		case inputSettingsInput:
+			return m.handleSettingsInputKey(msg)
+		case inputHelpOverlay:
+			return m.handleHelpOverlayKey(msg)
+		case inputDepsDialog:
 			return m.handleDialogKey(msg)
-		}
-		if m.Prune.Confirming() {
+		case inputPruneConfirm:
 			return m.handlePruneDialogKey(msg)
 		}
 		return m.handleKey(msg)

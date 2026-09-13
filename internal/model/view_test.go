@@ -160,7 +160,7 @@ func TestMaxInt(t *testing.T) {
 }
 
 func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
-	got := renderHelp(testTheme(), 0, true, ConfirmDialog{}, 80)
+	got := renderHelpBar(testTheme(), Model{CurrentTab: AvailableTab, ConfirmingDelete: true}, 80)
 	if !strings.Contains(stripANSI(got), "confirm") {
 		t.Fatalf("expected confirm hint, got: %s", got)
 	}
@@ -170,7 +170,7 @@ func TestRenderHelp_ConfirmsDeleteVariant(t *testing.T) {
 }
 
 func TestRenderHelp_InstalledIncludesPrune(t *testing.T) {
-	got := stripANSI(renderHelp(testTheme(), InstalledTab, false, ConfirmDialog{}, 80))
+	got := stripANSI(renderHelpBar(testTheme(), Model{CurrentTab: InstalledTab}, 80))
 	if !strings.Contains(got, "p prune") {
 		t.Fatalf("expected prune hint, got: %s", got)
 	}
@@ -188,7 +188,7 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stripANSI(renderHelp(testTheme(), DepsTab, false, ConfirmDialog{Kind: DialogRestore, ChoiceYes: tt.restoreChoiceYes}, 80))
+			got := stripANSI(renderHelpBar(testTheme(), Model{CurrentTab: DepsTab, Deps: DepsState{Dialog: ConfirmDialog{Kind: DialogRestore, ChoiceYes: tt.restoreChoiceYes}}}, 80))
 			if !strings.Contains(got, tt.want) {
 				t.Fatalf("expected help to contain %q, got %q", tt.want, got)
 			}
@@ -197,7 +197,7 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 }
 
 func TestRenderHelp_DepsTruncatesToWidth(t *testing.T) {
-	got := renderHelp(testTheme(), 2, false, ConfirmDialog{}, 20)
+	got := renderHelpBar(testTheme(), Model{CurrentTab: DepsTab}, 20)
 	if got == "" {
 		t.Fatal("expected non-empty help for deps")
 	}

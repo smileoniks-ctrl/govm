@@ -114,9 +114,9 @@ func FilterProgramMessage(current tea.Model, msg tea.Msg) tea.Msg {
 		(!program.lastRefreshKey.IsZero() && now.Sub(program.lastRefreshKey) < refreshKeyRepeatWindow)
 	program.lastRefreshKey = now
 	if repeated || program.model.refreshInFlight() {
-		// While the filter input has focus, r is ordinary input: the
-		// repeat suppression must not eat the second r of a fast "rr".
-		if program.model.filterInputActive() {
+		// In a text-entry context r is ordinary input: the repeat
+		// suppression must not eat the second r of a fast "rr".
+		if program.model.inputContext().textEntry() {
 			return msg
 		}
 		return nil

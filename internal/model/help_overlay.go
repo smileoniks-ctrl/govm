@@ -9,21 +9,12 @@ import (
 )
 
 // helpOverlaySections resolves which registry sections the Help
-// overlay shows: the bindings of the current input context (open
-// dialog, prune confirmation, delete confirmation, or tab) followed
-// by the matching global bindings. Settings text inputs never appear
-// here: the overlay cannot open while an input has focus.
+// overlay shows: the bindings of the Input context beneath the overlay
+// (open dialog, prune confirmation, delete confirmation, or tab)
+// followed by the matching global bindings. Text-entry contexts never
+// appear here: the overlay cannot open while an input has focus.
 func helpOverlaySections(m Model) []helpSection {
-	switch {
-	case m.Deps.Dialog.Active():
-		return []helpSection{dialogKeyBindings(m.Deps.Dialog), dialogGlobalKeyBindings()}
-	case m.Prune.Confirming():
-		return []helpSection{confirmPruneKeyBindings(), dialogGlobalKeyBindings()}
-	case m.ConfirmingDelete:
-		return []helpSection{confirmDeleteKeyBindings(), dialogGlobalKeyBindings()}
-	default:
-		return []helpSection{tabKeyBindings(m.CurrentTab), globalKeyBindings()}
-	}
+	return contextKeyBindings(m, m.inputContextBeneathHelp())
 }
 
 // renderHelpOverlay builds the themed Help overlay box: a title, then
