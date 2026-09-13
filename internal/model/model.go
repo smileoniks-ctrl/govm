@@ -72,6 +72,7 @@ type Model struct {
 
 	loadCatalog         loadCatalogFunc
 	distributionSource  changeDistributionSourceFunc
+	checkUpgrade        checkUpgradeFunc
 	installGo           installFunc
 	installWithProgress installProgressFunc
 	activateGo          activateFunc
@@ -80,6 +81,12 @@ type Model struct {
 	runPrune            pruneFunc
 	diskUsage           diskUsageFunc
 	shimInPath          func() bool
+
+	// upgradeCheck and upgradeNotice implement the Upgrade notice: the
+	// session's single Latest release lookup and the tag it produced
+	// (empty while nothing is shown). See upgrade_cmd.go.
+	upgradeCheck  upgradeCheckPhase
+	upgradeNotice string
 }
 
 type programModel struct {
@@ -183,6 +190,7 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 type VersionOperations struct {
 	LoadCatalog         loadCatalogFunc
 	DistributionSource  changeDistributionSourceFunc
+	CheckUpgrade        checkUpgradeFunc
 	Install             installFunc
 	InstallWithProgress installProgressFunc
 	Activate            activateFunc
@@ -197,6 +205,7 @@ type VersionOperations struct {
 func (m Model) BindVersionOperations(operations VersionOperations) Model {
 	m.loadCatalog = operations.LoadCatalog
 	m.distributionSource = operations.DistributionSource
+	m.checkUpgrade = operations.CheckUpgrade
 	m.installGo = operations.Install
 	m.installWithProgress = operations.InstallWithProgress
 	m.activateGo = operations.Activate
@@ -220,6 +229,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		load,
 		usage,
+		m.initialUpgradeCheckCmd(),
 		m.Spinner.Tick,
 	)
 }

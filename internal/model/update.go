@@ -94,6 +94,13 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case distributionSourceValidatedMsg:
 		return m.handleDistributionSourceValidation(msg)
 
+	case upgradeCheckStartMsg:
+		return m, m.startUpgradeCheck()
+
+	case upgradeCheckedMsg:
+		m.handleUpgradeChecked(msg)
+		return m, nil
+
 	case diskUsageMsg:
 		m.DiskUsage = msg.Summary
 		outcome := m.projection.setDiskUsage(msg.Summary.VersionBytes)

@@ -117,6 +117,7 @@ func TestSettingsTabRendersRowsAndHelp(t *testing.T) {
 		"Theme: Current",
 		"Deps backups: 10",
 		"Distribution source: https://go.dev/dl/",
+		"Upgrade notice: On",
 		"↑/↓",
 		"enter",
 		"q",

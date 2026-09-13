@@ -577,6 +577,14 @@ func (m *Model) toggleSelectedSetting() tea.Cmd {
 			m.Settings.Values.Theme = config.ThemeCurrent
 		}
 		cmd = m.applyRuntimeTheme()
+	case 4:
+		if m.Settings.Values.UpgradeNotice == config.UpgradeNoticeOn {
+			m.Settings.Values.UpgradeNotice = config.UpgradeNoticeOff
+			m.upgradeNotice = ""
+		} else {
+			m.Settings.Values.UpgradeNotice = config.UpgradeNoticeOn
+			cmd = m.startUpgradeCheck()
+		}
 	}
 	m.saveSettings()
 	return cmd

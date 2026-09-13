@@ -83,6 +83,7 @@ type Theme struct {
 	// General-purpose styles.
 	TitleStyle          lipgloss.Style
 	HeaderMetaStyle     lipgloss.Style
+	HeaderNoticeStyle   lipgloss.Style
 	ActiveTabStyle      lipgloss.Style
 	InactiveTabStyle    lipgloss.Style
 	ActiveBadgeStyle    lipgloss.Style
@@ -143,6 +144,7 @@ func buildTheme(palette themePalette) Theme {
 
 		TitleStyle:          lipgloss.NewStyle().Bold(true).Foreground(palette.Text),
 		HeaderMetaStyle:     lipgloss.NewStyle().Foreground(palette.Muted),
+		HeaderNoticeStyle:   lipgloss.NewStyle().Foreground(palette.Success).Bold(true),
 		ActiveTabStyle:      lipgloss.NewStyle().Foreground(palette.OnPrimary).Background(palette.Primary).Bold(true).Padding(0, 1),
 		InactiveTabStyle:    lipgloss.NewStyle().Foreground(palette.Muted).Padding(0, 1),
 		ActiveBadgeStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("#052E16")).Background(palette.Success).Bold(true).Padding(0, 1),
