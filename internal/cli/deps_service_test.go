@@ -25,12 +25,17 @@ func writeFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-// fakeExecutor is the ExecuteIntent seam substitute. Each operational
-// intent is routed to a configurable function field that returns the
-// raw event the cycle should observe; execErr short-circuits every
-// operational intent with an error (used to exercise the executor
-// failure path).
+// fakeExecutor is the Deps seam substitute. Each operational intent is
+// routed to a configurable function field that returns the raw event
+// the cycle should observe; execErr short-circuits every operational
+// intent with an error (used to exercise the executor failure path).
+// The standalone operations return the configured function's result
+// or zero values.
 type fakeExecutor struct {
+	list    func() ([]deps.ModuleDependency, error)
+	backups func() ([]deps.DependencyBackupInfo, error)
+	restore func(name string) (deps.DependencyRestoreResult, error)
+
 	checkUpdates func(deps.IntentCheckUpdates) deps.Event
 	applyUpdates func(deps.IntentApplyUpdates) deps.Event
 	compensate   func(deps.IntentCompensate) deps.Event
@@ -44,6 +49,27 @@ type fakeExecutor struct {
 	checksCalls     int
 	rollbackCalls   int
 	applyEntries    []deps.DependencyUpdateEntry
+}
+
+func (f *fakeExecutor) List() ([]deps.ModuleDependency, error) {
+	if f.list != nil {
+		return f.list()
+	}
+	return nil, nil
+}
+
+func (f *fakeExecutor) Backups() ([]deps.DependencyBackupInfo, error) {
+	if f.backups != nil {
+		return f.backups()
+	}
+	return nil, nil
+}
+
+func (f *fakeExecutor) Restore(name string) (deps.DependencyRestoreResult, error) {
+	if f.restore != nil {
+		return f.restore(name)
+	}
+	return deps.DependencyRestoreResult{}, nil
 }
 
 func (f *fakeExecutor) Execute(intent deps.Intent) (deps.Event, error) {
@@ -143,16 +169,11 @@ func newUpdateService(confirm func(string, bool) (bool, error)) (*DepsService, *
 		},
 	}
 	svc := &DepsService{
-		ModuleDir:     "/tmp/m",
-		Stdout:        stdout,
-		Stdin:         &bytes.Buffer{},
-		Confirm:       confirm,
-		ExecuteIntent: fx.Execute,
-		ListDeps:      func(string) ([]deps.ModuleDependency, error) { return nil, nil },
-		ListBackups:   func(string) ([]deps.DependencyBackupInfo, error) { return nil, nil },
-		RestoreBackup: func(string, string) (deps.DependencyRestoreResult, error) {
-			return deps.DependencyRestoreResult{}, nil
-		},
+		ModuleDir: "/tmp/m",
+		Stdout:    stdout,
+		Stdin:     &bytes.Buffer{},
+		Confirm:   confirm,
+		Deps:      fx,
 	}
 	return svc, fx, stdout
 }
@@ -166,12 +187,12 @@ func TestRunListPrintsDependencies(t *testing.T) {
 	svc := &DepsService{
 		ModuleDir: "/tmp/m",
 		Stdout:    stdout,
-		ListDeps: func(string) ([]deps.ModuleDependency, error) {
+		Deps: &fakeExecutor{list: func() ([]deps.ModuleDependency, error) {
 			return []deps.ModuleDependency{
 				{Path: "github.com/d/x", Version: "v1.0.0"},
 				{Path: "github.com/i/y", Version: "v0.5.0", Indirect: true},
 			}, nil
-		},
+		}},
 	}
 
 	if err := svc.RunList(); err != nil {
@@ -197,9 +218,9 @@ func TestRunCheckShowsUpdates(t *testing.T) {
 	}
 	stdout := &bytes.Buffer{}
 	svc := &DepsService{
-		ModuleDir:     "/tmp/m",
-		Stdout:        stdout,
-		ExecuteIntent: fx.Execute,
+		ModuleDir: "/tmp/m",
+		Stdout:    stdout,
+		Deps:      fx,
 	}
 
 	if err := svc.RunCheck(deps.LevelLatest); err != nil {
@@ -224,9 +245,9 @@ func TestRunCheckExecutorEventError(t *testing.T) {
 		},
 	}
 	svc := &DepsService{
-		ModuleDir:     "/tmp/m",
-		Stdout:        &bytes.Buffer{},
-		ExecuteIntent: fx.Execute,
+		ModuleDir: "/tmp/m",
+		Stdout:    &bytes.Buffer{},
+		Deps:      fx,
 	}
 	err := svc.RunCheck(deps.LevelLatest)
 	if err == nil {
@@ -240,13 +261,11 @@ func TestRunCheckExecutorEventError(t *testing.T) {
 	}
 }
 
-func TestRunCheckExecuteIntentError(t *testing.T) {
+func TestRunCheckExecutorError(t *testing.T) {
 	svc := &DepsService{
 		ModuleDir: "/tmp/m",
 		Stdout:    &bytes.Buffer{},
-		ExecuteIntent: func(deps.Intent) (deps.Event, error) {
-			return nil, errors.New("boom")
-		},
+		Deps:      &fakeExecutor{execErr: errors.New("boom")},
 	}
 	err := svc.RunCheck(deps.LevelLatest)
 	if err == nil || !strings.Contains(err.Error(), "boom") {
@@ -259,7 +278,7 @@ func TestRunBackupsPrintsNewestBackups(t *testing.T) {
 	svc := &DepsService{
 		ModuleDir: "/tmp/m",
 		Stdout:    stdout,
-		ListBackups: func(string) ([]deps.DependencyBackupInfo, error) {
+		Deps: &fakeExecutor{backups: func() ([]deps.DependencyBackupInfo, error) {
 			return []deps.DependencyBackupInfo{{
 				Name:       "2026-07-09_12-00-00.json",
 				CreatedAt:  time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
@@ -267,7 +286,7 @@ func TestRunBackupsPrintsNewestBackups(t *testing.T) {
 				Kind:       deps.DependencyBackupKindPreUpdate,
 				Updated:    2,
 			}}, nil
-		},
+		}},
 	}
 
 	if err := svc.RunBackups(); err != nil {
@@ -293,13 +312,13 @@ func TestRunRestoreUsesProvidedBackupName(t *testing.T) {
 			confirmCalls++
 			return true, nil
 		},
-		RestoreBackup: func(_ string, name string) (deps.DependencyRestoreResult, error) {
+		Deps: &fakeExecutor{restore: func(name string) (deps.DependencyRestoreResult, error) {
 			gotName = name
 			return deps.DependencyRestoreResult{
 				BackupName:    name,
 				BackupCreated: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
 			}, nil
-		},
+		}},
 	}
 
 	if err := svc.RunRestore("2026-07-09_12-00-00.json"); err != nil {
@@ -323,10 +342,10 @@ func TestRunRestoreDeclineCancels(t *testing.T) {
 		ModuleDir: "/tmp/m",
 		Stdout:    stdout,
 		Confirm:   func(string, bool) (bool, error) { return false, nil },
-		RestoreBackup: func(string, string) (deps.DependencyRestoreResult, error) {
+		Deps: &fakeExecutor{restore: func(string) (deps.DependencyRestoreResult, error) {
 			restoreCalls++
 			return deps.DependencyRestoreResult{}, nil
-		},
+		}},
 	}
 	if err := svc.RunRestore("x.json"); err != nil {
 		t.Fatalf("RunRestore: %v", err)
@@ -673,15 +692,9 @@ func TestDefaultConfirmReadsBufferedAnswersAcrossPrompts(t *testing.T) {
 func TestNewDepsServiceWiresDefaults(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/test\n\ngo 1.26\n")
-	svc, err := NewDepsService(root, &bytes.Buffer{}, &bytes.Buffer{})
-	if err != nil {
-		t.Fatalf("NewDepsService: %v", err)
-	}
-	if svc.ExecuteIntent == nil {
-		t.Fatal("ExecuteIntent should be wired to a deps.Executor")
-	}
-	if svc.ListDeps == nil || svc.ListBackups == nil || svc.RestoreBackup == nil {
-		t.Fatal("one-shot helpers should be wired")
+	svc := NewDepsService(root, &bytes.Buffer{}, &bytes.Buffer{})
+	if _, ok := svc.Deps.(*deps.Executor); !ok {
+		t.Fatalf("Deps = %T, want *deps.Executor", svc.Deps)
 	}
 	if svc.Confirm == nil {
 		t.Fatal("Confirm should be wired")

@@ -2,7 +2,6 @@ package model
 
 import (
 	"charm.land/bubbles/v2/table"
-	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
 )
 
@@ -41,21 +40,37 @@ type DepsState struct {
 	// RowPaths maps table row index to module path, refreshed by
 	// updateDependencyTable, so the cursor can be resolved to a module.
 	RowPaths []string
-	// ExecuteIntent is the injectable execution seam that maps an
-	// operational deps.Intent to a tea.Cmd. nil in production (the
-	// adapter builds a real deps.Executor per operation from the
-	// current Settings backup limit); tests inject a fake to drive the
-	// Cycle without IO.
-	ExecuteIntent func(deps.Intent) tea.Cmd
+	// Executor returns the dependency executor bound to the given
+	// backup limit. It is read before every operation so a mid-session
+	// limit change in Settings is honoured. Production binds a single
+	// deps.Executor for ModuleDir; tests inject a fake to drive the
+	// Cycle and the standalone operations without IO.
+	Executor func(backupLimit int) depsExecutor
+}
+
+// depsExecutor is the seam through which the Deps tab performs every
+// side-effecting dependency operation. *deps.Executor satisfies it.
+type depsExecutor interface {
+	Execute(intent deps.Intent) (deps.Event, error)
+	List() ([]deps.ModuleDependency, error)
+	CheckUpdates() ([]deps.ModuleDependency, error)
+	Backups() ([]deps.DependencyBackupInfo, error)
+	Restore(backupName string) (deps.DependencyRestoreResult, error)
 }
 
 // NewDepsState builds an empty DepsState with the given table model
-// and module directory. The Cycle is a fresh idle value.
+// and module directory. The Cycle is a fresh idle value. The executor
+// resolves the module lazily, so constructing the state never touches
+// the go toolchain.
 func NewDepsState(moduleDir string, tbl table.Model) DepsState {
+	executor := deps.NewExecutor(moduleDir, nil)
 	return DepsState{
 		ModuleDir: moduleDir,
 		Table:     tbl,
 		Cycle:     deps.NewUpdateCycle(),
+		Executor: func(backupLimit int) depsExecutor {
+			return executor.WithBackupLimit(backupLimit)
+		},
 	}
 }
 

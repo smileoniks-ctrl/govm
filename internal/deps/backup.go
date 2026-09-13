@@ -64,16 +64,8 @@ func defaultDependencyBackupStore() dependencyBackupStore {
 	}
 }
 
-// ListDependencyBackups lists the saved dependency backups for the
-// module that contains moduleDir, newest first.
-func ListDependencyBackups(moduleDir string) ([]DependencyBackupInfo, error) {
-	context, err := resolveModuleContext(moduleDir)
-	if err != nil {
-		return nil, err
-	}
-	return listDependencyBackupsResolved(context)
-}
-
+// listDependencyBackupsResolved lists the saved backups of the module,
+// newest first; a module without a backup directory has none.
 func listDependencyBackupsResolved(context moduleContext) ([]DependencyBackupInfo, error) {
 	dir, err := dependencyBackupProjectDir(context.Path)
 	if err != nil {
@@ -87,24 +79,6 @@ func listDependencyBackupsResolved(context moduleContext) ([]DependencyBackupInf
 		return nil, fmt.Errorf("read dependency backups: %w", err)
 	}
 	return backups, nil
-}
-
-// SaveDependencyBackup resolves the module context for moduleDir,
-// saves a persistent dependency backup of snap with the given kind,
-// and applies retention pruning up to backupLimit entries. It is the
-// exported entry point for the atomic-save + retention logic used by
-// the dependency update cycle.
-func SaveDependencyBackup(
-	moduleDir string,
-	snap *DependencySnapshot,
-	kind string,
-	backupLimit int,
-) (DependencyBackupInfo, error) {
-	context, err := resolveModuleContext(moduleDir)
-	if err != nil {
-		return DependencyBackupInfo{}, err
-	}
-	return saveDependencyBackupResolvedWithRetention(context, snap, kind, backupLimit)
 }
 
 func loadDependencyBackupInfos(dir, modulePath string) ([]DependencyBackupInfo, error) {

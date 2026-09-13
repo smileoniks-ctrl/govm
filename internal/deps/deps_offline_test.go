@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-// TestRestoreDependencyBackup_RestoresOfflineWithoutTidy verifies the
+// TestDefaultOperations_RestoreBackup_RestoresOfflineWithoutTidy verifies the
 // hardened manual-restore semantics: the backup files are restored
 // verbatim (exact byte restore), NO `go mod tidy` runs, the refresh
 // is offline, and a pre-restore backup of the current files is saved.
-func TestRestoreDependencyBackup_RestoresOfflineWithoutTidy(t *testing.T) {
+func TestDefaultOperations_RestoreBackup_RestoresOfflineWithoutTidy(t *testing.T) {
 	setTestHome(t)
 	root := t.TempDir()
 	currentMod := "module example.com/app\n\ngo 1.26\n\nrequire example.com/current v1.0.0\n"
@@ -39,7 +39,7 @@ func TestRestoreDependencyBackup_RestoresOfflineWithoutTidy(t *testing.T) {
 
 	var offline bool
 	tidyCalled := false
-	restored, err := restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
+	restoreOps := defaultOperations{operation: dependencyOperation{
 		runCommand: func(_ moduleContext, _ ...string) ([]byte, error) {
 			tidyCalled = true
 			return nil, nil
@@ -58,9 +58,10 @@ func TestRestoreDependencyBackup_RestoresOfflineWithoutTidy(t *testing.T) {
 			offline = true
 			return []ModuleDependency{{Path: "example.com/restored", Version: "v2.0.0"}}, nil
 		},
-	})
+	}}
+	restored, err := restoreOps.RestoreBackup(context, info.Name, defaultDependencyBackupLimit)
 	if err != nil {
-		t.Fatalf("restoreDependencyBackup: %v", err)
+		t.Fatalf("RestoreBackup: %v", err)
 	}
 
 	if !offline {
@@ -86,9 +87,9 @@ func TestRestoreDependencyBackup_RestoresOfflineWithoutTidy(t *testing.T) {
 	if string(gotSum) != restoredSum {
 		t.Fatalf("restored go.sum = %q, want exact %q", gotSum, restoredSum)
 	}
-	backups, err := ListDependencyBackups(root)
+	backups, err := NewExecutor(root, nil).Backups()
 	if err != nil {
-		t.Fatalf("ListDependencyBackups: %v", err)
+		t.Fatalf("Backups: %v", err)
 	}
 	foundPreRestore := false
 	for _, candidate := range backups {
@@ -151,7 +152,7 @@ func TestDefaultOperations_RestoreExact_RefreshesOffline(t *testing.T) {
 	}
 }
 
-func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *testing.T) {
+func TestDefaultOperations_RestoreBackup_RestoreFilesFailureRestoresCurrentFiles(t *testing.T) {
 	setTestHome(t)
 	root := t.TempDir()
 	currentMod := "module example.com/app\n\ngo 1.26\n\nrequire example.com/current v1.0.0\n"
@@ -177,7 +178,7 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 	}
 
 	restoreCalls := 0
-	_, err = restoreDependencyBackup(root, info.Name, defaultDependencyBackupLimit, dependencyOperation{
+	restoreOps := defaultOperations{operation: dependencyOperation{
 		loadBackup: func(ctx moduleContext, name string) (*DependencyBackup, error) {
 			return loadDependencyBackupResolved(ctx, name)
 		},
@@ -199,7 +200,8 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 			t.Fatal("loader must not run after restore error")
 			return nil, nil
 		},
-	})
+	}}
+	_, err = restoreOps.RestoreBackup(context, info.Name, defaultDependencyBackupLimit)
 
 	if err == nil || !strings.Contains(err.Error(), "restore failed") {
 		t.Fatalf("error = %v, want restore error", err)
@@ -221,9 +223,9 @@ func TestRestoreDependencyBackup_RestoreFilesFailureRestoresCurrentFiles(t *test
 	if string(gotSum) != currentSum {
 		t.Fatalf("go.sum after restore failure = %q, want original bytes %q", gotSum, currentSum)
 	}
-	backups, err := ListDependencyBackups(root)
+	backups, err := NewExecutor(root, nil).Backups()
 	if err != nil {
-		t.Fatalf("ListDependencyBackups: %v", err)
+		t.Fatalf("Backups: %v", err)
 	}
 	foundPreRestore := false
 	for _, candidate := range backups {

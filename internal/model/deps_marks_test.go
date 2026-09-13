@@ -78,7 +78,7 @@ func TestMarkOnRowWithoutUpdateStillRendersFilledGlyph(t *testing.T) {
 
 func TestUpdateScopeIsAllDirectUnlessMarked(t *testing.T) {
 	m := marksFixture(t)
-	m.Deps.ExecuteIntent = func(deps.Intent) tea.Cmd { return nil }
+	fakeDepsExecutor{}.bind(&m)
 
 	// No marks: every direct dependency, regardless of the cursor.
 	got := startedSelection(t, press(t, m, tea.KeyPressMsg{Code: 'j'}, tea.KeyPressMsg{Code: 'u'}))
@@ -175,7 +175,7 @@ func TestMarksSurviveRefreshAndDisplayToggle(t *testing.T) {
 
 func TestMarksClearedAfterCycleEndsButKeptOnCancel(t *testing.T) {
 	m := marksFixture(t)
-	m.Deps.ExecuteIntent = func(deps.Intent) tea.Cmd { return nil }
+	fakeDepsExecutor{}.bind(&m)
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeySpace}, tea.KeyPressMsg{Code: 'u'})
 	updated, _ := m.Update(deps.CheckUpdatesDoneEvent{Dependencies: m.Deps.Dependencies})
 	m = updated.(Model)
@@ -223,7 +223,7 @@ func entryPaths(entries []deps.DependencyUpdateEntry) []string {
 
 func TestDialogSpaceTogglesScopeBetweenAllAndCursorModule(t *testing.T) {
 	m := marksFixture(t)
-	m.Deps.ExecuteIntent = func(deps.Intent) tea.Cmd { return nil }
+	fakeDepsExecutor{}.bind(&m)
 	// Cursor on example.com/b (current); nothing marked.
 	m = openUpdateDialog(t, press(t, m, tea.KeyPressMsg{Code: 'j'}))
 	if m.Deps.Dialog.Explicit {
@@ -264,7 +264,7 @@ func TestDialogSpaceTogglesScopeBetweenAllAndCursorModule(t *testing.T) {
 
 func TestDialogScopeStartsMarkedAndKeepsLevelAcrossToggle(t *testing.T) {
 	m := marksFixture(t)
-	m.Deps.ExecuteIntent = func(deps.Intent) tea.Cmd { return nil }
+	fakeDepsExecutor{}.bind(&m)
 	m = openUpdateDialog(t, press(t, m, tea.KeyPressMsg{Code: tea.KeySpace}))
 	if !m.Deps.Dialog.Explicit {
 		t.Fatal("scope should start at the marked set")
@@ -310,7 +310,7 @@ func TestMarkKeysInertWhileOperationInProgress(t *testing.T) {
 func TestUpdateDialogArrowsCycleLevelAndRebuildPlan(t *testing.T) {
 	m := marksFixture(t)
 	m.Deps.Dependencies[0].Versions = []string{"v1.0.0", "v1.0.5", "v1.1.0"}
-	m.Deps.ExecuteIntent = func(deps.Intent) tea.Cmd { return nil }
+	fakeDepsExecutor{}.bind(&m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'u'})
 	updated, _ := m.Update(deps.CheckUpdatesDoneEvent{Dependencies: m.Deps.Dependencies})
 	m = updated.(Model)
@@ -343,7 +343,7 @@ func TestUpdateDialogArrowsCycleLevelAndRebuildPlan(t *testing.T) {
 func TestUpdateDialogEmptyPlanConfirmEndsAsNoUpdates(t *testing.T) {
 	m := marksFixture(t)
 	m.Deps.Dependencies[0].Versions = []string{"v1.0.0", "v1.1.0"}
-	m.Deps.ExecuteIntent = func(deps.Intent) tea.Cmd { return nil }
+	fakeDepsExecutor{}.bind(&m)
 	m = press(t, m, tea.KeyPressMsg{Code: 'u'})
 	updated, _ := m.Update(deps.CheckUpdatesDoneEvent{Dependencies: m.Deps.Dependencies})
 	m = updated.(Model)

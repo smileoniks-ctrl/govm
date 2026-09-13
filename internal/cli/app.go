@@ -354,11 +354,7 @@ func (a *App) DepsCommand(args ...string) bool {
 		fmt.Fprintf(a.out, "❌ Error getting working directory: %v\n", err)
 		return false
 	}
-	service, err := NewDepsService(cwd, a.out, a.in)
-	if err != nil {
-		fmt.Fprintf(a.out, "❌ Error: %v\n", err)
-		return false
-	}
+	service := NewDepsService(cwd, a.out, a.in)
 	switch subcommand {
 	case "list":
 		err = service.RunList()

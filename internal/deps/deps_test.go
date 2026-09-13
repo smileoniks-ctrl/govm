@@ -282,9 +282,9 @@ func TestSaveDependencyBackupDoesNotOverwriteSameSecondBackup(t *testing.T) {
 		t.Fatalf("expected unique backup paths, both were %q", first.Path)
 	}
 
-	backups, err := ListDependencyBackups(dir)
+	backups, err := NewExecutor(dir, nil).Backups()
 	if err != nil {
-		t.Fatalf("ListDependencyBackups: %v", err)
+		t.Fatalf("Backups: %v", err)
 	}
 	if len(backups) != 2 {
 		t.Fatalf("expected 2 backups, got %d: %+v", len(backups), backups)
@@ -315,9 +315,9 @@ func TestListDependencyBackupsSortsNewestFirst(t *testing.T) {
 		}
 	}
 
-	backups, err := ListDependencyBackups(dir)
+	backups, err := NewExecutor(dir, nil).Backups()
 	if err != nil {
-		t.Fatalf("ListDependencyBackups: %v", err)
+		t.Fatalf("Backups: %v", err)
 	}
 	if len(backups) != 2 {
 		t.Fatalf("expected 2 backups, got %d", len(backups))
@@ -349,9 +349,9 @@ func TestListDependencyBackupsSkipsInvalidBackupFiles(t *testing.T) {
 		t.Fatalf("write broken backup: %v", err)
 	}
 
-	backups, err := ListDependencyBackups(dir)
+	backups, err := NewExecutor(dir, nil).Backups()
 	if err != nil {
-		t.Fatalf("ListDependencyBackups: %v", err)
+		t.Fatalf("Backups: %v", err)
 	}
 	if len(backups) != 1 {
 		t.Fatalf("expected 1 valid backup, got %d: %+v", len(backups), backups)
@@ -414,12 +414,12 @@ func TestDependencyBackups_RemainAvailableAfterQuotedModuleIsNormalized(t *testi
 
 	writeFile(t, dir, "go.mod", "module github.com/acme/my-app\n\ngo 1.26\n")
 
-	backups, err := ListDependencyBackups(dir)
+	backups, err := NewExecutor(dir, nil).Backups()
 	if err != nil {
-		t.Fatalf("ListDependencyBackups: %v", err)
+		t.Fatalf("Backups: %v", err)
 	}
 	if len(backups) != 1 || backups[0].Name != info.Name {
-		t.Fatalf("ListDependencyBackups = %+v, want backup %q", backups, info.Name)
+		t.Fatalf("Backups = %+v, want backup %q", backups, info.Name)
 	}
 
 	context, err = resolveModuleContext(dir)

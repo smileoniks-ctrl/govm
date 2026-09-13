@@ -3,16 +3,20 @@ package deps
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 const DefaultBackupLimit = 10
 
 // Operations is the seam through which the Executor performs all
-// side-effecting work. Tests substitute a mock implementation.
-// Operations receive a resolved moduleContext instead of a string
-// moduleDir.
+// side-effecting work, for the update cycle and for the standalone
+// list / backups / restore operations alike. Tests substitute a mock
+// implementation. Operations receive a resolved moduleContext instead
+// of a string moduleDir.
 type Operations interface {
-	CheckUpdates(context moduleContext) ([]ModuleDependency, error)
+	// Load lists the module dependencies; checkUpdates adds the
+	// online update and version lookup.
+	Load(context moduleContext, checkUpdates bool) ([]ModuleDependency, error)
 	ApplyUpdates(
 		context moduleContext,
 		entries []DependencyUpdateEntry,
@@ -28,6 +32,12 @@ type Operations interface {
 		snapshot *DependencySnapshot,
 	) ([]ModuleDependency, error)
 	RunChecks(context moduleContext) (DependencyCheckResult, error)
+	ListBackups(context moduleContext) ([]DependencyBackupInfo, error)
+	RestoreBackup(
+		context moduleContext,
+		backupName string,
+		backupLimit int,
+	) (DependencyRestoreResult, error)
 }
 
 // InvalidIntentError is returned by Execute when the intent is not
@@ -40,79 +50,151 @@ func (e InvalidIntentError) Error() string {
 	return fmt.Sprintf("deps: executor cannot execute non-operational intent %q", e.Intent)
 }
 
+// Executor performs every side-effecting dependency operation for one
+// Go module: the operational intents of the UpdateCycle plus the
+// standalone list, check, backups and restore operations. It is the
+// single entry point for the CLI and the TUI.
+//
+// The module context (root directory and module path) is resolved
+// lazily, once, on the first operation: constructing an Executor never
+// touches the go toolchain, so a TUI started outside a Go module still
+// starts, and "not in a Go module" surfaces as the result of the first
+// operation. The resolution is shared by every copy made with
+// WithBackupLimit.
 type Executor struct {
-	context     moduleContext
+	module      *lazyModuleContext
 	ops         Operations
 	backupLimit int
 }
 
-// NewExecutor creates an Executor for the module containing moduleDir.
-// It resolves the module context (root directory and module path) once
-// at construction. Resolution failure returns an error.
-func NewExecutor(moduleDir string, ops Operations, backupLimit int) (*Executor, error) {
-	context, err := resolveModuleContext(moduleDir)
-	if err != nil {
-		return nil, err
-	}
-	if ops == nil {
-		ops = newDefaultOperations()
-	}
-	if backupLimit < 1 {
-		backupLimit = DefaultBackupLimit
-	}
-	return &Executor{
-		context:     context,
-		ops:         ops,
-		backupLimit: backupLimit,
-	}, nil
+// lazyModuleContext resolves a module context at most once and
+// remembers the outcome, error included.
+type lazyModuleContext struct {
+	resolve func() (moduleContext, error)
+	once    sync.Once
+	context moduleContext
+	err     error
+}
+
+func (l *lazyModuleContext) get() (moduleContext, error) {
+	l.once.Do(func() { l.context, l.err = l.resolve() })
+	return l.context, l.err
+}
+
+// NewExecutor creates an Executor for the module containing moduleDir
+// with the DefaultBackupLimit. A nil ops selects the production
+// Operations.
+func NewExecutor(moduleDir string, ops Operations) *Executor {
+	return newExecutor(&lazyModuleContext{
+		resolve: func() (moduleContext, error) { return resolveModuleContext(moduleDir) },
+	}, ops)
 }
 
 // NewExecutorWithContext creates an Executor with an already resolved
 // moduleContext. Used by tests to inject a fake context.
-func NewExecutorWithContext(context moduleContext, ops Operations, backupLimit int) *Executor {
+func NewExecutorWithContext(context moduleContext, ops Operations) *Executor {
+	return newExecutor(&lazyModuleContext{
+		resolve: func() (moduleContext, error) { return context, nil },
+	}, ops)
+}
+
+func newExecutor(module *lazyModuleContext, ops Operations) *Executor {
 	if ops == nil {
 		ops = newDefaultOperations()
 	}
+	return &Executor{module: module, ops: ops, backupLimit: DefaultBackupLimit}
+}
+
+// WithBackupLimit returns a copy of the Executor whose ApplyUpdates and
+// Restore keep at most backupLimit backups per module. Values below 1
+// select the DefaultBackupLimit. The copy shares the resolved module
+// context, so it is cheap to make before every operation.
+func (e *Executor) WithBackupLimit(backupLimit int) *Executor {
 	if backupLimit < 1 {
 		backupLimit = DefaultBackupLimit
 	}
-	return &Executor{
-		context:     context,
-		ops:         ops,
-		backupLimit: backupLimit,
+	return &Executor{module: e.module, ops: e.ops, backupLimit: backupLimit}
+}
+
+// List returns the module dependencies without going online.
+func (e *Executor) List() ([]ModuleDependency, error) {
+	context, err := e.module.get()
+	if err != nil {
+		return nil, err
 	}
+	return e.ops.Load(context, false)
+}
+
+// CheckUpdates returns the module dependencies with their available
+// updates and known versions. It is the same operation the update
+// cycle runs for IntentCheckUpdates.
+func (e *Executor) CheckUpdates() ([]ModuleDependency, error) {
+	context, err := e.module.get()
+	if err != nil {
+		return nil, err
+	}
+	return e.ops.Load(context, true)
+}
+
+// Backups lists the saved dependency backups of the module, newest
+// first.
+func (e *Executor) Backups() ([]DependencyBackupInfo, error) {
+	context, err := e.module.get()
+	if err != nil {
+		return nil, err
+	}
+	return e.ops.ListBackups(context)
+}
+
+// Restore replaces go.mod and go.sum with the contents of the named
+// backup (exact bytes, no `go mod tidy`), saving the current files
+// first as a pre-restore backup so the restore itself can be undone.
+func (e *Executor) Restore(backupName string) (DependencyRestoreResult, error) {
+	context, err := e.module.get()
+	if err != nil {
+		return DependencyRestoreResult{}, err
+	}
+	return e.ops.RestoreBackup(context, backupName, e.backupLimit)
 }
 
 // Execute runs an operational intent and returns the corresponding
-// event. Non-operational intents return InvalidIntentError.
+// event. Non-operational intents return InvalidIntentError; a module
+// that cannot be resolved returns that error.
 func (e *Executor) Execute(intent Intent) (Event, error) {
-	switch i := intent.(type) {
-	case IntentCheckUpdates:
-		return e.executeCheckUpdates(i), nil
-	case IntentApplyUpdates:
-		return e.executeApplyUpdates(i), nil
-	case IntentCompensate:
-		return e.executeCompensate(i), nil
-	case IntentRunChecks:
-		return e.executeRunChecks(i), nil
-	case IntentRollback:
-		return e.executeRollback(i), nil
-	default:
+	if !IsOperational(intent) {
 		name := "<nil>"
 		if intent != nil {
 			name = intent.intentName()
 		}
 		return nil, InvalidIntentError{Intent: name}
 	}
+	context, err := e.module.get()
+	if err != nil {
+		return nil, err
+	}
+	switch i := intent.(type) {
+	case IntentCheckUpdates:
+		return e.executeCheckUpdates(context, i), nil
+	case IntentApplyUpdates:
+		return e.executeApplyUpdates(context, i), nil
+	case IntentCompensate:
+		return e.executeCompensate(context, i), nil
+	case IntentRunChecks:
+		return e.executeRunChecks(context, i), nil
+	case IntentRollback:
+		return e.executeRollback(context, i), nil
+	default:
+		return nil, InvalidIntentError{Intent: intent.intentName()}
+	}
 }
 
-func (e *Executor) executeCheckUpdates(i IntentCheckUpdates) Event {
-	deps, err := e.ops.CheckUpdates(e.context)
+func (e *Executor) executeCheckUpdates(context moduleContext, _ IntentCheckUpdates) Event {
+	deps, err := e.ops.Load(context, true)
 	return CheckUpdatesDoneEvent{Dependencies: deps, Err: err}
 }
 
-func (e *Executor) executeApplyUpdates(i IntentApplyUpdates) Event {
-	snap, backup, deps, err := e.ops.ApplyUpdates(e.context, i.Entries, e.backupLimit)
+func (e *Executor) executeApplyUpdates(context moduleContext, i IntentApplyUpdates) Event {
+	snap, backup, deps, err := e.ops.ApplyUpdates(context, i.Entries, e.backupLimit)
 	return ApplyUpdatesDoneEvent{
 		Snapshot:     snap,
 		Backup:       backup,
@@ -121,18 +203,18 @@ func (e *Executor) executeApplyUpdates(i IntentApplyUpdates) Event {
 	}
 }
 
-func (e *Executor) executeCompensate(i IntentCompensate) Event {
-	deps, err := e.ops.RestoreExact(e.context, i.Snapshot)
+func (e *Executor) executeCompensate(context moduleContext, i IntentCompensate) Event {
+	deps, err := e.ops.RestoreExact(context, i.Snapshot)
 	return CompensateDoneEvent{Dependencies: deps, Err: err}
 }
 
-func (e *Executor) executeRunChecks(i IntentRunChecks) Event {
-	result, err := e.ops.RunChecks(e.context)
+func (e *Executor) executeRunChecks(context moduleContext, _ IntentRunChecks) Event {
+	result, err := e.ops.RunChecks(context)
 	return ChecksDoneEvent{Result: result, Err: err}
 }
 
-func (e *Executor) executeRollback(i IntentRollback) Event {
-	deps, err := e.ops.RestoreExact(e.context, i.Snapshot)
+func (e *Executor) executeRollback(context moduleContext, i IntentRollback) Event {
+	deps, err := e.ops.RestoreExact(context, i.Snapshot)
 	return RollbackDoneEvent{Dependencies: deps, Err: err}
 }
 
@@ -148,8 +230,12 @@ func newDefaultOperations() defaultOperations {
 	return defaultOperations{operation: defaultDependencyOperation()}
 }
 
-func (o defaultOperations) CheckUpdates(context moduleContext) ([]ModuleDependency, error) {
-	return o.operation.load(context, true)
+func (o defaultOperations) Load(context moduleContext, checkUpdates bool) ([]ModuleDependency, error) {
+	return o.operation.load(context, checkUpdates)
+}
+
+func (o defaultOperations) ListBackups(context moduleContext) ([]DependencyBackupInfo, error) {
+	return listDependencyBackupsResolved(context)
 }
 
 func (o defaultOperations) ApplyUpdates(

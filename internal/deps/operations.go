@@ -9,12 +9,11 @@ import (
 	"strings"
 )
 
-// dependencyOperation is the testable seam through which the
-// dependency operations perform all side-effecting work (command
-// execution, loading, backup save/load, file restore). Production
-// code uses defaultDependencyOperation; tests inject fakes.
-// Resolution happens outside this seam; operations receive a
-// resolved moduleContext.
+// dependencyOperation is the exec/fs seam beneath defaultOperations:
+// command execution, loading, backup save/load, file restore.
+// Production code uses defaultDependencyOperation; tests of
+// defaultOperations inject fakes. Resolution happens outside this
+// seam; operations receive a resolved moduleContext.
 type dependencyOperation struct {
 	restoreFiles func(moduleContext, *DependencySnapshot) error
 	runCommand   func(moduleContext, ...string) ([]byte, error)
@@ -62,55 +61,17 @@ func (operation dependencyOperation) restore(context moduleContext, snap *Depend
 	return operation.restoreFiles(context, snap)
 }
 
-// ListModuleDependencies lists current module dependencies without
-// checking for updates online. The provided moduleDir is treated as a
-// starting directory; the actual module root is resolved via
-// ResolveModuleRoot so the call works from any subfolder of a Go module.
-func ListModuleDependencies(moduleDir string) ([]ModuleDependency, error) {
-	return listModuleDependencies(moduleDir, false, defaultDependencyOperation())
-}
-
-// CheckModuleDependencyUpdates lists module dependencies and checks
-// for available updates online.
-func CheckModuleDependencyUpdates(moduleDir string) ([]ModuleDependency, error) {
-	return listModuleDependencies(moduleDir, true, defaultDependencyOperation())
-}
-
-func listModuleDependencies(
-	moduleDir string,
-	checkUpdates bool,
-	operation dependencyOperation,
-) ([]ModuleDependency, error) {
-	context, err := resolveModuleContext(moduleDir)
-	if err != nil {
-		return nil, err
-	}
-	return operation.load(context, checkUpdates)
-}
-
-// RestoreDependencyBackup restores go.mod and go.sum verbatim from a
-// saved dependency backup (exact byte restore, no `go mod tidy`),
-// saving the current files first as a pre-restore backup so the
-// restore itself can be undone manually. The pre-restore backup is
-// retained on disk.
-func RestoreDependencyBackup(
-	moduleDir string,
+// RestoreBackup restores go.mod and go.sum verbatim from a saved
+// dependency backup (exact byte restore, no `go mod tidy`), saving
+// the current files first as a pre-restore backup so the restore
+// itself can be undone manually. The pre-restore backup is retained
+// on disk.
+func (o defaultOperations) RestoreBackup(
+	context moduleContext,
 	backupName string,
 	backupLimit int,
 ) (DependencyRestoreResult, error) {
-	return restoreDependencyBackup(moduleDir, backupName, backupLimit, defaultDependencyOperation())
-}
-
-func restoreDependencyBackup(
-	moduleDir string,
-	backupName string,
-	backupLimit int,
-	operation dependencyOperation,
-) (DependencyRestoreResult, error) {
-	context, err := resolveModuleContext(moduleDir)
-	if err != nil {
-		return DependencyRestoreResult{}, err
-	}
+	operation := o.operation
 	backup, err := operation.loadBackupResolved(context, backupName)
 	if err != nil {
 		return DependencyRestoreResult{}, err

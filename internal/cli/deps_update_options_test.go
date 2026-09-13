@@ -222,7 +222,7 @@ func TestRunCheckHonoursLevel(t *testing.T) {
 		},
 	}
 	stdout := &bytes.Buffer{}
-	svc := &DepsService{ModuleDir: "/tmp/m", Stdout: stdout, ExecuteIntent: fx.Execute}
+	svc := &DepsService{ModuleDir: "/tmp/m", Stdout: stdout, Deps: fx}
 	if err := svc.RunCheck(deps.LevelPatch); err != nil {
 		t.Fatalf("RunCheck: %v", err)
 	}

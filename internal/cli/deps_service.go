@@ -12,15 +12,24 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/deps"
 )
 
+// depsExecutor is the seam through which DepsService performs every
+// side-effecting dependency operation. *deps.Executor satisfies it in
+// production; tests substitute a fake.
+type depsExecutor interface {
+	Execute(intent deps.Intent) (deps.Event, error)
+	List() ([]deps.ModuleDependency, error)
+	Backups() ([]deps.DependencyBackupInfo, error)
+	Restore(backupName string) (deps.DependencyRestoreResult, error)
+}
+
 // DepsService encapsulates the CLI dependency workflow.
 //
 // The full update lifecycle (check -> confirm apply -> apply ->
 // checks -> rollback) is driven as a synchronous loop over the pure
 // deps.UpdateCycle state machine. Operational intents emitted by the
-// cycle are executed through ExecuteIntent (a thin seam over
-// deps.Executor); confirmation intents are rendered to Stdout and
-// resolved through Confirm. The standalone list / check / backups /
-// restore commands keep their imperative one-shot helpers.
+// cycle are executed through Deps; confirmation intents are rendered
+// to Stdout and resolved through Confirm. The standalone list /
+// backups / restore commands call Deps directly.
 type DepsService struct {
 	ModuleDir string
 	Stdout    io.Writer
@@ -32,27 +41,17 @@ type DepsService struct {
 	// line from Stdin.
 	Confirm func(question string, defaultYes bool) (bool, error)
 
-	// ExecuteIntent runs an operational deps.Intent through the
-	// deps.Executor and returns the resulting event. It is the
-	// single seam through which RunUpdate and RunCheck perform
-	// side-effecting dependency work; tests substitute it instead
-	// of the individual update / checks / rollback helpers.
-	ExecuteIntent func(intent deps.Intent) (deps.Event, error)
-
-	// ListDeps returns the current dependencies of moduleDir.
-	ListDeps func(moduleDir string) ([]deps.ModuleDependency, error)
-
-	// ListBackups returns saved dependency backups for moduleDir.
-	ListBackups func(moduleDir string) ([]deps.DependencyBackupInfo, error)
-
-	// RestoreBackup restores a saved dependency backup by filename.
-	RestoreBackup func(moduleDir, name string) (deps.DependencyRestoreResult, error)
+	// Deps performs the dependency operations of the module at
+	// ModuleDir. It is the single seam through which every command
+	// does side-effecting work; tests substitute a fake.
+	Deps depsExecutor
 }
 
-// NewDepsService builds a service wired to the production helpers.
-// The deps.Executor is constructed with the configured dependency
-// backup limit so retention policy is honoured for every apply.
-func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) (*DepsService, error) {
+// NewDepsService builds a service wired to a deps.Executor bound to
+// the configured dependency backup limit, so retention policy is
+// honoured for every apply and restore. The module is resolved by the
+// first command, not here.
+func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) *DepsService {
 	if stdout == nil {
 		stdout = os.Stdout
 	}
@@ -63,22 +62,13 @@ func NewDepsService(moduleDir string, stdout io.Writer, stdin io.Reader) (*DepsS
 	if err != nil {
 		settings = config.DefaultSettings()
 	}
-	executor, err := deps.NewExecutor(moduleDir, nil, settings.DepsBackupLimit)
-	if err != nil {
-		return nil, fmt.Errorf("resolve module context: %w", err)
-	}
 	return &DepsService{
-		ModuleDir:     moduleDir,
-		Stdout:        stdout,
-		Stdin:         stdin,
-		Confirm:       defaultConfirm(stdin, stdout),
-		ExecuteIntent: executor.Execute,
-		ListDeps:      deps.ListModuleDependencies,
-		ListBackups:   deps.ListDependencyBackups,
-		RestoreBackup: func(moduleDir, name string) (deps.DependencyRestoreResult, error) {
-			return deps.RestoreDependencyBackup(moduleDir, name, settings.DepsBackupLimit)
-		},
-	}, nil
+		ModuleDir: moduleDir,
+		Stdout:    stdout,
+		Stdin:     stdin,
+		Confirm:   defaultConfirm(stdin, stdout),
+		Deps:      deps.NewExecutor(moduleDir, nil).WithBackupLimit(settings.DepsBackupLimit),
+	}
 }
 
 // defaultConfirm returns a Confirm implementation that prompts on
@@ -124,7 +114,7 @@ func yesNoLabel(defaultYes bool) string {
 
 // RunList prints the current module dependencies to Stdout.
 func (s *DepsService) RunList() error {
-	deps, err := s.ListDeps(s.ModuleDir)
+	deps, err := s.Deps.List()
 	if err != nil {
 		return fmt.Errorf("failed to read dependencies: %w", err)
 	}
@@ -153,10 +143,10 @@ func (s *DepsService) RunList() error {
 }
 
 // RunCheck prints the dependencies and marks available updates at the
-// given level. The check is performed through the ExecuteIntent seam
-// so RunCheck and RunUpdate share the same deps.Executor.
+// given level. The check is an IntentCheckUpdates through Deps, so
+// RunCheck and RunUpdate share the same code path.
 func (s *DepsService) RunCheck(level deps.UpdateLevel) error {
-	event, err := s.ExecuteIntent(deps.IntentCheckUpdates{})
+	event, err := s.Deps.Execute(deps.IntentCheckUpdates{})
 	if err != nil {
 		return fmt.Errorf("failed to check dependencies: %w", err)
 	}
@@ -212,7 +202,7 @@ func levelSuffix(level deps.UpdateLevel) string {
 
 // RunBackups prints saved dependency backups for the current module.
 func (s *DepsService) RunBackups() error {
-	backups, err := s.ListBackups(s.ModuleDir)
+	backups, err := s.Deps.Backups()
 	if err != nil {
 		return fmt.Errorf("failed to list dependency backups: %w", err)
 	}
@@ -247,7 +237,7 @@ func (s *DepsService) RunRestore(name string) error {
 		fmt.Fprintln(s.Stdout, "🛑 Restore canceled.")
 		return nil
 	}
-	restored, err := s.RestoreBackup(s.ModuleDir, name)
+	restored, err := s.Deps.Restore(name)
 	if err != nil {
 		return fmt.Errorf("restore failed: %w", err)
 	}
@@ -324,7 +314,7 @@ func (s *DepsService) renderDryRun(i deps.IntentConfirmApply) {
 
 // advance processes a single intent produced by the cycle.
 // Confirmation intents are rendered and resolved through Confirm;
-// operational intents are executed through ExecuteIntent. The
+// operational intents are executed through Deps. The
 // returned cycle/intent pair is the result of feeding the resolved
 // event back into deps.UpdateCycle.Handle.
 func (s *DepsService) advance(c deps.UpdateCycle, intent deps.Intent, confirm func(string, bool) (bool, error)) (deps.UpdateCycle, deps.Intent, error) {
@@ -356,7 +346,7 @@ func (s *DepsService) advance(c deps.UpdateCycle, intent deps.Intent, confirm fu
 		return c.Handle(deps.ConfirmRollbackEvent{Yes: yes})
 	case deps.IntentCheckUpdates, deps.IntentApplyUpdates, deps.IntentCompensate,
 		deps.IntentRunChecks, deps.IntentRollback:
-		event, err := s.ExecuteIntent(intent)
+		event, err := s.Deps.Execute(intent)
 		if err != nil {
 			return c, intent, fmt.Errorf("failed to execute %T: %w", intent, err)
 		}

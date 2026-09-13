@@ -9,81 +9,46 @@ import (
 	"testing"
 )
 
-func TestListModuleDependencies_DelegatesToTypedLoader(t *testing.T) {
+func TestDefaultOperations_Load_PassesCheckUpdatesFlagAndErrors(t *testing.T) {
+	loadErr := errors.New("load failed")
+	want := []ModuleDependency{{
+		Path:    "example.com/dependency",
+		Version: "v1.0.0",
+		Latest:  "v1.1.0",
+	}}
 	tests := []struct {
 		name         string
 		checkUpdates bool
+		loadErr      error
 	}{
-		{
-			name:         "list without update check",
-			checkUpdates: false,
-		},
-		{
-			name:         "check available updates",
-			checkUpdates: true,
-		},
+		{name: "list without update check", checkUpdates: false},
+		{name: "check available updates", checkUpdates: true},
+		{name: "load error", loadErr: loadErr},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root := t.TempDir()
-			writeFile(t, root, "go.mod", "module example.com/module\n\ngo 1.26\n")
-			want := []ModuleDependency{{
-				Path:    "example.com/dependency",
-				Version: "v1.0.0",
-				Latest:  "v1.1.0",
-			}}
-			loaded := false
-			got, err := listModuleDependencies(root, tt.checkUpdates, dependencyOperation{
+			context := moduleContext{Root: t.TempDir(), Path: "example.com/module"}
+			ops := defaultOperations{operation: dependencyOperation{
 				load: func(ctx moduleContext, checkUpdates bool) ([]ModuleDependency, error) {
-					loaded = true
-					if ctx.Root != root {
-						t.Fatalf("root = %q, want %q", ctx.Root, root)
+					if ctx != context {
+						t.Fatalf("context = %+v, want %+v", ctx, context)
 					}
 					if checkUpdates != tt.checkUpdates {
 						t.Fatalf("check updates = %t, want %t", checkUpdates, tt.checkUpdates)
 					}
+					if tt.loadErr != nil {
+						return nil, tt.loadErr
+					}
 					return want, nil
 				},
-			})
-			if err != nil {
-				t.Fatalf("listModuleDependencies: %v", err)
+			}}
+			got, err := ops.Load(context, tt.checkUpdates)
+			if !errors.Is(err, tt.loadErr) {
+				t.Fatalf("error = %v, want %v", err, tt.loadErr)
 			}
-			if !loaded {
-				t.Fatalf("loaded = %t, want true", loaded)
-			}
-			if !reflect.DeepEqual(got, want) {
+			if err == nil && !reflect.DeepEqual(got, want) {
 				t.Fatalf("dependencies = %#v, want %#v", got, want)
-			}
-		})
-	}
-}
-
-func TestListModuleDependencies_ReturnsTypedErrors(t *testing.T) {
-	loadErr := errors.New("load failed")
-	tests := []struct {
-		name      string
-		operation dependencyOperation
-		wantErr   error
-	}{
-		{
-			name: "load error",
-			operation: dependencyOperation{
-				load: func(_ moduleContext, _ bool) ([]ModuleDependency, error) {
-					return nil, loadErr
-				},
-			},
-			wantErr: loadErr,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			root := t.TempDir()
-			writeFile(t, root, "go.mod", "module example.com/module\n\ngo 1.26\n")
-			_, err := listModuleDependencies(root, false, tt.operation)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -246,7 +211,7 @@ func TestDependencyMutationRefreshErrors(t *testing.T) {
 		{
 			name: "restore",
 			run: func() error {
-				_, err := restoreDependencyBackup(root, "saved.json", 3, dependencyOperation{
+				ops := defaultOperations{operation: dependencyOperation{
 					restoreFiles: func(_ moduleContext, _ *DependencySnapshot) error {
 						return nil
 					},
@@ -259,7 +224,8 @@ func TestDependencyMutationRefreshErrors(t *testing.T) {
 					loadBackup: func(moduleContext, string) (*DependencyBackup, error) {
 						return &DependencyBackup{Snapshot: snapshot}, nil
 					},
-				})
+				}}
+				_, err := ops.RestoreBackup(context, "saved.json", 3)
 				return err
 			},
 		},

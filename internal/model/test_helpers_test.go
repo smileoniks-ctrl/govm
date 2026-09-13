@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/config"
+	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -202,4 +203,29 @@ func newTestModel(t *testing.T) Model {
 	m.Status.SetTab("Successfully installed Go 1.24.4", "success")
 	m.Layout = styles.LayoutWide
 	return m
+}
+
+// fakeDepsExecutor is the depsExecutor substitute for model tests.
+// execute drives the update cycle; the standalone operations return
+// zero values. bind installs it on a Model regardless of backup limit.
+type fakeDepsExecutor struct {
+	execute func(deps.Intent) (deps.Event, error)
+}
+
+func (f fakeDepsExecutor) Execute(intent deps.Intent) (deps.Event, error) {
+	if f.execute != nil {
+		return f.execute(intent)
+	}
+	return nil, nil
+}
+
+func (fakeDepsExecutor) List() ([]deps.ModuleDependency, error)         { return nil, nil }
+func (fakeDepsExecutor) CheckUpdates() ([]deps.ModuleDependency, error) { return nil, nil }
+func (fakeDepsExecutor) Backups() ([]deps.DependencyBackupInfo, error)  { return nil, nil }
+func (fakeDepsExecutor) Restore(string) (deps.DependencyRestoreResult, error) {
+	return deps.DependencyRestoreResult{}, nil
+}
+
+func (f fakeDepsExecutor) bind(m *Model) {
+	m.Deps.Executor = func(int) depsExecutor { return f }
 }

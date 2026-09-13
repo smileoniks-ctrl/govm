@@ -188,7 +188,7 @@ func (m *Model) switchTab(target int) (tea.Model, tea.Cmd) {
 	// Lazy-load deps on first visit.
 	if m.CurrentTab == DepsTab && !m.Deps.Loaded {
 		m.Deps.Phase = OpChecking
-		return m, ListModuleDependenciesCmd(m.Deps.ModuleDir)
+		return m, ListModuleDependenciesCmd(m.depsExecutor())
 	}
 	if m.CurrentTab == SettingsTab {
 		return m, tea.ClearScreen
@@ -335,7 +335,7 @@ func (m *Model) handleRefreshKey() (tea.Model, tea.Cmd) {
 		// the scope tab-local, which lets the DependenciesMsg handler
 		// tear it down cleanly when the check finishes.
 		m.Status.Clear()
-		return m, CheckModuleDependencyUpdatesCmd(m.Deps.ModuleDir)
+		return m, CheckModuleDependencyUpdatesCmd(m.depsExecutor())
 	}
 	if m.refreshInFlight() {
 		return m, nil
@@ -363,7 +363,7 @@ func (m *Model) handleBackupsKey() (tea.Model, tea.Cmd) {
 	// the scope tab-local, which lets the DependencyBackupsMsg
 	// handler tear it down cleanly when the load finishes.
 	m.Status.Clear()
-	return m, ListDependencyBackupsCmd(m.Deps.ModuleDir)
+	return m, ListDependencyBackupsCmd(m.depsExecutor())
 }
 
 func (m *Model) handleDeleteKey() (tea.Model, tea.Cmd) {

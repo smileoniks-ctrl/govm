@@ -13,14 +13,21 @@ type mockOps struct {
 	applyUpdatesFn func(moduleContext, []DependencyUpdateEntry, int) (
 		*DependencySnapshot, *DependencyBackupInfo, []ModuleDependency, error,
 	)
-	restoreExactFn func(moduleContext, *DependencySnapshot) ([]ModuleDependency, error)
-	runChecksFn    func(moduleContext) (DependencyCheckResult, error)
+	restoreExactFn  func(moduleContext, *DependencySnapshot) ([]ModuleDependency, error)
+	runChecksFn     func(moduleContext) (DependencyCheckResult, error)
+	listBackupsFn   func(moduleContext) ([]DependencyBackupInfo, error)
+	restoreBackupFn func(moduleContext, string, int) (DependencyRestoreResult, error)
 
+	// checkUpdatesCalls records the roots of Load calls made online;
+	// listCalls those made offline.
 	checkUpdatesCalls []string
+	listCalls         []string
 	applyEntries      []DependencyUpdateEntry
 	applyLimits       []int
 	restoreCalls      []restoreCall
 	checksCalls       []string
+	listBackupsCalls  []string
+	restoreBackups    []restoreBackupCall
 }
 
 type restoreCall struct {
@@ -28,12 +35,38 @@ type restoreCall struct {
 	snapshot  *DependencySnapshot
 }
 
-func (m *mockOps) CheckUpdates(context moduleContext) ([]ModuleDependency, error) {
+type restoreBackupCall struct {
+	moduleDir string
+	name      string
+	limit     int
+}
+
+func (m *mockOps) Load(context moduleContext, checkUpdates bool) ([]ModuleDependency, error) {
+	if !checkUpdates {
+		m.listCalls = append(m.listCalls, context.Root)
+		return nil, nil
+	}
 	m.checkUpdatesCalls = append(m.checkUpdatesCalls, context.Root)
 	if m.checkUpdatesFn != nil {
 		return m.checkUpdatesFn(context)
 	}
 	return nil, nil
+}
+
+func (m *mockOps) ListBackups(context moduleContext) ([]DependencyBackupInfo, error) {
+	m.listBackupsCalls = append(m.listBackupsCalls, context.Root)
+	if m.listBackupsFn != nil {
+		return m.listBackupsFn(context)
+	}
+	return nil, nil
+}
+
+func (m *mockOps) RestoreBackup(context moduleContext, name string, limit int) (DependencyRestoreResult, error) {
+	m.restoreBackups = append(m.restoreBackups, restoreBackupCall{moduleDir: context.Root, name: name, limit: limit})
+	if m.restoreBackupFn != nil {
+		return m.restoreBackupFn(context, name, limit)
+	}
+	return DependencyRestoreResult{}, nil
 }
 
 func (m *mockOps) ApplyUpdates(
@@ -85,7 +118,7 @@ func TestExecutor_CheckUpdates(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	done, ok := mustExecute(t, exec, IntentCheckUpdates{}).(CheckUpdatesDoneEvent)
 	if !ok {
@@ -110,7 +143,7 @@ func TestExecutor_CheckUpdates_PropagatesError(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	done, ok := mustExecute(t, exec, IntentCheckUpdates{}).(CheckUpdatesDoneEvent)
 	if !ok {
@@ -137,7 +170,7 @@ func TestExecutor_ApplyUpdates_Success(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 7)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(7)
 
 	done, ok := mustExecute(t, exec, IntentApplyUpdates{Entries: entries}).(ApplyUpdatesDoneEvent)
 	if !ok {
@@ -179,7 +212,7 @@ func TestExecutor_ApplyUpdates_Failure_StillReturnsSnapshotAndBackup(t *testing.
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 3)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(3)
 
 	done, ok := mustExecute(t, exec, IntentApplyUpdates{Entries: entries}).(ApplyUpdatesDoneEvent)
 	if !ok {
@@ -205,7 +238,7 @@ func TestExecutor_Compensate(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	done, ok := mustExecute(t, exec, IntentCompensate{Snapshot: snap}).(CompensateDoneEvent)
 	if !ok {
@@ -232,7 +265,7 @@ func TestExecutor_RunChecks(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	done, ok := mustExecute(t, exec, IntentRunChecks{}).(ChecksDoneEvent)
 	if !ok {
@@ -255,7 +288,7 @@ func TestExecutor_Rollback(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	done, ok := mustExecute(t, exec, IntentRollback{Snapshot: snap}).(RollbackDoneEvent)
 	if !ok {
@@ -278,7 +311,7 @@ func TestExecutor_Rollback_PropagatesError(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	done, ok := mustExecute(t, exec, IntentRollback{Snapshot: snap}).(RollbackDoneEvent)
 	if !ok {
@@ -291,7 +324,7 @@ func TestExecutor_Rollback_PropagatesError(t *testing.T) {
 
 func TestExecutor_NonOperationalIntentReturnsError(t *testing.T) {
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, nil, 5)
+	exec := NewExecutorWithContext(context, nil).WithBackupLimit(5)
 
 	tests := []Intent{
 		nil,
@@ -317,12 +350,7 @@ func TestExecutor_NonOperationalIntentReturnsError(t *testing.T) {
 }
 
 func TestNewExecutor_NilOpsUsesDefault(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, root, "go.mod", "module example.com/test\n\ngo 1.26\n")
-	exec, err := NewExecutor(root, nil, 0)
-	if err != nil {
-		t.Fatalf("NewExecutor: %v", err)
-	}
+	exec := NewExecutor(t.TempDir(), nil)
 	if exec.ops == nil {
 		t.Fatal("ops should be defaultOperations, not nil")
 	}
@@ -334,9 +362,117 @@ func TestNewExecutor_NilOpsUsesDefault(t *testing.T) {
 func TestNewExecutor_RespectsBackupLimit(t *testing.T) {
 	ops := &mockOps{}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 42)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(42)
 	if exec.backupLimit != 42 {
 		t.Fatalf("backupLimit = %d, want 42", exec.backupLimit)
+	}
+	if low := exec.WithBackupLimit(0); low.backupLimit != DefaultBackupLimit {
+		t.Fatalf("WithBackupLimit(0) = %d, want %d", low.backupLimit, DefaultBackupLimit)
+	}
+}
+
+func TestExecutor_StandaloneOperationsDelegateToOps(t *testing.T) {
+	ops := &mockOps{
+		listBackupsFn: func(moduleContext) ([]DependencyBackupInfo, error) {
+			return []DependencyBackupInfo{{Name: "b.json"}}, nil
+		},
+		restoreBackupFn: func(_ moduleContext, name string, _ int) (DependencyRestoreResult, error) {
+			return DependencyRestoreResult{BackupName: name}, nil
+		},
+	}
+	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(7)
+
+	if _, err := exec.List(); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if _, err := exec.CheckUpdates(); err != nil {
+		t.Fatalf("CheckUpdates: %v", err)
+	}
+	backups, err := exec.Backups()
+	if err != nil || len(backups) != 1 || backups[0].Name != "b.json" {
+		t.Fatalf("Backups = %v, %v", backups, err)
+	}
+	restored, err := exec.Restore("b.json")
+	if err != nil || restored.BackupName != "b.json" {
+		t.Fatalf("Restore = %+v, %v", restored, err)
+	}
+
+	if len(ops.listCalls) != 1 || ops.listCalls[0] != "/test/root" {
+		t.Fatalf("listCalls = %v, want [/test/root]", ops.listCalls)
+	}
+	if len(ops.checkUpdatesCalls) != 1 {
+		t.Fatalf("checkUpdatesCalls = %v, want one call", ops.checkUpdatesCalls)
+	}
+	if len(ops.listBackupsCalls) != 1 {
+		t.Fatalf("listBackupsCalls = %v, want one call", ops.listBackupsCalls)
+	}
+	want := restoreBackupCall{moduleDir: "/test/root", name: "b.json", limit: 7}
+	if len(ops.restoreBackups) != 1 || ops.restoreBackups[0] != want {
+		t.Fatalf("restoreBackups = %+v, want [%+v]", ops.restoreBackups, want)
+	}
+}
+
+func TestExecutor_ResolvesModuleOnceAndSharesAcrossCopies(t *testing.T) {
+	resolves := 0
+	module := &lazyModuleContext{resolve: func() (moduleContext, error) {
+		resolves++
+		return moduleContext{Root: "/test/root", Path: "example.com/test"}, nil
+	}}
+	exec := newExecutor(module, &mockOps{})
+
+	if _, err := exec.List(); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if _, err := exec.WithBackupLimit(3).Backups(); err != nil {
+		t.Fatalf("Backups: %v", err)
+	}
+	if _, err := exec.Execute(IntentRunChecks{}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resolves != 1 {
+		t.Fatalf("module resolved %d times, want 1", resolves)
+	}
+}
+
+func TestExecutor_UnresolvedModuleErrorIsStickyAndSurfacesFromEveryOperation(t *testing.T) {
+	resolves := 0
+	resolveErr := errors.New("not in a Go module")
+	module := &lazyModuleContext{resolve: func() (moduleContext, error) {
+		resolves++
+		return moduleContext{}, resolveErr
+	}}
+	ops := &mockOps{}
+	exec := newExecutor(module, ops)
+
+	if _, err := exec.List(); !errors.Is(err, resolveErr) {
+		t.Fatalf("List error = %v, want %v", err, resolveErr)
+	}
+	if _, err := exec.CheckUpdates(); !errors.Is(err, resolveErr) {
+		t.Fatalf("CheckUpdates error = %v, want %v", err, resolveErr)
+	}
+	if _, err := exec.Backups(); !errors.Is(err, resolveErr) {
+		t.Fatalf("Backups error = %v, want %v", err, resolveErr)
+	}
+	if _, err := exec.Restore("b.json"); !errors.Is(err, resolveErr) {
+		t.Fatalf("Restore error = %v, want %v", err, resolveErr)
+	}
+	event, err := exec.Execute(IntentCheckUpdates{})
+	if !errors.Is(err, resolveErr) || event != nil {
+		t.Fatalf("Execute = %v, %v, want nil event and %v", event, err, resolveErr)
+	}
+	if resolves != 1 {
+		t.Fatalf("module resolved %d times, want 1", resolves)
+	}
+	if len(ops.listCalls)+len(ops.checkUpdatesCalls)+len(ops.listBackupsCalls)+len(ops.restoreBackups) != 0 {
+		t.Fatal("no operation may reach ops when the module is unresolved")
+	}
+}
+
+func TestNewExecutor_OutsideModuleFailsOnFirstOperation(t *testing.T) {
+	exec := NewExecutor(t.TempDir(), &mockOps{})
+	if _, err := exec.List(); err == nil {
+		t.Fatal("List outside a Go module should fail")
 	}
 }
 
@@ -388,7 +524,7 @@ func TestEndToEnd_UpdatedVerified(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	c := NewUpdateCycle()
 	c, intent, _ := c.Handle(StartEvent{ModuleDir: "/mod"})
@@ -436,7 +572,7 @@ func TestEndToEnd_RolledBack(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	c := NewUpdateCycle()
 	c, intent, _ := c.Handle(StartEvent{ModuleDir: "/mod"})
@@ -479,7 +615,7 @@ func TestEndToEnd_UpdateFailedRestored(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	c := NewUpdateCycle()
 	c, intent, _ := c.Handle(StartEvent{ModuleDir: "/mod"})
@@ -515,7 +651,7 @@ func TestEndToEnd_RecoveryRequired_CompensationFailed(t *testing.T) {
 		},
 	}
 	context := moduleContext{Root: "/test/root", Path: "example.com/test"}
-	exec := NewExecutorWithContext(context, ops, 5)
+	exec := NewExecutorWithContext(context, ops).WithBackupLimit(5)
 
 	c := NewUpdateCycle()
 	c, intent, _ := c.Handle(StartEvent{ModuleDir: "/mod"})

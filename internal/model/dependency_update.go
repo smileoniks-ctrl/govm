@@ -145,9 +145,5 @@ func (m *Model) applyRestoreBackupChoice() (tea.Model, tea.Cmd) {
 	m.resetDialog()
 	m.Deps.Phase = OpRestoringBackup
 	m.Status.SetGlobal("Restoring dependency backup...", "info")
-	return m, RestoreDependencyBackupCmd(
-		m.Deps.ModuleDir,
-		backup.Name,
-		m.Settings.Values.DepsBackupLimit,
-	)
+	return m, RestoreDependencyBackupCmd(m.depsExecutor(), backup.Name)
 }

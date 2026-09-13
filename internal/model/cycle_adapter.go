@@ -185,22 +185,18 @@ func cycleRecoveryRequiredMessage(c deps.UpdateCycle) string {
 	return msg
 }
 
-// cycleExecuteCmd builds the tea.Cmd that runs an operational intent.
-// When the ExecuteIntent seam is set (tests) it is used directly;
-// otherwise a real deps.Executor is built from the current Settings
-// backup limit so a mid-session limit change is always respected.
+// depsExecutor returns the dependency executor bound to the current
+// Settings backup limit.
+func (m Model) depsExecutor() depsExecutor {
+	return m.Deps.Executor(m.Settings.Values.DepsBackupLimit)
+}
+
+// cycleExecuteCmd builds the tea.Cmd that runs an operational intent
+// through the dependency executor.
 func (m Model) cycleExecuteCmd(intent deps.Intent) tea.Cmd {
-	if fn := m.Deps.ExecuteIntent; fn != nil {
-		return fn(intent)
-	}
-	moduleDir := m.Deps.ModuleDir
-	limit := m.Settings.Values.DepsBackupLimit
+	executor := m.depsExecutor()
 	return func() tea.Msg {
-		exec, err := deps.NewExecutor(moduleDir, nil, limit)
-		if err != nil {
-			return dependencyExecutionErrMsg{Err: err}
-		}
-		event, err := exec.Execute(intent)
+		event, err := executor.Execute(intent)
 		if err != nil {
 			return dependencyExecutionErrMsg{Err: err}
 		}

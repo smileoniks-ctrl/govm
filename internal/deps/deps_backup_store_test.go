@@ -433,7 +433,7 @@ func TestDefaultOperations_ApplyUpdates_PassesEntriesAndLimit(t *testing.T) {
 	}
 }
 
-func TestRestoreDependencyBackup_ResolvesContextOnce(t *testing.T) {
+func TestDefaultOperations_RestoreBackup_PassesLimitAndReportsBackup(t *testing.T) {
 	context := moduleContext{Root: t.TempDir(), Path: "example.com/app"}
 	writeFile(t, context.Root, "go.mod", "module example.com/app\n\ngo 1.26\n")
 	const backupLimit = 4
@@ -459,9 +459,9 @@ func TestRestoreDependencyBackup_ResolvesContextOnce(t *testing.T) {
 		},
 	}
 
-	result, err := restoreDependencyBackup(context.Root, "saved.json", backupLimit, operation)
+	result, err := defaultOperations{operation: operation}.RestoreBackup(context, "saved.json", backupLimit)
 	if err != nil {
-		t.Fatalf("restoreDependencyBackup: %v", err)
+		t.Fatalf("RestoreBackup: %v", err)
 	}
 	if result.BackupName != "saved.json" || !result.BackupCreated.Equal(backup.CreatedAt) {
 		t.Fatalf("restore result = %+v, want saved backup metadata", result)

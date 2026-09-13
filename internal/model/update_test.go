@@ -21,10 +21,10 @@ func TestUpdateKeyStartsFreshPreflight(t *testing.T) {
 	}
 	m.updateDependencyTable()
 	var issued deps.Intent
-	m.Deps.ExecuteIntent = func(intent deps.Intent) tea.Cmd {
+	fakeDepsExecutor{execute: func(intent deps.Intent) (deps.Event, error) {
 		issued = intent
-		return func() tea.Msg { return nil }
-	}
+		return nil, nil
+	}}.bind(&m)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'u'})
 	got := updated.(Model)
@@ -32,6 +32,7 @@ func TestUpdateKeyStartsFreshPreflight(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected fresh check command")
 	}
+	cmd()
 	if got.Deps.Cycle.Phase() != deps.PhaseChecking {
 		t.Fatalf("cycle phase = %s, want checking", got.Deps.Cycle.Phase())
 	}

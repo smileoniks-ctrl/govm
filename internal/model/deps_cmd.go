@@ -8,8 +8,8 @@ import (
 // This file is the Bubbletea adapter for the standalone (non-cycle)
 // dependency commands: manual refresh, lazy load, backups listing, and
 // restore. It is the only place in the model that knows about tea.Cmd
-// for these operations; the underlying work lives in internal/deps,
-// which is tea-free. The update workflow (check -> apply -> checks ->
+// for these operations; the underlying work is the dependency
+// executor, which is tea-free. The update workflow (check -> apply -> checks ->
 // rollback) is driven by deps.UpdateCycle through cycle_adapter.go and
 // has no entry here.
 
@@ -36,36 +36,36 @@ type DependencyErrMsg struct {
 // ListModuleDependenciesCmd lists current module dependencies without
 // checking for updates online. Used for the lazy load on first visit
 // to the Deps tab.
-func ListModuleDependenciesCmd(moduleDir string) tea.Cmd {
+func ListModuleDependenciesCmd(executor depsExecutor) tea.Cmd {
 	return dependencyCmd(func() (DependenciesMsg, error) {
-		dependencies, err := deps.ListModuleDependencies(moduleDir)
+		dependencies, err := executor.List()
 		return DependenciesMsg(dependencies), err
 	})
 }
 
 // CheckModuleDependencyUpdatesCmd lists module dependencies and checks
 // for available updates online. Used for the manual refresh action.
-func CheckModuleDependencyUpdatesCmd(moduleDir string) tea.Cmd {
+func CheckModuleDependencyUpdatesCmd(executor depsExecutor) tea.Cmd {
 	return dependencyCmd(func() (DependenciesMsg, error) {
-		dependencies, err := deps.CheckModuleDependencyUpdates(moduleDir)
+		dependencies, err := executor.CheckUpdates()
 		return DependenciesMsg(dependencies), err
 	})
 }
 
 // ListDependencyBackupsCmd lists saved dependency backups for the
 // current module, newest first.
-func ListDependencyBackupsCmd(moduleDir string) tea.Cmd {
+func ListDependencyBackupsCmd(executor depsExecutor) tea.Cmd {
 	return dependencyCmd(func() (DependencyBackupsMsg, error) {
-		backups, err := deps.ListDependencyBackups(moduleDir)
+		backups, err := executor.Backups()
 		return DependencyBackupsMsg(backups), err
 	})
 }
 
 // RestoreDependencyBackupCmd restores a saved dependency backup by
 // filename, saving the current files first as a pre-restore backup.
-func RestoreDependencyBackupCmd(moduleDir, backupName string, backupLimit int) tea.Cmd {
+func RestoreDependencyBackupCmd(executor depsExecutor, backupName string) tea.Cmd {
 	return dependencyCmd(func() (DependenciesRestoredMsg, error) {
-		result, err := deps.RestoreDependencyBackup(moduleDir, backupName, backupLimit)
+		result, err := executor.Restore(backupName)
 		return DependenciesRestoredMsg(result), err
 	})
 }
