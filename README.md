@@ -15,6 +15,7 @@ GoVM is a modern tool for managing multiple Go versions on your system. It featu
 - Keyboard shortcut overlay (`?`) that lists every binding of the current context, including the ones the one-line hint bar has no room for
 - Inline fuzzy filter on the Available tab (`f`): type to narrow the version list fzf-style; `enter` applies, `esc` clears
 - Version string shown in the TUI header and CLI help output
+- Upgrade notice in the TUI header (`↑ v0.2.5 available`) when a newer stable govm release is published on GitHub. The TUI makes one request to `api.github.com` per session; the check fails silently, never runs for dev builds, and can be switched off on the Settings tab
 - Command-line interface for quick operations
 - Install any available Go version directly from go.dev
 - Switch between installed versions with a single command
@@ -23,7 +24,7 @@ GoVM is a modern tool for managing multiple Go versions on your system. It featu
 - Go module dependency viewer built into the TUI
 - Dependency update flow with a pre-update snapshot, optional `go test ./...` and `go vet ./...` checks, and one-key rollback to the pre-update state if checks fail
 - Dependency backup management: each update snapshots `go.mod` and `go.sum`, and the TUI and CLI can list, restore, and prune those snapshots
-- Settings tab with a dependency display filter (`Direct only` / `All`), runtime theme switching (`Current` / `Light`), and a configurable dependency backup retention limit
+- Settings tab with a dependency display filter (`Direct only` / `All`), runtime theme switching (`Current` / `Light`), a configurable dependency backup retention limit, and an Upgrade notice toggle
 - Settings persist between sessions and are stored in a platform-specific config file
 - Resilient error handling: the TUI remains responsive (and closable) when go.dev is unreachable
 - Enforced minimum terminal viewport of 64x20; below that, a centred warning explains the required size
@@ -119,7 +120,7 @@ The TUI has four tabs that you cycle through with `Tab` (forward) and `Shift+Tab
 - **Available** - all Go versions available for download from go.dev
 - **Installed** - Go versions installed locally on your system
 - **Deps** - Go module dependencies of the current working directory
-- **Settings** - dependency display filter, theme toggle, and the dependency backup retention limit
+- **Settings** - dependency display filter, theme toggle, the dependency backup retention limit, and the Upgrade notice toggle
 
 The TUI layout is responsive and adjusts to your terminal width:
 
@@ -339,6 +340,7 @@ The **Settings** tab lets you customise GoVM's behaviour. Settings are saved aut
 | Deps display | `Direct only` / `All` | `Direct only` | Controls which dependencies are shown on the Deps tab. `Direct only` hides indirect dependencies; `All` shows every dependency. |
 | Theme | `Current` / `Light` | `Current` | Switches the TUI colour palette. `Current` is the dark theme; `Light` is a light-background theme. The change is applied immediately. |
 | Deps backups | `1`-`100` | `10` | Maximum number of dependency backups retained per module. The newest backup is always kept; the oldest are pruned when the limit is exceeded. |
+| Upgrade notice | `On` / `Off` | `On` | Once per TUI session, looks up the newest stable govm release on GitHub (`api.github.com`) and shows `↑ vX.Y.Z available` in the header when it is newer than the running build. `Off` skips the request entirely and hides a notice that is already showing. Failures are silent, and dev builds never check. |
 
 #### Navigating the Settings tab
 
