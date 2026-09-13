@@ -10,156 +10,156 @@ import (
 	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
 
-// DialogKind identifies which Yes/No dependency dialog is currently
-// active. The zero value DialogIdle means "no dialog open", which
-// makes a freshly constructed ConfirmDialog inactive by default.
-type DialogKind int
+// depsDialogKind identifies which Yes/No dependency dialog is currently
+// active. The zero value dialogIdle means "no dialog open", which
+// makes a freshly constructed depsDialog inactive by default.
+type depsDialogKind int
 
 const (
-	DialogIdle DialogKind = iota
-	DialogUpdate
-	DialogChecks
-	DialogRollback
-	DialogRestore
+	dialogIdle depsDialogKind = iota
+	dialogUpdate
+	dialogChecks
+	dialogRollback
+	dialogRestore
 )
 
-// DialogAction is the side-effect-free signal returned by
-// ConfirmDialog.Handle. Model.Update interprets it to decide which
+// dialogAction is the side-effect-free signal returned by
+// depsDialog.Handle. Model.Update interprets it to decide which
 // per-kind side-effect runner to invoke (apply*Choice / cancel*).
-type DialogAction int
+type dialogAction int
 
 const (
-	DialogNoop        DialogAction = iota // ←/→, ↑/↓ — state already updated inside Handle
-	DialogConfirm                         // enter / y — caller runs the per-kind confirm path
-	DialogCancel                          // n / esc — caller runs the per-kind cancel path
-	DialogChangeLevel                     // ↑/↓ on the update dialog — Level already updated; caller rebuilds the plan
-	DialogChangeScope                     // space on the update dialog — Explicit already flipped; caller rebuilds the plan
+	dialogNoop        dialogAction = iota // ←/→, ↑/↓ — state already updated inside Handle
+	dialogConfirm                         // enter / y — caller runs the per-kind confirm path
+	dialogCancel                          // n / esc — caller runs the per-kind cancel path
+	dialogChangeLevel                     // ↑/↓ on the update dialog — Level already updated; caller rebuilds the plan
+	dialogChangeScope                     // space on the update dialog — Explicit already flipped; caller rebuilds the plan
 )
 
-// ConfirmDialog is the single module that owns the active Yes/No
+// depsDialog is the single module that owns the active Yes/No
 // dialog for the Deps tab. Four dialogs (update, checks, rollback,
 // restore) collapse into one struct parameterised by Kind. Only
 // restore uses the Cursor / MaxCursor pair, which controls navigation
-// over the Backups slice stored on DepsState. UpdateEntries and
+// over the Backups slice stored on depsTab. UpdateEntries and
 // CheckResult retain the prompt payload so rendering stays independent
 // from the cycle's defensively copied accessors. Inconclusive selects
 // the distinct rollback copy used when checks could not run.
 //
 // The struct is intentionally small and side-effect free. Key handling
 // that mutates only dialog-internal state (choice toggle, list
-// navigation) lives in Handle; commands and DepsState mutations stay
-// in Model.Update, which interprets the returned DialogAction.
-type ConfirmDialog struct {
-	Kind          DialogKind
-	ChoiceYes     bool
-	Cursor        int
-	MaxCursor     int
-	Inconclusive  bool
-	UpdateEntries []deps.DependencyUpdateEntry
-	CheckResult   *deps.DependencyCheckResult
+// navigation) lives in Handle; commands and depsTab mutations stay
+// in Model.Update, which interprets the returned dialogAction.
+type depsDialog struct {
+	kind          depsDialogKind
+	choiceYes     bool
+	cursor        int
+	maxCursor     int
+	inconclusive  bool
+	updateEntries []deps.DependencyUpdateEntry
+	checkResult   *deps.DependencyCheckResult
 	// Level is the Update level the update dialog's entries were built
 	// for; Explicit is true when the plan covers ExplicitModules (the
 	// Update scope "marked"/"current") rather than every direct
 	// dependency. ExplicitModules is captured when the dialog opens so
 	// the scope can be toggled back and forth without re-reading marks.
-	Level           deps.UpdateLevel
-	Explicit        bool
-	ExplicitModules []string
+	level           deps.UpdateLevel
+	explicit        bool
+	explicitModules []string
 }
 
 // CanToggleScope reports whether the update dialog has an explicit
 // module set to switch to.
-func (d ConfirmDialog) CanToggleScope() bool {
-	return d.Kind == DialogUpdate && len(d.ExplicitModules) > 0
+func (d depsDialog) canToggleScope() bool {
+	return d.kind == dialogUpdate && len(d.explicitModules) > 0
 }
 
 // Active reports whether any dialog is currently open. The zero value
-// of ConfirmDialog (Kind == DialogIdle) is inactive.
-func (d ConfirmDialog) Active() bool { return d.Kind != DialogIdle }
+// of depsDialog (Kind == dialogIdle) is inactive.
+func (d depsDialog) active() bool { return d.kind != dialogIdle }
 
 // Handle translates a key press into a new dialog state plus an
 // action the caller interprets. It mutates only fields on the dialog
 // itself (ChoiceYes, Cursor). Per-kind commands, status messages, and
 // in-flight flag mutations are performed by the caller based on the
 // returned action.
-func (d ConfirmDialog) Handle(msg tea.KeyPressMsg) (ConfirmDialog, DialogAction) {
+func (d depsDialog) handle(msg tea.KeyPressMsg) (depsDialog, dialogAction) {
 	// The update dialog uses the vertical keys to cycle the level and
 	// space to toggle the scope between all direct dependencies and
 	// the explicit set.
-	if d.Kind == DialogUpdate {
+	if d.kind == dialogUpdate {
 		switch msg.String() {
 		case "up", "k":
-			d.Level = adjacentLevel(d.Level, -1)
-			return d, DialogChangeLevel
+			d.level = adjacentLevel(d.level, -1)
+			return d, dialogChangeLevel
 		case "down", "j":
-			d.Level = adjacentLevel(d.Level, +1)
-			return d, DialogChangeLevel
+			d.level = adjacentLevel(d.level, +1)
+			return d, dialogChangeLevel
 		case "space":
-			if !d.CanToggleScope() {
-				return d, DialogNoop
+			if !d.canToggleScope() {
+				return d, dialogNoop
 			}
-			d.Explicit = !d.Explicit
-			return d, DialogChangeScope
+			d.explicit = !d.explicit
+			return d, dialogChangeScope
 		}
 	}
 	// Restore is the only kind that navigates a list inside the dialog.
-	if d.Kind == DialogRestore {
+	if d.kind == dialogRestore {
 		switch msg.String() {
 		case "up", "k":
-			if d.Cursor > 0 {
-				d.Cursor--
+			if d.cursor > 0 {
+				d.cursor--
 			}
-			return d, DialogNoop
+			return d, dialogNoop
 		case "down", "j":
-			if d.Cursor < d.MaxCursor {
-				d.Cursor++
+			if d.cursor < d.maxCursor {
+				d.cursor++
 			}
-			return d, DialogNoop
+			return d, dialogNoop
 		}
 	}
 
-	var action DialogAction
-	d.ChoiceYes, action = yesNoKeyAction(msg.String(), d.ChoiceYes)
+	var action dialogAction
+	d.choiceYes, action = yesNoKeyAction(msg.String(), d.choiceYes)
 	return d, action
 }
 
 // yesNoKeyAction is the key handling every Yes/No dialog shares: the
 // horizontal keys toggle the highlighted button, enter commits it, y
 // and n answer directly, esc declines. It returns the new choice and
-// the action the caller enacts. DialogConfirm is returned only when
+// the action the caller enacts. dialogConfirm is returned only when
 // the committed choice is Yes; enter on No cancels.
-func yesNoKeyAction(key string, choiceYes bool) (bool, DialogAction) {
+func yesNoKeyAction(key string, choiceYes bool) (bool, dialogAction) {
 	switch key {
 	case "left", "right", "tab", "shift+tab", "h", "l":
-		return !choiceYes, DialogNoop
+		return !choiceYes, dialogNoop
 	case "enter":
 		if choiceYes {
-			return choiceYes, DialogConfirm
+			return choiceYes, dialogConfirm
 		}
-		return choiceYes, DialogCancel
+		return choiceYes, dialogCancel
 	case "y", "Y":
-		return true, DialogConfirm
+		return true, dialogConfirm
 	case "n", "N", "esc":
-		return false, DialogCancel
+		return false, dialogCancel
 	}
-	return choiceYes, DialogNoop
+	return choiceYes, dialogNoop
 }
 
 // Render composes the dialog's body (kind-specific), the shared Yes/No
 // buttons, and the outer renderDialog wrapper. The theme is taken as a
-// parameter so ConfirmDialog has no hidden dependency on package-level
+// parameter so depsDialog has no hidden dependency on package-level
 // style state. Callers only need to overlay the returned string onto
 // the active view.
-func (d ConfirmDialog) Render(t styles.Theme, deps DepsState, viewport viewportSize) string {
-	lines := d.bodyLines(t, deps)
+func (d depsDialog) render(t styles.Theme, tab depsTab, viewport viewportSize) string {
+	lines := d.bodyLines(t, tab)
 	lines = append(lines, "")
 	lines = append(lines, d.renderButtons(t))
 	return renderDialog(t, lipgloss.JoinVertical(lipgloss.Left, lines...), d.errorStyle(), viewport)
 }
 
-func (d ConfirmDialog) renderButtons(t styles.Theme) string {
-	yesLabel, noLabel := buttonLabels(d.Kind)
-	return renderYesNoButtons(t, d.ChoiceYes, yesLabel, noLabel)
+func (d depsDialog) renderButtons(t styles.Theme) string {
+	yesLabel, noLabel := buttonLabels(d.kind)
+	return renderYesNoButtons(t, d.choiceYes, yesLabel, noLabel)
 }
 
 // renderYesNoButtons draws the shared button row of a Yes/No dialog
@@ -178,31 +178,31 @@ func renderYesNoButtons(t styles.Theme, choiceYes bool, yesLabel, noLabel string
 	)
 }
 
-func (d ConfirmDialog) errorStyle() bool {
-	return d.Kind == DialogRollback
+func (d depsDialog) errorStyle() bool {
+	return d.kind == dialogRollback
 }
 
-func buttonLabels(kind DialogKind) (yes, no string) {
+func buttonLabels(kind depsDialogKind) (yes, no string) {
 	switch kind {
-	case DialogRollback:
+	case dialogRollback:
 		return "Roll back", "Keep"
-	case DialogRestore:
+	case dialogRestore:
 		return "Restore", "Cancel"
 	default:
 		return "Yes", "No"
 	}
 }
 
-func (d ConfirmDialog) bodyLines(t styles.Theme, deps DepsState) []string {
-	switch d.Kind {
-	case DialogUpdate:
-		return updateDialogLines(t, d.UpdateEntries, d.Level, d.Explicit, explicitScopeLabel(deps, d.ExplicitModules))
-	case DialogChecks:
+func (d depsDialog) bodyLines(t styles.Theme, tab depsTab) []string {
+	switch d.kind {
+	case dialogUpdate:
+		return updateDialogLines(t, d.updateEntries, d.level, d.explicit, explicitScopeLabel(tab, d.explicitModules))
+	case dialogChecks:
 		return checksDialogLines(t)
-	case DialogRollback:
-		return rollbackDialogLines(t, d.CheckResult, d.Inconclusive)
-	case DialogRestore:
-		return restoreDialogLines(t, deps.Backups, d.Cursor)
+	case dialogRollback:
+		return rollbackDialogLines(t, d.checkResult, d.inconclusive)
+	case dialogRestore:
+		return restoreDialogLines(t, tab.backups, d.cursor)
 	}
 	return nil
 }
@@ -311,11 +311,11 @@ func scopeSelectorLine(t styles.Theme, explicit bool, explicitLabel string) stri
 // explicitScopeLabel names the explicit Update scope offered by the
 // dialog: the marked modules when marks exist, otherwise the module
 // under the cursor. Empty when there is no explicit set.
-func explicitScopeLabel(state DepsState, modules []string) string {
+func explicitScopeLabel(state depsTab, modules []string) string {
 	if len(modules) == 0 {
 		return ""
 	}
-	if n := len(state.MarkedPaths()); n > 0 {
+	if n := len(state.markedPaths()); n > 0 {
 		return fmt.Sprintf("Marked (%d)", n)
 	}
 	return "Current"

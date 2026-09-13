@@ -10,14 +10,14 @@ const (
 // StatusLine is the value-type module that owns the status triplet:
 // text, kind, and scope. It is the fifth application of the "implicit
 // module in flat fields -> explicit value-type module" pattern in this
-// package (after ConfirmDialog, DepsOperation, the version catalog
+// package (after depsDialog, depsPhase, the version catalog
 // projection, and Theme).
 //
 // The zero value is an empty, tab-scoped, inactive status. Reads go
 // through Text/Kind/Scope; mutations go through SetTab/SetGlobal/
 // Clear/ClearTab.
 //
-// Receiver style mirrors DepsState/SettingsState: the value lives as a
+// Receiver style mirrors depsTab/SettingsState: the value lives as a
 // field on Model, reads use value receivers, mutations use pointer
 // receivers invoked from *Model methods (m.Status.SetGlobal(...)).
 type StatusLine struct {

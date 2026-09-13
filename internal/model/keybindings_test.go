@@ -60,9 +60,9 @@ func hasBinding(section helpSection, keys string) bool {
 // TestRegistryDialogSectionsCoverAllKinds walks every dialog kind and
 // asserts the shared choice keys plus the restore-only extras.
 func TestRegistryDialogSectionsCoverAllKinds(t *testing.T) {
-	kinds := []DialogKind{DialogUpdate, DialogChecks, DialogRollback, DialogRestore}
+	kinds := []depsDialogKind{dialogUpdate, dialogChecks, dialogRollback, dialogRestore}
 	for _, kind := range kinds {
-		section := dialogKeyBindings(ConfirmDialog{Kind: kind})
+		section := dialogKeyBindings(depsDialog{kind: kind})
 		if section.title == "" || len(section.bindings) == 0 {
 			t.Fatalf("dialog kind %d: expected titled non-empty section", kind)
 		}
@@ -73,7 +73,7 @@ func TestRegistryDialogSectionsCoverAllKinds(t *testing.T) {
 		}
 	}
 
-	restore := dialogKeyBindings(ConfirmDialog{Kind: DialogRestore, ChoiceYes: true})
+	restore := dialogKeyBindings(depsDialog{kind: dialogRestore, choiceYes: true})
 	if !hasBinding(restore, "↑/↓ k/j") {
 		t.Error("restore section must document backup navigation")
 	}
@@ -84,7 +84,7 @@ func TestRegistryDialogSectionsCoverAllKinds(t *testing.T) {
 		{choiceYes: true, want: "restore"},
 		{choiceYes: false, want: "cancel"},
 	} {
-		section := dialogKeyBindings(ConfirmDialog{Kind: DialogRestore, ChoiceYes: tt.choiceYes})
+		section := dialogKeyBindings(depsDialog{kind: dialogRestore, choiceYes: tt.choiceYes})
 		found := false
 		for _, binding := range section.bindings {
 			if binding.keys == "enter" {

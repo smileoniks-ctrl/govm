@@ -8,7 +8,7 @@ package model
 //
 // The registry lists only bindings the key-dispatch code actually
 // accepts: handleKey, handleDialogKey, handleSettingsKey, or
-// ConfirmDialog.Handle must recognise every documented key.
+// depsDialog.Handle must recognise every documented key.
 
 // keyBinding is one entry in the keybinding registry: the keys as
 // displayed to the user, what they do, and whether the entry also
@@ -116,29 +116,29 @@ func tabKeyBindings(tab int) helpSection {
 // dialogKeyBindings returns the section describing the open
 // dependency dialog. The restore dialog adds backup navigation and
 // re-labels enter to the highlighted button, mirroring the hint bar.
-func dialogKeyBindings(dialog ConfirmDialog) helpSection {
+func dialogKeyBindings(dialog depsDialog) helpSection {
 	var bindings []keyBinding
 	title := "Dialog"
 	escDesc := "cancel"
 	enterDesc := "confirm"
 
-	switch dialog.Kind {
-	case DialogUpdate:
+	switch dialog.kind {
+	case dialogUpdate:
 		title = "Update dependencies"
 		bindings = append(bindings, keyBinding{keys: "↑/↓ k/j", desc: "level", short: true})
-		if dialog.CanToggleScope() {
+		if dialog.canToggleScope() {
 			bindings = append(bindings, keyBinding{keys: "space", desc: "scope", short: true})
 		}
-	case DialogChecks:
+	case dialogChecks:
 		title = "Run checks"
 		escDesc = "skip"
-	case DialogRollback:
+	case dialogRollback:
 		title = "Roll back"
-	case DialogRestore:
+	case dialogRestore:
 		title = "Restore backup"
 		escDesc = "cancel"
 		enterDesc = "cancel"
-		if dialog.ChoiceYes {
+		if dialog.choiceYes {
 			enterDesc = "restore"
 		}
 		bindings = append(bindings, keyBinding{keys: "↑/↓ k/j", desc: "select backup", short: true})

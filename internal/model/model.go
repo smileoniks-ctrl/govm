@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/smileoniks-ctrl/govm/internal/application"
 	"github.com/smileoniks-ctrl/govm/internal/config"
@@ -67,7 +66,7 @@ type Model struct {
 	// Deps groups every field and state machine flag related to the
 	// "Deps" tab. Use the helpers in deps_state.go to keep the
 	// main Model surface small.
-	Deps     DepsState
+	deps     depsTab
 	Settings SettingsState
 
 	loadCatalog         loadCatalogFunc
@@ -148,8 +147,8 @@ func (m Model) Theme() styles.Theme { return m.theme }
 
 // New builds the top-level Model for the TUI. It owns the invariant
 // setup that every caller needs: the spinner, the installed-versions
-// and dependencies tables (columns + height + styles), the version
-// list and its delegate, and the Deps/Settings sub-states.
+// table (columns + height + styles), the version list and its
+// delegate, the Deps tab and the Settings sub-state.
 //
 // The theme parameter is the immutable styles.Theme value built by the
 // caller (main.go at startup, applyRuntimeTheme on toggle, tests
@@ -163,13 +162,6 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 	sp.Spinner = spinner.Dot
 	sp.Style = theme.SpinnerStyle
 
-	depTable := table.New(
-		table.WithColumns(dependencyTableColumns(defaultConstructionWidth)),
-		table.WithFocused(true),
-		table.WithHeight(15),
-	)
-	depTable.SetStyles(tableStyles(theme))
-
 	projection := newCatalogProjectionAdapter(theme)
 	initialLoad := projection.startLoad(catalogLoadPurposeInitial).loadRequest
 
@@ -179,7 +171,7 @@ func New(moduleDir, settingsPath string, settings config.Settings, shimPathWarni
 		Spinner:         sp,
 		Layout:          styles.LayoutNormal,
 		theme:           theme,
-		Deps:            NewDepsState(moduleDir, depTable),
+		deps:            newDepsTab(moduleDir, theme),
 		Settings:        NewSettingsState(settingsPath, settings),
 		ShimPathWarning: shimPathWarning,
 	}
@@ -231,7 +223,7 @@ type DepsOperations struct {
 // executor. Without it every dependency operation reports that it is
 // unavailable.
 func (m Model) BindDepsOperations(operations DepsOperations) Model {
-	m.Deps.Executor = operations.Executor
+	m.deps.newExecutor = operations.Executor
 	return m
 }
 

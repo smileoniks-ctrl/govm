@@ -13,71 +13,71 @@ import (
 // rollback) is driven by deps.UpdateCycle through cycle_adapter.go and
 // has no entry here.
 
-// DependenciesMsg carries the list of module dependencies. It is the
-// result of both ListModuleDependenciesCmd (lazy load) and
-// CheckModuleDependencyUpdatesCmd (manual refresh).
-type DependenciesMsg []deps.ModuleDependency
+// dependenciesMsg carries the list of module dependencies. It is the
+// result of both listDependenciesCmd (lazy load) and
+// checkDependencyUpdatesCmd (manual refresh).
+type dependenciesMsg []deps.ModuleDependency
 
-// DependencyBackupsMsg carries the saved dependency backups for the
+// dependencyBackupsMsg carries the saved dependency backups for the
 // current module.
-type DependencyBackupsMsg []deps.DependencyBackupInfo
+type dependencyBackupsMsg []deps.DependencyBackupInfo
 
-// DependenciesRestoredMsg is sent after restoring a dependency backup.
-type DependenciesRestoredMsg deps.DependencyRestoreResult
+// dependenciesRestoredMsg is sent after restoring a dependency backup.
+type dependenciesRestoredMsg deps.DependencyRestoreResult
 
-// DependencyErrMsg carries a dependency-related error without affecting
+// dependencyErrMsg carries a dependency-related error without affecting
 // the main error state. It is intentionally a plain struct (not an
 // error) so that it does not satisfy the error interface and therefore
 // does not collide with ErrMsg in type switches.
-type DependencyErrMsg struct {
+type dependencyErrMsg struct {
 	Err error
 }
 
-// ListModuleDependenciesCmd lists current module dependencies without
+// listDependenciesCmd lists current module dependencies without
 // checking for updates online. Used for the lazy load on first visit
 // to the Deps tab.
-func ListModuleDependenciesCmd(executor DepsExecutor) tea.Cmd {
-	return dependencyCmd(func() (DependenciesMsg, error) {
+func listDependenciesCmd(executor DepsExecutor) tea.Cmd {
+	return dependencyCmd(func() (dependenciesMsg, error) {
 		dependencies, err := executor.List()
-		return DependenciesMsg(dependencies), err
+		return dependenciesMsg(dependencies), err
 	})
 }
 
-// CheckModuleDependencyUpdatesCmd lists module dependencies and checks
+// checkDependencyUpdatesCmd lists module dependencies and checks
 // for available updates online. Used for the manual refresh action.
-func CheckModuleDependencyUpdatesCmd(executor DepsExecutor) tea.Cmd {
-	return dependencyCmd(func() (DependenciesMsg, error) {
+func checkDependencyUpdatesCmd(executor DepsExecutor) tea.Cmd {
+	return dependencyCmd(func() (dependenciesMsg, error) {
 		dependencies, err := executor.CheckUpdates()
-		return DependenciesMsg(dependencies), err
+		return dependenciesMsg(dependencies), err
 	})
 }
 
-// ListDependencyBackupsCmd lists saved dependency backups for the
+// listDependencyBackupsCmd lists saved dependency backups for the
 // current module, newest first.
-func ListDependencyBackupsCmd(executor DepsExecutor) tea.Cmd {
-	return dependencyCmd(func() (DependencyBackupsMsg, error) {
+func listDependencyBackupsCmd(executor DepsExecutor) tea.Cmd {
+	return dependencyCmd(func() (dependencyBackupsMsg, error) {
 		backups, err := executor.Backups()
-		return DependencyBackupsMsg(backups), err
+		return dependencyBackupsMsg(backups), err
 	})
 }
 
-// RestoreDependencyBackupCmd restores a saved dependency backup by
+// restoreDependencyBackupCmd restores a saved dependency backup by
 // filename, saving the current files first as a pre-restore backup.
-func RestoreDependencyBackupCmd(executor DepsExecutor, backupName string) tea.Cmd {
-	return dependencyCmd(func() (DependenciesRestoredMsg, error) {
+func restoreDependencyBackupCmd(executor DepsExecutor, backupName string) tea.Cmd {
+	return dependencyCmd(func() (dependenciesRestoredMsg, error) {
 		result, err := executor.Restore(backupName)
-		return DependenciesRestoredMsg(result), err
+		return dependenciesRestoredMsg(result), err
 	})
 }
 
 // dependencyCmd adapts a synchronous internal/deps call into a tea.Cmd.
 // The returned tea.Msg is the typed result on success, or
-// DependencyErrMsg wrapping the error on failure.
+// dependencyErrMsg wrapping the error on failure.
 func dependencyCmd[T any](run func() (T, error)) tea.Cmd {
 	return func() tea.Msg {
 		result, err := run()
 		if err != nil {
-			return DependencyErrMsg{Err: err}
+			return dependencyErrMsg{Err: err}
 		}
 		return result
 	}

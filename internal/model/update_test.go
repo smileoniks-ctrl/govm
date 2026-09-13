@@ -13,13 +13,7 @@ import (
 )
 
 func TestUpdateKeyStartsFreshPreflight(t *testing.T) {
-	m := newTestModel(t)
-	m.CurrentTab = DepsTab
-	m.Deps.Loaded = true
-	m.Deps.Dependencies = []deps.ModuleDependency{
-		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
-	}
-	m.updateDependencyTable()
+	m := loadDeps(t, newTestModel(t), testLib())
 	var issued deps.Intent
 	fakeDepsExecutor{execute: func(intent deps.Intent) (deps.Event, error) {
 		issued = intent
@@ -33,22 +27,19 @@ func TestUpdateKeyStartsFreshPreflight(t *testing.T) {
 		t.Fatal("expected fresh check command")
 	}
 	cmd()
-	if got.Deps.Cycle.Phase() != deps.PhaseChecking {
-		t.Fatalf("cycle phase = %s, want checking", got.Deps.Cycle.Phase())
+	if got.deps.cycle.Phase() != deps.PhaseChecking {
+		t.Fatalf("cycle phase = %s, want checking", got.deps.cycle.Phase())
 	}
 	if _, ok := issued.(deps.IntentCheckUpdates); !ok {
 		t.Fatalf("issued intent = %T, want IntentCheckUpdates", issued)
 	}
-	if got.Deps.Dialog.Active() {
+	if got.deps.dialog.active() {
 		t.Fatal("update dialog must wait for the fresh preflight result")
 	}
 }
 
 func TestFreshPreflightResultOpensUpdateDialog(t *testing.T) {
-	m := newTestModel(t)
-	m.CurrentTab = DepsTab
-	m.Deps.Loaded = true
-	m.Deps.Cycle = mustCycleEvent(t, deps.NewUpdateCycle(), deps.StartEvent{ModuleDir: "/tmp/module"})
+	m := feed(t, loadDeps(t, newTestModel(t), testLib()), tea.KeyPressMsg{Code: 'u'})
 
 	fresh := []deps.ModuleDependency{
 		{Path: "github.com/example/lib", Version: "v1.0.1", Latest: "v1.2.0"},
@@ -56,33 +47,32 @@ func TestFreshPreflightResultOpensUpdateDialog(t *testing.T) {
 	updated, _ := m.Update(deps.CheckUpdatesDoneEvent{Dependencies: fresh})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.Kind != DialogUpdate {
-		t.Fatalf("dialog kind = %v, want DialogUpdate", got.Deps.Dialog.Kind)
+	if got.deps.dialog.kind != dialogUpdate {
+		t.Fatalf("dialog kind = %v, want dialogUpdate", got.deps.dialog.kind)
 	}
-	entries := got.Deps.Cycle.Entries()
+	entries := got.deps.cycle.Entries()
 	if len(entries) != 1 || entries[0].OldVersion != "v1.0.1" || entries[0].NewVersion != "v1.2.0" {
 		t.Fatalf("fresh entries = %+v", entries)
 	}
-	if !reflect.DeepEqual(got.Deps.Cycle.Dependencies(), fresh) {
-		t.Fatalf("dependencies = %+v, want %+v", got.Deps.Cycle.Dependencies(), fresh)
+	if !reflect.DeepEqual(got.deps.cycle.Dependencies(), fresh) {
+		t.Fatalf("dependencies = %+v, want %+v", got.deps.cycle.Dependencies(), fresh)
 	}
-	if !got.Deps.Dialog.ChoiceYes {
+	if !got.deps.dialog.choiceYes {
 		t.Fatal("expected default choice Yes")
 	}
-	if !reflect.DeepEqual(got.Deps.Dialog.UpdateEntries, entries) {
-		t.Fatalf("dialog entries = %+v, want %+v", got.Deps.Dialog.UpdateEntries, entries)
+	if !reflect.DeepEqual(got.deps.dialog.updateEntries, entries) {
+		t.Fatalf("dialog entries = %+v, want %+v", got.deps.dialog.updateEntries, entries)
 	}
 }
 
 func TestUnknownCycleIntentReportsError(t *testing.T) {
-	m := newTestModel(t)
-	m.Deps.Cycle = mustCycleEvent(t, deps.NewUpdateCycle(), deps.StartEvent{ModuleDir: "/tmp/module"})
+	m := feed(t, loadDeps(t, newTestModel(t), testLib()), tea.KeyPressMsg{Code: 'u'})
 
-	_, status := m.Deps.applyCycleIntent(nil)
+	_, status := m.deps.applyCycleIntent(nil)
 	m.applyDepsStatus(status)
 	got := m
-	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
-		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
+	if got.deps.cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.deps.cycle.Phase())
 	}
 	if got.Status.Kind() != "error" || !strings.Contains(got.Status.Text(), "Unhandled dependency cycle intent") {
 		t.Fatalf("status = %q (%s)", got.Status.Text(), got.Status.Kind())
@@ -110,8 +100,8 @@ func TestWindowSizeMsgResizesDepsTable(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	got := updated.(Model)
 
-	if got.Deps.Table.Width() <= 0 || got.Deps.Table.Height() <= 0 {
-		t.Fatalf("expected positive deps table size, got %dx%d", got.Deps.Table.Width(), got.Deps.Table.Height())
+	if got.deps.table.Width() <= 0 || got.deps.table.Height() <= 0 {
+		t.Fatalf("expected positive deps table size, got %dx%d", got.deps.table.Width(), got.deps.table.Height())
 	}
 }
 
@@ -135,8 +125,8 @@ func TestWindowSizeMsgUsesNormalContentWidth(t *testing.T) {
 			if got.Width != tt.wantWidth {
 				t.Fatalf("content width = %d, want %d", got.Width, tt.wantWidth)
 			}
-			if got.Deps.Table.Width() != tt.wantWidth {
-				t.Fatalf("deps table width = %d, want %d", got.Deps.Table.Width(), tt.wantWidth)
+			if got.deps.table.Width() != tt.wantWidth {
+				t.Fatalf("deps table width = %d, want %d", got.deps.table.Width(), tt.wantWidth)
 			}
 		})
 	}
@@ -145,7 +135,7 @@ func TestWindowSizeMsgUsesNormalContentWidth(t *testing.T) {
 func TestDependencyBackupsMsgOpensRestoreDialog(t *testing.T) {
 	m := newTestModel(t)
 
-	updated, _ := m.Update(DependencyBackupsMsg{
+	updated, _ := m.Update(dependencyBackupsMsg{
 		{
 			Name:       "2026-07-09_12-00-00.json",
 			ModulePath: "github.com/acme/app",
@@ -155,20 +145,19 @@ func TestDependencyBackupsMsgOpensRestoreDialog(t *testing.T) {
 	})
 	got := updated.(Model)
 
-	if got.Deps.Phase == OpLoadingBackups {
+	if got.deps.phase == depsLoadingBackups {
 		t.Fatal("expected LoadingBackups to be false after backups load")
 	}
-	if got.Deps.Dialog.Kind != DialogRestore {
+	if got.deps.dialog.kind != dialogRestore {
 		t.Fatal("expected restore dialog to open")
 	}
-	if got.Deps.Dialog.Cursor != 0 {
-		t.Fatalf("expected backup cursor 0, got %d", got.Deps.Dialog.Cursor)
+	if got.deps.dialog.cursor != 0 {
+		t.Fatalf("expected backup cursor 0, got %d", got.deps.dialog.cursor)
 	}
 }
 
 func TestApplyResultUpdatesStateAndOpensChecksDialog(t *testing.T) {
-	m := modelAtConfirmApply(t)
-	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmApplyEvent{Yes: true})
+	m := feed(t, modelAtConfirmApply(t), tea.KeyPressMsg{Code: tea.KeyEnter})
 	dependencies := []deps.ModuleDependency{{
 		Path: "github.com/example/lib", Version: "v1.1.0", Latest: "v1.1.0",
 	}}
@@ -182,34 +171,32 @@ func TestApplyResultUpdatesStateAndOpensChecksDialog(t *testing.T) {
 	})
 	got := updated.(Model)
 
-	if got.Deps.Cycle.Phase() != deps.PhaseConfirmChecks {
-		t.Fatalf("cycle phase = %s, want confirm-checks", got.Deps.Cycle.Phase())
+	if got.deps.cycle.Phase() != deps.PhaseConfirmChecks {
+		t.Fatalf("cycle phase = %s, want confirm-checks", got.deps.cycle.Phase())
 	}
-	if got.Deps.Cycle.Snapshot() == nil {
+	if got.deps.cycle.Snapshot() == nil {
 		t.Fatal("expected cycle snapshot")
 	}
-	if got.Deps.Dialog.Kind != DialogChecks || !got.Deps.Dialog.ChoiceYes {
-		t.Fatalf("dialog = %+v, want checks default Yes", got.Deps.Dialog)
+	if got.deps.dialog.kind != dialogChecks || !got.deps.dialog.choiceYes {
+		t.Fatalf("dialog = %+v, want checks default Yes", got.deps.dialog)
 	}
-	if !reflect.DeepEqual(got.Deps.Dependencies, dependencies) {
-		t.Fatalf("dependencies = %+v, want %+v", got.Deps.Dependencies, dependencies)
+	if !reflect.DeepEqual(got.deps.dependencies, dependencies) {
+		t.Fatalf("dependencies = %+v, want %+v", got.deps.dependencies, dependencies)
 	}
 }
 
 func TestChecksPassedCompletesCycle(t *testing.T) {
-	m := modelAtConfirmChecks(t)
-	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmChecksEvent{Yes: true})
-	m.Deps.resetDialog()
+	m := feed(t, modelAtConfirmChecks(t), tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	updated, _ := m.Update(deps.ChecksDoneEvent{
 		Result: deps.DependencyCheckResult{OK: true},
 	})
 	got := updated.(Model)
 
-	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
-		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
+	if got.deps.cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.deps.cycle.Phase())
 	}
-	if got.Deps.Dialog.Active() {
+	if got.deps.dialog.active() {
 		t.Fatal("expected dialog closed")
 	}
 	if got.Status.Kind() != "success" {
@@ -218,8 +205,7 @@ func TestChecksPassedCompletesCycle(t *testing.T) {
 }
 
 func TestChecksFailedOpensRollbackDialog(t *testing.T) {
-	m := modelAtConfirmChecks(t)
-	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmChecksEvent{Yes: true})
+	m := feed(t, modelAtConfirmChecks(t), tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	updated, _ := m.Update(deps.ChecksDoneEvent{
 		Result: deps.DependencyCheckResult{
@@ -229,29 +215,28 @@ func TestChecksFailedOpensRollbackDialog(t *testing.T) {
 	})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.Kind != DialogRollback || !got.Deps.Dialog.ChoiceYes {
-		t.Fatalf("dialog = %+v, want rollback default Yes", got.Deps.Dialog)
+	if got.deps.dialog.kind != dialogRollback || !got.deps.dialog.choiceYes {
+		t.Fatalf("dialog = %+v, want rollback default Yes", got.deps.dialog)
 	}
-	if got.Deps.Dialog.Inconclusive {
+	if got.deps.dialog.inconclusive {
 		t.Fatal("failed command should not be marked inconclusive")
 	}
-	if got.Deps.Dialog.CheckResult == nil || got.Deps.Dialog.CheckResult.Command != "go test ./..." {
-		t.Fatalf("dialog check result = %+v", got.Deps.Dialog.CheckResult)
+	if got.deps.dialog.checkResult == nil || got.deps.dialog.checkResult.Command != "go test ./..." {
+		t.Fatalf("dialog check result = %+v", got.deps.dialog.checkResult)
 	}
-	if got.Deps.Cycle.CheckResult() == nil || got.Deps.Cycle.CheckResult().Command != "go test ./..." {
-		t.Fatalf("check result = %+v", got.Deps.Cycle.CheckResult())
+	if got.deps.cycle.CheckResult() == nil || got.deps.cycle.CheckResult().Command != "go test ./..." {
+		t.Fatalf("check result = %+v", got.deps.cycle.CheckResult())
 	}
 }
 
 func TestChecksInconclusiveOpensDistinctRollbackDialog(t *testing.T) {
-	m := modelAtConfirmChecks(t)
-	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmChecksEvent{Yes: true})
+	m := feed(t, modelAtConfirmChecks(t), tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	updated, _ := m.Update(deps.ChecksDoneEvent{Err: errors.New("could not start go test")})
 	got := updated.(Model)
 
-	if got.Deps.Dialog.Kind != DialogRollback || !got.Deps.Dialog.Inconclusive {
-		t.Fatalf("dialog = %+v, want inconclusive rollback", got.Deps.Dialog)
+	if got.deps.dialog.kind != dialogRollback || !got.deps.dialog.inconclusive {
+		t.Fatalf("dialog = %+v, want inconclusive rollback", got.deps.dialog)
 	}
 	if !strings.Contains(got.Status.Text(), "could not start go test") {
 		t.Fatalf("status = %q", got.Status.Text())
@@ -259,8 +244,7 @@ func TestChecksInconclusiveOpensDistinctRollbackDialog(t *testing.T) {
 }
 
 func TestRollbackResultUpdatesState(t *testing.T) {
-	m := modelAtConfirmRollback(t)
-	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmRollbackEvent{Yes: true})
+	m := feed(t, modelAtConfirmRollback(t), tea.KeyPressMsg{Code: tea.KeyEnter})
 	dependencies := []deps.ModuleDependency{{
 		Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0",
 	}}
@@ -268,11 +252,11 @@ func TestRollbackResultUpdatesState(t *testing.T) {
 	updated, _ := m.Update(deps.RollbackDoneEvent{Dependencies: dependencies})
 	got := updated.(Model)
 
-	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
-		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
+	if got.deps.cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.deps.cycle.Phase())
 	}
-	if !reflect.DeepEqual(got.Deps.Dependencies, dependencies) {
-		t.Fatalf("dependencies = %+v, want %+v", got.Deps.Dependencies, dependencies)
+	if !reflect.DeepEqual(got.deps.dependencies, dependencies) {
+		t.Fatalf("dependencies = %+v, want %+v", got.deps.dependencies, dependencies)
 	}
 	if got.Status.Kind() != "success" {
 		t.Fatalf("status kind = %q, want success", got.Status.Kind())
@@ -280,9 +264,8 @@ func TestRollbackResultUpdatesState(t *testing.T) {
 }
 
 func TestSuccessfulCompensationReportsRestoredUpdateFailure(t *testing.T) {
-	m := modelAtConfirmApply(t)
-	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmApplyEvent{Yes: true})
-	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ApplyUpdatesDoneEvent{
+	m := feed(t, modelAtConfirmApply(t), tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = feed(t, m, deps.ApplyUpdatesDoneEvent{
 		Snapshot: &deps.DependencySnapshot{
 			ModFile: deps.ModuleFileSnapshot{Exists: true, Content: "old"},
 		},
@@ -295,8 +278,8 @@ func TestSuccessfulCompensationReportsRestoredUpdateFailure(t *testing.T) {
 	})
 	got := updated.(Model)
 
-	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
-		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
+	if got.deps.cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.deps.cycle.Phase())
 	}
 	if !strings.Contains(got.Status.Text(), "go get failed") || !strings.Contains(got.Status.Text(), "reverted") {
 		t.Fatalf("status = %q", got.Status.Text())
@@ -304,8 +287,7 @@ func TestSuccessfulCompensationReportsRestoredUpdateFailure(t *testing.T) {
 }
 
 func TestRecoveryRequiredShowsBackupLocation(t *testing.T) {
-	m := modelAtConfirmRollback(t)
-	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmRollbackEvent{Yes: true})
+	m := feed(t, modelAtConfirmRollback(t), tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	updated, _ := m.Update(deps.RollbackDoneEvent{Err: errors.New("disk full")})
 	got := updated.(Model)
@@ -317,14 +299,13 @@ func TestRecoveryRequiredShowsBackupLocation(t *testing.T) {
 }
 
 func TestCycleExecutionErrorResetsState(t *testing.T) {
-	m := modelAtConfirmApply(t)
-	m.Deps.Cycle = mustCycleEvent(t, m.Deps.Cycle, deps.ConfirmApplyEvent{Yes: true})
+	m := feed(t, modelAtConfirmApply(t), tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	updated, _ := m.Update(dependencyExecutionErrMsg{Err: errors.New("invalid executor intent")})
 	got := updated.(Model)
 
-	if got.Deps.Cycle.Phase() != deps.PhaseIdle {
-		t.Fatalf("cycle phase = %s, want idle", got.Deps.Cycle.Phase())
+	if got.deps.cycle.Phase() != deps.PhaseIdle {
+		t.Fatalf("cycle phase = %s, want idle", got.deps.cycle.Phase())
 	}
 	if got.Status.Kind() != "error" {
 		t.Fatalf("status kind = %q, want error", got.Status.Kind())

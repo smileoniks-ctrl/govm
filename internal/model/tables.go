@@ -16,12 +16,12 @@ const (
 	markEmpty  = "○ "
 )
 
-func (s *DepsState) updateDependencyTable() {
-	rows := make([]table.Row, 0, len(s.Dependencies))
-	paths := make([]string, 0, len(s.Dependencies))
-	listed := make(map[string]bool, len(s.Marks))
-	for _, d := range s.Dependencies {
-		if s.Marks[d.Path] {
+func (s *depsTab) updateDependencyTable() {
+	rows := make([]table.Row, 0, len(s.dependencies))
+	paths := make([]string, 0, len(s.dependencies))
+	listed := make(map[string]bool, len(s.marks))
+	for _, d := range s.dependencies {
+		if s.marks[d.Path] {
 			listed[d.Path] = true
 		}
 		if s.display == config.DepsDisplayDirect && d.Indirect {
@@ -32,29 +32,23 @@ func (s *DepsState) updateDependencyTable() {
 	}
 	// Drop marks whose module disappeared from the list (e.g. after a
 	// tidy removed it) so they cannot poison a later selection.
-	for path := range s.Marks {
+	for path := range s.marks {
 		if !listed[path] {
-			delete(s.Marks, path)
+			delete(s.marks, path)
 		}
 	}
-	s.Table.SetRows(rows)
+	s.table.SetRows(rows)
 	// The table parks its cursor at -1 once it has been given no
 	// rows and never brings it back on its own; a listed table always
 	// has the cursor on a row.
-	if s.Table.Cursor() < 0 && len(rows) > 0 {
-		s.Table.SetCursor(0)
+	if s.table.Cursor() < 0 && len(rows) > 0 {
+		s.table.SetCursor(0)
 	}
-	s.RowPaths = paths
+	s.rowPaths = paths
 }
 
-// updateDependencyTable rebuilds the Deps table with the Model's
-// current Settings. Transitional: tests still call it.
-func (m *Model) updateDependencyTable() {
-	m.syncDepsSettings()
-}
-
-func markPrefix(state DepsState, d deps.ModuleDependency) string {
-	if state.Marked(d.Path) {
+func markPrefix(state depsTab, d deps.ModuleDependency) string {
+	if state.marked(d.Path) {
 		return markFilled
 	}
 	return markEmpty

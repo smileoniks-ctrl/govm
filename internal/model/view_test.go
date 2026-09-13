@@ -188,7 +188,7 @@ func TestRenderHelp_RestoreUsesSelectedAction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := stripANSI(renderHelpBar(testTheme(), Model{CurrentTab: DepsTab, Deps: DepsState{Dialog: ConfirmDialog{Kind: DialogRestore, ChoiceYes: tt.restoreChoiceYes}}}, 80))
+			got := stripANSI(renderHelpBar(testTheme(), Model{CurrentTab: DepsTab, deps: depsTab{dialog: depsDialog{kind: dialogRestore, choiceYes: tt.restoreChoiceYes}}}, 80))
 			if !strings.Contains(got, tt.want) {
 				t.Fatalf("expected help to contain %q, got %q", tt.want, got)
 			}

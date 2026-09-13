@@ -56,17 +56,17 @@ var (
 
 // executor returns the dependency executor bound to the current
 // backup limit, or the unavailable executor while none is bound.
-func (s DepsState) executor() DepsExecutor {
-	if s.Executor == nil {
+func (s depsTab) executor() DepsExecutor {
+	if s.newExecutor == nil {
 		return unavailableDepsExecutor{}
 	}
-	return s.Executor(s.backupLimit)
+	return s.newExecutor(s.backupLimit)
 }
 
 // applySettings pushes the Settings values the tab depends on: which
 // rows the table shows and the backup limit handed to the executor.
 // It is the only way Settings reach the tab.
-func (s *DepsState) applySettings(values config.Settings) {
+func (s *depsTab) applySettings(values config.Settings) {
 	values = config.Normalize(values)
 	s.display = values.DepsDisplay
 	s.backupLimit = values.DepsBackupLimit
@@ -75,49 +75,49 @@ func (s *DepsState) applySettings(values config.Settings) {
 
 // enter runs the arrival side effect of the tab: the dependency list
 // is loaded lazily on the first visit.
-func (s *DepsState) enter() (tea.Cmd, depsStatus) {
-	if s.Loaded {
+func (s *depsTab) enter() (tea.Cmd, depsStatus) {
+	if s.loaded {
 		return nil, depsStatus{}
 	}
-	s.Phase = OpChecking
-	return ListModuleDependenciesCmd(s.executor()), depsStatus{}
+	s.phase = depsChecking
+	return listDependenciesCmd(s.executor()), depsStatus{}
 }
 
 // update is the single entry for keys and messages. Keys arrive only
 // while the tab or one of its dialogs owns the keyboard (the Model
 // keeps ctrl+c, q and tab navigation for itself); every other message
 // is either one of the tab's own results or forwarded to the table.
-func (s *DepsState) update(msg tea.Msg) (tea.Cmd, depsStatus) {
+func (s *depsTab) update(msg tea.Msg) (tea.Cmd, depsStatus) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
 		return s.handleKey(msg)
-	case DependenciesMsg:
-		s.Dependencies = msg
-		s.Loaded = true
-		s.Phase = OpIdle
+	case dependenciesMsg:
+		s.dependencies = msg
+		s.loaded = true
+		s.phase = depsIdle
 		s.updateDependencyTable()
 		return nil, depsClearTabStatus
-	case DependencyBackupsMsg:
-		s.Phase = OpIdle
-		s.Backups = msg
+	case dependencyBackupsMsg:
+		s.phase = depsIdle
+		s.backups = msg
 		if len(msg) == 0 {
 			return nil, depsTabStatus("No dependency backups found.", "warning")
 		}
-		s.Dialog = ConfirmDialog{
-			Kind:      DialogRestore,
-			ChoiceYes: true,
-			MaxCursor: len(msg) - 1,
+		s.dialog = depsDialog{
+			kind:      dialogRestore,
+			choiceYes: true,
+			maxCursor: len(msg) - 1,
 		}
 		return nil, depsTabStatus("Select a dependency backup to restore.", "info")
-	case DependenciesRestoredMsg:
+	case dependenciesRestoredMsg:
 		s.setUpdatedDependencies(msg.Dependencies)
 		return nil, depsGlobalStatus(fmt.Sprintf("Restored dependencies from %s.", msg.BackupName), "success")
 	case dependencyExecutionErrMsg:
-		s.Cycle = deps.NewUpdateCycle()
+		s.cycle = deps.NewUpdateCycle()
 		s.resetDialog()
 		return nil, depsGlobalStatus(msg.Err.Error(), "error")
-	case DependencyErrMsg:
-		s.Reset()
+	case dependencyErrMsg:
+		s.reset()
 		if msg.Err != nil {
 			return nil, depsGlobalStatus(msg.Err.Error(), "error")
 		}
@@ -130,7 +130,7 @@ func (s *DepsState) update(msg tea.Msg) (tea.Cmd, depsStatus) {
 		return s.handleCycleEvent(msg.(deps.Event))
 	}
 	var cmd tea.Cmd
-	s.Table, cmd = s.Table.Update(msg)
+	s.table, cmd = s.table.Update(msg)
 	return cmd, depsStatus{}
 }
 
@@ -138,8 +138,8 @@ func (s *DepsState) update(msg tea.Msg) (tea.Cmd, depsStatus) {
 // the Model routes to update regardless of the current tab.
 func isDepsMsg(msg tea.Msg) bool {
 	switch msg.(type) {
-	case DependenciesMsg, DependencyBackupsMsg, DependenciesRestoredMsg,
-		dependencyExecutionErrMsg, DependencyErrMsg,
+	case dependenciesMsg, dependencyBackupsMsg, dependenciesRestoredMsg,
+		dependencyExecutionErrMsg, dependencyErrMsg,
 		deps.CheckUpdatesDoneEvent, deps.ApplyUpdatesDoneEvent,
 		deps.CompensateDoneEvent, deps.ChecksDoneEvent, deps.RollbackDoneEvent:
 		return true
@@ -149,12 +149,12 @@ func isDepsMsg(msg tea.Msg) bool {
 
 // handleKey maps a key to the tab's own action. While an operation is
 // in flight the action keys are inert; an unknown key has no effect.
-func (s *DepsState) handleKey(msg tea.KeyPressMsg) (tea.Cmd, depsStatus) {
-	if s.Dialog.Active() {
+func (s *depsTab) handleKey(msg tea.KeyPressMsg) (tea.Cmd, depsStatus) {
+	if s.dialog.active() {
 		return s.handleDialogKey(msg)
 	}
 	key := msg.String()
-	if s.operationInProgress() {
+	if s.busy() {
 		switch key {
 		case "u", "r", "b", "space", "a":
 			return nil, depsStatus{}
@@ -173,7 +173,7 @@ func (s *DepsState) handleKey(msg tea.KeyPressMsg) (tea.Cmd, depsStatus) {
 		return s.toggleMarkAll()
 	case "up", "down", "k", "j":
 		var cmd tea.Cmd
-		s.Table, cmd = s.Table.Update(msg)
+		s.table, cmd = s.table.Update(msg)
 		return cmd, depsStatus{}
 	}
 	return nil, depsStatus{}
@@ -181,8 +181,8 @@ func (s *DepsState) handleKey(msg tea.KeyPressMsg) (tea.Cmd, depsStatus) {
 
 // startUpdate begins an update cycle for the current Update scope:
 // the marked modules, else every direct dependency.
-func (s *DepsState) startUpdate() (tea.Cmd, depsStatus) {
-	if !s.Loaded {
+func (s *depsTab) startUpdate() (tea.Cmd, depsStatus) {
+	if !s.loaded {
 		return nil, depsStatus{}
 	}
 	selection, ok := s.updateSelection()
@@ -195,76 +195,76 @@ func (s *DepsState) startUpdate() (tea.Cmd, depsStatus) {
 // startUpdateCycle creates a fresh Cycle, feeds StartEvent, and
 // returns the tea.Cmd that runs the initial check-updates intent. The
 // update confirmation dialog only opens after the check completes.
-func (s *DepsState) startUpdateCycle(selection deps.UpdateSelection) (tea.Cmd, depsStatus) {
-	s.Cycle = deps.NewUpdateCycle()
-	next, intent, err := s.Cycle.Handle(deps.StartEvent{ModuleDir: s.ModuleDir, Selection: selection})
+func (s *depsTab) startUpdateCycle(selection deps.UpdateSelection) (tea.Cmd, depsStatus) {
+	s.cycle = deps.NewUpdateCycle()
+	next, intent, err := s.cycle.Handle(deps.StartEvent{ModuleDir: s.moduleDir, Selection: selection})
 	if err != nil {
 		return nil, depsTabStatus("Could not start update.", "error")
 	}
-	s.Cycle = next
+	s.cycle = next
 	return s.cycleExecuteCmd(intent), depsClearStatus
 }
 
 // refresh re-lists the dependencies and checks for updates online.
 // Progress text comes from SpinnerText while the phase is in flight,
 // so only a stale status needs clearing; the tab-local scope lets the
-// DependenciesMsg handler tear it down cleanly.
-func (s *DepsState) refresh() (tea.Cmd, depsStatus) {
-	s.Phase = OpChecking
-	return CheckModuleDependencyUpdatesCmd(s.executor()), depsClearStatus
+// dependenciesMsg handler tear it down cleanly.
+func (s *depsTab) refresh() (tea.Cmd, depsStatus) {
+	s.phase = depsChecking
+	return checkDependencyUpdatesCmd(s.executor()), depsClearStatus
 }
 
 // loadBackups lists the saved backups; the restore dialog opens when
 // the list arrives.
-func (s *DepsState) loadBackups() (tea.Cmd, depsStatus) {
-	s.Phase = OpLoadingBackups
-	return ListDependencyBackupsCmd(s.executor()), depsClearStatus
+func (s *depsTab) loadBackups() (tea.Cmd, depsStatus) {
+	s.phase = depsLoadingBackups
+	return listDependencyBackupsCmd(s.executor()), depsClearStatus
 }
 
 // toggleMark flips the Mark on the module under the cursor.
-func (s *DepsState) toggleMark() (tea.Cmd, depsStatus) {
-	if !s.Loaded {
+func (s *depsTab) toggleMark() (tea.Cmd, depsStatus) {
+	if !s.loaded {
 		return nil, depsStatus{}
 	}
 	d, ok := s.cursorDependency()
 	if !ok {
 		return nil, depsStatus{}
 	}
-	s.ToggleMark(d.Path)
+	s.flipMark(d.Path)
 	s.updateDependencyTable()
 	return nil, depsStatus{}
 }
 
 // toggleMarkAll marks every listed dependency, or clears all marks
 // when any exist.
-func (s *DepsState) toggleMarkAll() (tea.Cmd, depsStatus) {
-	if !s.Loaded {
+func (s *depsTab) toggleMarkAll() (tea.Cmd, depsStatus) {
+	if !s.loaded {
 		return nil, depsStatus{}
 	}
-	added := s.ToggleMarkAll()
+	added := s.flipAllMarks()
 	s.updateDependencyTable()
-	if n := len(s.MarkedPaths()); added {
+	if n := len(s.markedPaths()); added {
 		return nil, depsTabStatus(fmt.Sprintf("Marked %d %s.", n, deps.Pluralize(n, "dependency", "dependencies")), "info")
 	}
 	return nil, depsTabStatus("Marks cleared.", "info")
 }
 
 // view renders the tab's content canvas.
-func (s DepsState) view() string { return s.Table.View() }
+func (s depsTab) view() string { return s.table.View() }
 
 // dialogActive reports whether one of the tab's dialogs owns the
 // keyboard; the Model's Input context resolver reads it.
-func (s DepsState) dialogActive() bool { return s.Dialog.Active() }
+func (s depsTab) dialogActive() bool { return s.dialog.active() }
 
 // dialogView renders the open dialog for the overlay.
-func (s DepsState) dialogView(t styles.Theme, viewport viewportSize) string {
-	return s.Dialog.Render(t, s, viewport)
+func (s depsTab) dialogView(t styles.Theme, viewport viewportSize) string {
+	return s.dialog.render(t, s, viewport)
 }
 
 // dialogKeyBindings describes the open dialog for the hint bar and the
 // Help overlay.
-func (s DepsState) dialogKeyBindings() helpSection {
-	return dialogKeyBindings(s.Dialog)
+func (s depsTab) dialogKeyBindings() helpSection {
+	return dialogKeyBindings(s.dialog)
 }
 
 // Model side: the adapter between the tab and the Model's StatusLine.
@@ -285,7 +285,7 @@ func (m *Model) applyDepsStatus(s depsStatus) {
 
 // delegateDeps routes msg to the Deps tab and applies its status.
 func (m *Model) delegateDeps(msg tea.Msg) (tea.Model, tea.Cmd) {
-	cmd, status := m.Deps.update(msg)
+	cmd, status := m.deps.update(msg)
 	m.applyDepsStatus(status)
 	return m, cmd
 }
@@ -293,5 +293,5 @@ func (m *Model) delegateDeps(msg tea.Msg) (tea.Model, tea.Cmd) {
 // syncDepsSettings pushes the current Settings values to the Deps tab.
 // Call it after any change to Settings.Values.
 func (m *Model) syncDepsSettings() {
-	m.Deps.applySettings(m.Settings.Values)
+	m.deps.applySettings(m.Settings.Values)
 }

@@ -6,51 +6,54 @@ import (
 	"charm.land/bubbles/v2/table"
 	"github.com/smileoniks-ctrl/govm/internal/config"
 	"github.com/smileoniks-ctrl/govm/internal/deps"
+	"github.com/smileoniks-ctrl/govm/internal/styles"
 )
 
-// DepsOperation tracks standalone (non-cycle) dependency operations:
+// depsPhase tracks standalone (non-cycle) dependency operations:
 // manual refresh, lazy load, backups listing, and restore. The update
 // workflow (check -> apply -> checks -> rollback) is driven by the
 // deps.UpdateCycle and has no entry here.
-type DepsOperation int
+type depsPhase int
 
 const (
-	OpIdle DepsOperation = iota
-	OpChecking
-	OpLoadingBackups
-	OpRestoringBackup
+	depsIdle depsPhase = iota
+	depsChecking
+	depsLoadingBackups
+	depsRestoringBackup
 )
 
-// DepsState groups everything that belongs to the "Deps" tab. The
-// deps.UpdateCycle owns the update-workflow phase, pending decision,
-// entries, snapshot, and check context. DepsState retains only
-// presentation/standalone state: the dependency table projection, the
-// standalone operation phase, saved backups for the restore flow, and
-// the active confirmation dialog.
-type DepsState struct {
-	ModuleDir    string
-	Table        table.Model
-	Dependencies []deps.ModuleDependency
-	Loaded       bool
-	Phase        DepsOperation
-	Backups      []deps.DependencyBackupInfo
-	Dialog       ConfirmDialog
-	Cycle        deps.UpdateCycle
-	// Marks holds the module paths the user marked for the next
+// depsTab is the Deps tab module: everything the tab owns, behind the
+// entry points in deps_tab.go. The deps.UpdateCycle owns the
+// update-workflow phase, pending decision, entries, snapshot, and
+// check context; depsTab holds the presentation and standalone state
+// around it: the dependency table projection, the standalone
+// operation phase, saved backups for the restore flow, the Marks and
+// the active confirmation dialog. Every field is private to the
+// module; the Model and the tests reach it only through its methods.
+type depsTab struct {
+	moduleDir    string
+	table        table.Model
+	dependencies []deps.ModuleDependency
+	loaded       bool
+	phase        depsPhase
+	backups      []deps.DependencyBackupInfo
+	dialog       depsDialog
+	cycle        deps.UpdateCycle
+	// marks holds the module paths the user marked for the next
 	// update (see CONTEXT.md "Mark"). Keyed by path, never by row,
 	// because the table hides indirect rows and is rebuilt often.
-	Marks map[string]bool
-	// RowPaths maps table row index to module path, refreshed by
+	marks map[string]bool
+	// rowPaths maps table row index to module path, refreshed by
 	// updateDependencyTable, so the cursor can be resolved to a module.
-	RowPaths []string
-	// Executor returns the dependency executor bound to the given
+	rowPaths []string
+	// newExecutor returns the dependency executor bound to the given
 	// backup limit. It is read before every operation so a mid-session
 	// limit change in Settings is honoured. It is bound through
 	// Model.BindDepsOperations: main.go binds a single deps.Executor
-	// for ModuleDir; tests bind a fake to drive the Cycle and the
+	// for moduleDir; tests bind a fake to drive the cycle and the
 	// standalone operations without IO. Unbound, every operation
 	// reports errDepsUnavailable through the ordinary error path.
-	Executor func(backupLimit int) DepsExecutor
+	newExecutor func(backupLimit int) DepsExecutor
 	// display and backupLimit are the Settings values the tab depends
 	// on, pushed through applySettings.
 	display     config.DepsDisplayMode
@@ -93,40 +96,59 @@ func (unavailableDepsExecutor) Restore(string) (deps.DependencyRestoreResult, er
 	return deps.DependencyRestoreResult{}, errDepsUnavailable
 }
 
-// NewDepsState builds an empty DepsState with the given table model
-// and module directory. The Cycle is a fresh idle value. No executor
-// is bound yet: constructing the state never touches the go toolchain.
-func NewDepsState(moduleDir string, tbl table.Model) DepsState {
-	return DepsState{
-		ModuleDir: moduleDir,
-		Table:     tbl,
-		Cycle:     deps.NewUpdateCycle(),
+// newDepsTab builds an empty Deps tab for the module in moduleDir,
+// with its table styled by theme. The Cycle is a fresh idle value. No
+// executor is bound yet: constructing the tab never touches the go
+// toolchain.
+func newDepsTab(moduleDir string, theme styles.Theme) depsTab {
+	tbl := table.New(
+		table.WithColumns(dependencyTableColumns(defaultConstructionWidth)),
+		table.WithFocused(true),
+		table.WithHeight(15),
+	)
+	tbl.SetStyles(tableStyles(theme))
+	return depsTab{
+		moduleDir: moduleDir,
+		table:     tbl,
+		cycle:     deps.NewUpdateCycle(),
 	}
+}
+
+// resize fits the table to the content area the Model has laid out.
+func (s *depsTab) resize(width, height int) {
+	s.table.SetWidth(width)
+	s.table.SetHeight(height)
+	s.table.SetColumns(dependencyTableColumns(width))
+}
+
+// applyTheme restyles the table after a runtime theme change.
+func (s *depsTab) applyTheme(theme styles.Theme) {
+	s.table.SetStyles(tableStyles(theme))
 }
 
 // operationInProgress reports whether any dependency operation —
 // standalone or update-cycle — is in flight.
-func (s DepsState) operationInProgress() bool {
-	if s.Phase != OpIdle {
+func (s depsTab) busy() bool {
+	if s.phase != depsIdle {
 		return true
 	}
-	p := s.Cycle.Phase()
+	p := s.cycle.Phase()
 	return p != deps.PhaseIdle && p != deps.PhaseTerminal
 }
 
 // SpinnerText returns the noun phrase to render next to the spinner
 // while an operation is in-flight, or "" if the caller should fall
 // back to its own status text.
-func (s DepsState) SpinnerText() string {
-	switch s.Phase {
-	case OpChecking:
+func (s depsTab) spinnerText() string {
+	switch s.phase {
+	case depsChecking:
 		return "Checking for dependency updates"
-	case OpRestoringBackup:
+	case depsRestoringBackup:
 		return "Restoring dependency backup"
-	case OpLoadingBackups:
+	case depsLoadingBackups:
 		return "Loading dependency backups"
 	}
-	switch s.Cycle.Phase() {
+	switch s.cycle.Phase() {
 	case deps.PhaseChecking:
 		return "Checking for dependency updates"
 	case deps.PhaseApplying:
@@ -143,37 +165,37 @@ func (s DepsState) SpinnerText() string {
 
 // Reset clears the standalone operation phase. It does not touch the
 // Cycle; cycle errors are handled by the cycle adapter.
-func (s *DepsState) Reset() {
-	s.Phase = OpIdle
+func (s *depsTab) reset() {
+	s.phase = depsIdle
 }
 
 // Marked reports whether the module at path carries a Mark.
-func (s DepsState) Marked(path string) bool { return s.Marks[path] }
+func (s depsTab) marked(path string) bool { return s.marks[path] }
 
 // ToggleMark flips the Mark on path.
-func (s *DepsState) ToggleMark(path string) {
-	if s.Marks == nil {
-		s.Marks = map[string]bool{}
+func (s *depsTab) flipMark(path string) {
+	if s.marks == nil {
+		s.marks = map[string]bool{}
 	}
-	if s.Marks[path] {
-		delete(s.Marks, path)
+	if s.marks[path] {
+		delete(s.marks, path)
 		return
 	}
-	s.Marks[path] = true
+	s.marks[path] = true
 }
 
 // ClearMarks removes every Mark.
-func (s *DepsState) ClearMarks() { s.Marks = nil }
+func (s *depsTab) clearMarks() { s.marks = nil }
 
 // MarkedPaths returns the marked module paths in dependency-list
 // order. Marks on modules that are no longer listed are ignored.
-func (s DepsState) MarkedPaths() []string {
-	if len(s.Marks) == 0 {
+func (s depsTab) markedPaths() []string {
+	if len(s.marks) == 0 {
 		return nil
 	}
-	paths := make([]string, 0, len(s.Marks))
-	for _, d := range s.Dependencies {
-		if s.Marks[d.Path] {
+	paths := make([]string, 0, len(s.marks))
+	for _, d := range s.dependencies {
+		if s.marks[d.Path] {
 			paths = append(paths, d.Path)
 		}
 	}
@@ -184,27 +206,27 @@ func (s DepsState) MarkedPaths() []string {
 // every listed row (the rows the current display mode shows). It
 // reports whether marks were added. Whether a marked module actually
 // moves is decided by the update plan.
-func (s *DepsState) ToggleMarkAll() bool {
-	if len(s.MarkedPaths()) > 0 || len(s.RowPaths) == 0 {
-		s.ClearMarks()
+func (s *depsTab) flipAllMarks() bool {
+	if len(s.markedPaths()) > 0 || len(s.rowPaths) == 0 {
+		s.clearMarks()
 		return false
 	}
-	s.Marks = make(map[string]bool, len(s.RowPaths))
-	for _, p := range s.RowPaths {
-		s.Marks[p] = true
+	s.marks = make(map[string]bool, len(s.rowPaths))
+	for _, p := range s.rowPaths {
+		s.marks[p] = true
 	}
 	return true
 }
 
 // cursorDependency resolves the table cursor to its module, mapping
 // through RowPaths because hidden indirect rows shift indices.
-func (s DepsState) cursorDependency() (deps.ModuleDependency, bool) {
-	i := s.Table.Cursor()
-	if i < 0 || i >= len(s.RowPaths) {
+func (s depsTab) cursorDependency() (deps.ModuleDependency, bool) {
+	i := s.table.Cursor()
+	if i < 0 || i >= len(s.rowPaths) {
 		return deps.ModuleDependency{}, false
 	}
-	path := s.RowPaths[i]
-	for _, d := range s.Dependencies {
+	path := s.rowPaths[i]
+	for _, d := range s.dependencies {
 		if d.Path == path {
 			return d, true
 		}
@@ -215,8 +237,8 @@ func (s DepsState) cursorDependency() (deps.ModuleDependency, bool) {
 // explicitModules returns the module set behind the explicit Update
 // scope: the marked modules, or the module under the cursor when
 // nothing is marked. nil when neither exists.
-func (s DepsState) explicitModules() []string {
-	if paths := s.MarkedPaths(); len(paths) > 0 {
+func (s depsTab) explicitModules() []string {
+	if paths := s.markedPaths(); len(paths) > 0 {
 		return paths
 	}
 	if d, found := s.cursorDependency(); found {
@@ -229,11 +251,11 @@ func (s DepsState) explicitModules() []string {
 // initial Update scope is "marked" when marks exist and "all direct
 // dependencies" otherwise; the dialog lets the user switch between
 // the two. ok is false when the list is empty.
-func (s DepsState) updateSelection() (sel deps.UpdateSelection, ok bool) {
-	if paths := s.MarkedPaths(); len(paths) > 0 {
+func (s depsTab) updateSelection() (sel deps.UpdateSelection, ok bool) {
+	if paths := s.markedPaths(); len(paths) > 0 {
 		return deps.UpdateSelection{Modules: paths}, true
 	}
-	if len(s.RowPaths) == 0 {
+	if len(s.rowPaths) == 0 {
 		return deps.UpdateSelection{}, false
 	}
 	return deps.UpdateSelection{}, true

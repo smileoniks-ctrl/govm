@@ -16,7 +16,7 @@ func activeModeFlags(m *Model) int {
 		m.Settings.EditingDistributionSource,
 		m.Settings.EditingDepsBackupLimit,
 		m.HelpVisible,
-		m.Deps.Dialog.Active(),
+		m.deps.dialog.active(),
 		m.Prune.Confirming(),
 		m.ConfirmingDelete,
 		m.filterInputActive(),
@@ -83,9 +83,7 @@ func TestInputContextResolvesEachState(t *testing.T) {
 		{
 			name: "deps dialog",
 			setup: func(t *testing.T, m Model) Model {
-				m.CurrentTab = DepsTab
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate}
-				return m
+				return confirmApplyFrom(t, m)
 			},
 			want: inputDepsDialog,
 		},
@@ -141,9 +139,7 @@ func TestInputContextResolvesEachState(t *testing.T) {
 }
 
 func TestInputContextPriorityWhenFlagsOverlap(t *testing.T) {
-	m := newTestModel(t)
-	m.CurrentTab = DepsTab
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate}
+	m := modelAtConfirmApply(t)
 	m.HelpVisible = true
 	if got := m.inputContext(); got != inputHelpOverlay {
 		t.Fatalf("help above dialog: inputContext() = %s, want help overlay", got)

@@ -58,8 +58,8 @@ func benchModel(b *testing.B) Model {
 		_ = cmd
 	}
 	m.projection.resize(80, 24)
-	m.Deps.Dependencies = depItems
-	m.Deps.Loaded = true
+	m = loadDeps(b, m, depItems)
+	m.CurrentTab = AvailableTab
 	m.Width = 80
 	m.Height = 24
 	return m
@@ -126,9 +126,7 @@ func BenchmarkView_DepsTab(b *testing.B) {
 }
 
 func BenchmarkView_DepsTabWithDialog(b *testing.B) {
-	m := benchModel(b)
-	m.CurrentTab = 2
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
+	m := openUpdateDialog(b, benchModel(b))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -139,11 +137,9 @@ func BenchmarkView_DepsTabWithDialog(b *testing.B) {
 func BenchmarkView_DepsTabWithPhysicalViewport(b *testing.B) {
 	for _, width := range []int{64, 80, 120} {
 		b.Run(strconv.Itoa(width), func(b *testing.B) {
-			m := benchModel(b)
-			m.CurrentTab = DepsTab
+			m := openUpdateDialog(b, benchModel(b))
 			m.TermWidth = width
 			m.TermHeight = 30
-			m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -172,9 +168,7 @@ func BenchmarkView_DepsTabWithPhysicalViewportWithoutDialog(b *testing.B) {
 func BenchmarkView_DepsTabWithPhysicalViewportWithDialog(b *testing.B) {
 	for _, width := range []int{64, 80, 120} {
 		b.Run(strconv.Itoa(width), func(b *testing.B) {
-			m := benchModelAtViewport(b, width)
-			m.CurrentTab = DepsTab
-			m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
+			m := openUpdateDialog(b, benchModelAtViewport(b, width))
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -291,14 +285,14 @@ func BenchmarkRenderDependencyUpdateDialog(b *testing.B) {
 		{Path: "github.com/example/dep2", OldVersion: "v2.0.0", NewVersion: "v2.1.0"},
 		{Path: "github.com/example/dep3", OldVersion: "v3.0.0", NewVersion: "v3.1.0"},
 	}
-	updateYes := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true, UpdateEntries: entries}
-	updateNo := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: false, UpdateEntries: entries}
+	updateYes := depsDialog{kind: dialogUpdate, choiceYes: true, updateEntries: entries}
+	updateNo := depsDialog{kind: dialogUpdate, choiceYes: false, updateEntries: entries}
 	theme := styles.NewTheme(config.ThemeCurrent)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		benchStringSink = updateYes.Render(theme, DepsState{}, viewportSize{Width: 64, Height: 20})
-		benchStringSink = updateNo.Render(theme, DepsState{}, viewportSize{Width: 64, Height: 20})
+		benchStringSink = updateYes.render(theme, depsTab{}, viewportSize{Width: 64, Height: 20})
+		benchStringSink = updateNo.render(theme, depsTab{}, viewportSize{Width: 64, Height: 20})
 	}
 }
 
@@ -312,10 +306,10 @@ func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
 		Kind:    deps.DependencyBackupKindPreUpdate,
 		Updated: 1,
 	}}
-	checksDialog := ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
-	rollbackDialog := ConfirmDialog{Kind: DialogRollback, ChoiceYes: true, CheckResult: &result}
-	restoreDialog := ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
-	restoreDeps := DepsState{Backups: backups}
+	checksDialog := depsDialog{kind: dialogChecks, choiceYes: true}
+	rollbackDialog := depsDialog{kind: dialogRollback, choiceYes: true, checkResult: &result}
+	restoreDialog := depsDialog{kind: dialogRestore, choiceYes: true}
+	restoreDeps := depsTab{backups: backups}
 	theme := styles.NewTheme(config.ThemeCurrent)
 
 	for _, width := range []int{64, 80} {
@@ -324,9 +318,9 @@ func BenchmarkRenderDependencyDialogsMinimumViewport(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				viewport := viewportSize{Width: width, Height: 20}
-				benchStringSink = checksDialog.Render(theme, DepsState{}, viewport)
-				benchStringSink = rollbackDialog.Render(theme, DepsState{}, viewport)
-				benchStringSink = restoreDialog.Render(theme, restoreDeps, viewport)
+				benchStringSink = checksDialog.render(theme, depsTab{}, viewport)
+				benchStringSink = rollbackDialog.render(theme, depsTab{}, viewport)
+				benchStringSink = restoreDialog.render(theme, restoreDeps, viewport)
 			}
 		})
 	}

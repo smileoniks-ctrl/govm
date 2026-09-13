@@ -165,7 +165,7 @@ func TestApplyRuntimeThemePropagatesToComponents(t *testing.T) {
 
 	currentSpinner := m.Spinner.Style.GetForeground()
 	currentInstalledOut := m.projection.installedView()
-	currentDepsOut := m.Deps.Table.View()
+	currentDepsOut := m.deps.table.View()
 
 	m.Settings.Values.Theme = config.ThemeLight
 	m.applyRuntimeTheme()
@@ -182,7 +182,7 @@ func TestApplyRuntimeThemePropagatesToComponents(t *testing.T) {
 	if got := m.projection.installedView(); got == currentInstalledOut {
 		t.Fatal("installedTable.View did not change after applyRuntimeTheme")
 	}
-	if got := m.Deps.Table.View(); got == currentDepsOut {
+	if got := m.deps.table.View(); got == currentDepsOut {
 		t.Fatal("Deps.Table.View did not change after applyRuntimeTheme")
 	}
 	// List delegate is rebuilt via SetDelegate. bubbles/list does not

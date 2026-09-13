@@ -14,51 +14,50 @@ import (
 func TestViewRespectsTerminalWidth(t *testing.T) {
 	dialogs := []struct {
 		name  string
-		setup func(*Model)
+		setup func(*testing.T, *Model)
 	}{
 		{
 			name:  "without dialog",
-			setup: func(*Model) {},
+			setup: func(*testing.T, *Model) {},
 		},
 		{
 			name: "update dialog",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model { return confirmApplyFrom(t, m) })
 			},
 		},
 		{
 			name: "checks dialog",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model { return confirmChecksFrom(t, m) })
 			},
 		},
 		{
 			name: "rollback dialog",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{
-					Kind:      DialogRollback,
-					ChoiceYes: true,
-					CheckResult: &deps.DependencyCheckResult{
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model {
+					return confirmRollbackFrom(t, m, deps.DependencyCheckResult{
 						Command: "go test ./...",
 						Output:  strings.Repeat("failure output ", 12),
-					},
-				}
+					})
+				})
 			},
 		},
 		{
 			name: "restore dialog",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
-				m.Deps.Backups = []deps.DependencyBackupInfo{{
-					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
-					Kind:    deps.DependencyBackupKindPreUpdate,
-					Updated: 1,
-				}}
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model {
+					return openRestoreDialog(t, m, []deps.DependencyBackupInfo{{
+						Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
+						Kind:    deps.DependencyBackupKindPreUpdate,
+						Updated: 1,
+					}})
+				})
 			},
 		},
 		{
 			name: "backup limit dialog",
-			setup: func(m *Model) {
+			setup: func(_ *testing.T, m *Model) {
 				m.CurrentTab = SettingsTab
 				m.Settings.Cursor = 2
 				m.Settings.OpenDepsBackupLimitInput()
@@ -74,7 +73,7 @@ func TestViewRespectsTerminalWidth(t *testing.T) {
 					updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 					m = updated.(Model)
 					m.CurrentTab = tab
-					dialog.setup(&m)
+					dialog.setup(t, &m)
 
 					for _, line := range strings.Split(m.View().Content, "\n") {
 						if got := ansi.StringWidth(line); got > width {
@@ -90,51 +89,50 @@ func TestViewRespectsTerminalWidth(t *testing.T) {
 func TestOverlayModalsRespectPhysicalViewport(t *testing.T) {
 	modals := []struct {
 		name  string
-		setup func(*Model)
+		setup func(*testing.T, *Model)
 	}{
 		{
 			name: "dependency update",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model { return confirmApplyFrom(t, m) })
 			},
 		},
 		{
 			name: "dependency checks",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model { return confirmChecksFrom(t, m) })
 			},
 		},
 		{
 			name: "dependency rollback",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{
-					Kind:      DialogRollback,
-					ChoiceYes: true,
-					CheckResult: &deps.DependencyCheckResult{
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model {
+					return confirmRollbackFrom(t, m, deps.DependencyCheckResult{
 						Command: "go test ./...",
 						Output: strings.Join([]string{
 							"FAIL: example.com/module/package",
 							"expected: successful update",
 							"actual: failed dependency check",
 						}, "\n"),
-					},
-				}
+					})
+				})
 			},
 		},
 		{
 			name: "dependency restore",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
-				m.Deps.Backups = []deps.DependencyBackupInfo{{
-					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
-					Kind:    deps.DependencyBackupKindPreUpdate,
-					Updated: 1,
-				}}
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model {
+					return openRestoreDialog(t, m, []deps.DependencyBackupInfo{{
+						Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
+						Kind:    deps.DependencyBackupKindPreUpdate,
+						Updated: 1,
+					}})
+				})
 			},
 		},
 		{
 			name: "dependency backup limit",
-			setup: func(m *Model) {
+			setup: func(_ *testing.T, m *Model) {
 				m.CurrentTab = SettingsTab
 				m.Settings.Cursor = 2
 				m.Settings.OpenDepsBackupLimitInput()
@@ -159,7 +157,7 @@ func TestOverlayModalsRespectPhysicalViewport(t *testing.T) {
 					Height: viewport.height,
 				})
 				m = updated.(Model)
-				modal.setup(&m)
+				modal.setup(t, &m)
 
 				content := m.View().Content
 				lines := strings.Split(content, "\n")
@@ -193,14 +191,10 @@ func TestRollbackDialogLimitsLongOutput(t *testing.T) {
 	for i := range output {
 		output[i] = "failure output line " + strconv.Itoa(i+1)
 	}
-	m.Deps.Dialog = ConfirmDialog{
-		Kind:      DialogRollback,
-		ChoiceYes: true,
-		CheckResult: &deps.DependencyCheckResult{
-			Command: "go test ./...",
-			Output:  strings.Join(output, "\n"),
-		},
-	}
+	m = confirmRollbackFrom(t, m, deps.DependencyCheckResult{
+		Command: "go test ./...",
+		Output:  strings.Join(output, "\n"),
+	})
 
 	content := m.View().Content
 	want := "…and 4 more"
@@ -231,50 +225,47 @@ func TestViewHasEqualHeightAcrossTabsAtStandardViewport(t *testing.T) {
 func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
 	tests := []struct {
 		name  string
-		setup func(*Model)
+		setup func(*testing.T, *Model)
 	}{
 		{
 			name: "update",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{
-					Kind:      DialogUpdate,
-					ChoiceYes: true,
-					UpdateEntries: []deps.DependencyUpdateEntry{{
-						Path:       "github.com/acme/very-long-module-name-that-must-not-overflow-the-terminal",
-						OldVersion: "v1.0.0",
-						NewVersion: "v1.1.0",
-					}},
-				}
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model {
+					return openUpdateDialog(t, loadDeps(t, m, []deps.ModuleDependency{{
+						Path:    "github.com/acme/very-long-module-name-that-must-not-overflow-the-terminal",
+						Version: "v1.0.0",
+						Latest:  "v1.1.0",
+					}}))
+				})
 			},
 		},
 		{
 			name: "checks",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model { return confirmChecksFrom(t, m) })
 			},
 		},
 		{
 			name: "rollback",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{
-					Kind:      DialogRollback,
-					ChoiceYes: true,
-					CheckResult: &deps.DependencyCheckResult{
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model {
+					return confirmRollbackFrom(t, m, deps.DependencyCheckResult{
 						Command: "go test ./...",
 						Output:  strings.Repeat("failure output ", 12),
-					},
-				}
+					})
+				})
 			},
 		},
 		{
 			name: "restore",
-			setup: func(m *Model) {
-				m.Deps.Dialog = ConfirmDialog{Kind: DialogRestore, ChoiceYes: true}
-				m.Deps.Backups = []deps.DependencyBackupInfo{{
-					Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
-					Kind:    deps.DependencyBackupKindPreUpdate,
-					Updated: 1,
-				}}
+			setup: func(t *testing.T, m *Model) {
+				withDialog(m, func(m Model) Model {
+					return openRestoreDialog(t, m, []deps.DependencyBackupInfo{{
+						Name:    "2026-07-09_12-00-00-a-very-long-backup-filename.json",
+						Kind:    deps.DependencyBackupKindPreUpdate,
+						Updated: 1,
+					}})
+				})
 			},
 		},
 	}
@@ -285,7 +276,7 @@ func TestViewDependencyDialogsRespectTerminalWidth(t *testing.T) {
 				m := newTestModel(t)
 				updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
 				m = updated.(Model)
-				tt.setup(&m)
+				tt.setup(t, &m)
 
 				for _, line := range strings.Split(m.View().Content, "\n") {
 					if got := ansi.StringWidth(line); got > width {

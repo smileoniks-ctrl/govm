@@ -54,20 +54,20 @@ func TestSettingsToggleThemeChangesStateAndMessage(t *testing.T) {
 // TestApplyRuntimeThemeRebuildsDependencyDialogStyles pins the contract
 // that previously broke silently (see docs/review/03-performance.md):
 // after applyRuntimeTheme the active theme must flow into
-// ConfirmDialog.Render. Because Render now takes Theme as a parameter,
+// depsDialog.Render. Because Render now takes Theme as a parameter,
 // the test also documents the new propagation path explicitly.
 func TestApplyRuntimeThemeRebuildsDependencyDialogStyles(t *testing.T) {
 	m := newTestModel(t)
 
 	m.Settings.Values.Theme = config.ThemeCurrent
 	m.applyRuntimeTheme()
-	currentDialog := ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}.
-		Render(m.theme, DepsState{}, viewportSize{Width: 64, Height: 20})
+	currentDialog := depsDialog{kind: dialogChecks, choiceYes: true}.
+		render(m.theme, depsTab{}, viewportSize{Width: 64, Height: 20})
 
 	m.Settings.Values.Theme = config.ThemeLight
 	m.applyRuntimeTheme()
-	lightDialog := ConfirmDialog{Kind: DialogChecks, ChoiceYes: true}.
-		Render(m.theme, DepsState{}, viewportSize{Width: 64, Height: 20})
+	lightDialog := depsDialog{kind: dialogChecks, choiceYes: true}.
+		render(m.theme, depsTab{}, viewportSize{Width: 64, Height: 20})
 
 	if lightDialog == currentDialog {
 		t.Fatal("expected light theme to change dependency dialog output")

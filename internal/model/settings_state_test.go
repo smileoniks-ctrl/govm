@@ -54,13 +54,13 @@ func TestSettingsDepsBackupLimitShortcutControlsAndSaves(t *testing.T) {
 func TestSettingsToggleDepsDisplayUpdatesDependencyRows(t *testing.T) {
 	m := newTestModel(t)
 	m.CurrentTab = SettingsTab
-	updated, _ := m.Update(DependenciesMsg{
+	updated, _ := m.Update(dependenciesMsg{
 		{Path: "github.com/example/direct", Version: "v1.0.0"},
 		{Path: "github.com/example/indirect", Version: "v1.0.0", Indirect: true},
 	})
 	m = updated.(Model)
 
-	if rows := m.Deps.Table.Rows(); len(rows) != 1 {
+	if rows := m.deps.table.Rows(); len(rows) != 1 {
 		t.Fatalf("expected default direct-only view to show 1 row, got %d", len(rows))
 	}
 
@@ -70,7 +70,7 @@ func TestSettingsToggleDepsDisplayUpdatesDependencyRows(t *testing.T) {
 	if m.Settings.Values.DepsDisplay != config.DepsDisplayAll {
 		t.Fatalf("expected deps display all, got %q", m.Settings.Values.DepsDisplay)
 	}
-	if rows := m.Deps.Table.Rows(); len(rows) != 2 {
+	if rows := m.deps.table.Rows(); len(rows) != 2 {
 		t.Fatalf("expected all deps view to show 2 rows, got %d", len(rows))
 	}
 	if m.Status.Kind() == "error" {

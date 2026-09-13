@@ -84,9 +84,9 @@ func (m *Model) handlePruneDialogKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	choiceYes, action := yesNoKeyAction(msg.String(), m.Prune.ChoiceYes())
 	m.Prune.SetChoiceYes(choiceYes)
 	switch action {
-	case DialogConfirm:
+	case dialogConfirm:
 		return m.handlePruneConfirmYes()
-	case DialogCancel:
+	case dialogCancel:
 		return m.handlePruneConfirmNo()
 	}
 	return m, nil
@@ -169,7 +169,7 @@ func (m *Model) switchTab(target int) (tea.Model, tea.Cmd) {
 	m.clearTabContext()
 	m.CurrentTab = target
 	if m.CurrentTab == DepsTab {
-		cmd, status := m.Deps.enter()
+		cmd, status := m.deps.enter()
 		m.applyDepsStatus(status)
 		return m, cmd
 	}
@@ -548,8 +548,8 @@ func (m *Model) handleDepsBackupLimitInputKey(msg tea.KeyPressMsg) (tea.Model, t
 
 // applyRuntimeTheme rebuilds m.theme from the user's current settings
 // value and propagates the new theme to every component that caches
-// style values by value (Spinner, installedTable, Deps.Table, List
-// delegate). It also forwards the theme to the catalog and, when the
+// style values by value (Spinner, installedTable, the Deps tab's
+// table, List delegate). It also forwards the theme to the catalog and, when the
 // catalog accepts it, re-applies the version projection so the list
 // items pick up the new pre-rendered titles. The returned tea.Cmd
 // propagates the asynchronous refilter (if any) through the settings
@@ -560,7 +560,7 @@ func (m *Model) applyRuntimeTheme() tea.Cmd {
 	m.theme = t
 	m.Settings.ApplyTheme()
 	m.Spinner.Style = t.SpinnerStyle
-	m.Deps.Table.SetStyles(tableStyles(t))
+	m.deps.applyTheme(t)
 	return m.projection.setTheme(t).cmd
 }
 

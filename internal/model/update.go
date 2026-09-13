@@ -84,9 +84,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Width = contentWidth
 		m.Height = contentHeight
 		m.projection.resize(contentWidth, contentHeight)
-		m.Deps.Table.SetWidth(contentWidth)
-		m.Deps.Table.SetHeight(contentHeight)
-		m.Deps.Table.SetColumns(dependencyTableColumns(contentWidth))
+		m.deps.resize(contentWidth, contentHeight)
 		return m, nil
 
 	case catalogLoadedMsg:
@@ -188,7 +186,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	cmds = append(cmds, m.projection.update(msg))
-	depsCmd, depsStatus := m.Deps.update(msg)
+	depsCmd, depsStatus := m.deps.update(msg)
 	m.applyDepsStatus(depsStatus)
 	cmds = append(cmds, depsCmd)
 	return m, tea.Batch(cmds...)

@@ -144,18 +144,18 @@ func TestShiftTabCancelsPendingDelete(t *testing.T) {
 // confirm dialog: Shift+Tab flips the Yes/No selection rather than
 // escaping the dialog, matching desktop conventions for 2-button dialogs.
 func TestConfirmDialogShiftTabTogglesChoice(t *testing.T) {
-	d := ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
+	d := depsDialog{kind: dialogUpdate, choiceYes: true}
 
-	got, action := d.Handle(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	if action != DialogNoop {
-		t.Fatalf("expected DialogNoop, got %v", action)
+	got, action := d.handle(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if action != dialogNoop {
+		t.Fatalf("expected dialogNoop, got %v", action)
 	}
-	if got.ChoiceYes {
+	if got.choiceYes {
 		t.Fatal("expected Shift+Tab to flip ChoiceYes from true to false")
 	}
 
-	got, _ = got.Handle(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
-	if !got.ChoiceYes {
+	got, _ = got.handle(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
+	if !got.choiceYes {
 		t.Fatal("expected second Shift+Tab to flip ChoiceYes back to true")
 	}
 }
@@ -232,14 +232,14 @@ func TestRefreshOnDepsTabTriggersCheckCmd(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
-	updated, _ = m.Update(DependenciesMsg{})
+	updated, _ = m.Update(dependenciesMsg{})
 	m = updated.(Model)
 
 	// Press 'r' on deps tab
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'r'})
 	m = updated.(Model)
 
-	if m.Deps.Phase != OpChecking {
+	if m.deps.phase != depsChecking {
 		t.Fatal("expected CheckingDependencies to be true after pressing r on deps tab")
 	}
 
@@ -353,13 +353,13 @@ func TestPressBOnDepsTabTriggersBackupListCmd(t *testing.T) {
 	updated, _ := m.Update(tea.KeyPressMsg{Code: '\t'})
 	updated, _ = updated.Update(tea.KeyPressMsg{Code: '\t'})
 	m = updated.(Model)
-	updated, _ = m.Update(DependenciesMsg{})
+	updated, _ = m.Update(dependenciesMsg{})
 	m = updated.(Model)
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'b'})
 	m = updated.(Model)
 
-	if m.Deps.Phase != OpLoadingBackups {
+	if m.deps.phase != depsLoadingBackups {
 		t.Fatal("expected LoadingBackups to be true after pressing b on deps tab")
 	}
 	if cmd == nil {
@@ -376,7 +376,7 @@ func TestPressUOnDepsOpensConfirmDialog(t *testing.T) {
 	m = updated.(Model)
 
 	// Load deps with one direct update.
-	deps := DependenciesMsg{
+	deps := dependenciesMsg{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
 	}
 	updated, _ = m.Update(deps)
@@ -388,10 +388,10 @@ func TestPressUOnDepsOpensConfirmDialog(t *testing.T) {
 	updated, _ = m.Update(coredeps.CheckUpdatesDoneEvent{Dependencies: []coredeps.ModuleDependency(deps)})
 	m = updated.(Model)
 
-	if m.Deps.Dialog.Kind != DialogUpdate {
+	if m.deps.dialog.kind != dialogUpdate {
 		t.Fatal("expected update dialog after fresh preflight")
 	}
-	if !m.Deps.Dialog.ChoiceYes {
+	if !m.deps.dialog.choiceYes {
 		t.Fatal("expected default choice to be Yes")
 	}
 }
@@ -404,7 +404,7 @@ func TestPressUOnDepsWithoutUpdatesShowsMessage(t *testing.T) {
 	m = updated.(Model)
 
 	// Load deps with no updates.
-	deps := DependenciesMsg{
+	deps := dependenciesMsg{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.0.0"},
 	}
 	updated, _ = m.Update(deps)
@@ -415,7 +415,7 @@ func TestPressUOnDepsWithoutUpdatesShowsMessage(t *testing.T) {
 	updated, _ = m.Update(coredeps.CheckUpdatesDoneEvent{Dependencies: []coredeps.ModuleDependency(deps)})
 	m = updated.(Model)
 
-	if m.Deps.Dialog.Active() {
+	if m.deps.dialog.active() {
 		t.Fatal("expected dialog to stay closed when no updates available")
 	}
 	if m.Status.Kind() != "warning" {

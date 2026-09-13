@@ -120,9 +120,7 @@ func TestHelpOverlayCtrlCStillQuits(t *testing.T) {
 }
 
 func TestHelpOverlayShowsDialogContext(t *testing.T) {
-	m := newTestModel(t)
-	m = resizeModel(t, m, 100, 30)
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
+	m := confirmApplyFrom(t, resizeModel(t, newTestModel(t), 100, 30))
 
 	m = pressKey(t, m, tea.KeyPressMsg{Code: '?'})
 	if !m.HelpVisible {
@@ -213,7 +211,8 @@ func TestHelpOverlaySectionsResolveContext(t *testing.T) {
 		t.Fatalf("prune confirmation context = %q, want Confirm prune", sections[0].title)
 	}
 
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogChecks}
+	m.Prune.Reset()
+	withDialog(&m, func(m Model) Model { return confirmChecksFrom(t, m) })
 	if sections := helpOverlaySections(m); sections[0].title != "Run checks" {
 		t.Fatalf("dialog context = %q, want Run checks", sections[0].title)
 	}

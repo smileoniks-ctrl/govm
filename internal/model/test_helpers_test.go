@@ -21,7 +21,7 @@ func stripANSI(s string) string {
 
 // testTheme returns the canonical theme used by model tests. It is a
 // pure value (no global state), so tests can run in parallel and can
-// pass the same theme to both Model.New and ConfirmDialog.Render.
+// pass the same theme to both Model.New and depsDialog.Render.
 func testTheme() styles.Theme {
 	return styles.NewTheme(config.ThemeCurrent)
 }
@@ -36,7 +36,7 @@ func testTheme() styles.Theme {
 //
 // This is the single entry point for populating versions in tests —
 // never mutate catalog slices or widget items directly.
-func seedVersions(t *testing.T, m *Model, versions []utils.GoVersion) {
+func seedVersions(t testing.TB, m *Model, versions []utils.GoVersion) {
 	t.Helper()
 	outcome := catalogProjectionOutcome{}
 	if m.initialLoad.ID != 0 && m.projection.operationPhase() == catalogOperationPhaseLoading {
@@ -175,7 +175,7 @@ func assertVersionViewsConsistent(t *testing.T, m Model) {
 	}
 }
 
-func newTestModel(t *testing.T) Model {
+func newTestModel(t testing.TB) Model {
 	t.Helper()
 
 	home := t.TempDir()

@@ -17,18 +17,18 @@ type dependencyExecutionErrMsg struct {
 // intent. Operational intents become a tea.Cmd that runs the executor;
 // confirmation intents open the matching dialog; a terminal outcome
 // (NoIntent) is rendered as a status message.
-func (s *DepsState) handleCycleEvent(event deps.Event) (tea.Cmd, depsStatus) {
-	next, intent, err := s.Cycle.Handle(event)
+func (s *depsTab) handleCycleEvent(event deps.Event) (tea.Cmd, depsStatus) {
+	next, intent, err := s.cycle.Handle(event)
 	if err != nil {
-		s.Cycle = deps.NewUpdateCycle()
+		s.cycle = deps.NewUpdateCycle()
 		return nil, depsGlobalStatus(err.Error(), "error")
 	}
-	s.Cycle = next
+	s.cycle = next
 	return s.applyCycleIntent(intent)
 }
 
 // applyCycleIntent maps a Cycle intent to its TUI side effect.
-func (s *DepsState) applyCycleIntent(intent deps.Intent) (tea.Cmd, depsStatus) {
+func (s *depsTab) applyCycleIntent(intent deps.Intent) (tea.Cmd, depsStatus) {
 	switch i := intent.(type) {
 	case deps.NoIntent:
 		return s.applyCycleTerminal()
@@ -41,34 +41,34 @@ func (s *DepsState) applyCycleIntent(intent deps.Intent) (tea.Cmd, depsStatus) {
 		// for the whole cycle: keys that change marks are inert while
 		// the cycle runs, so reading it here is stable.
 		explicitModules := s.explicitModules()
-		if s.Dialog.Kind == DialogUpdate {
+		if s.dialog.kind == dialogUpdate {
 			// A level or scope change re-emits the intent: keep the
 			// button the user had highlighted and the captured set.
-			choice = s.Dialog.ChoiceYes
-			explicitModules = s.Dialog.ExplicitModules
+			choice = s.dialog.choiceYes
+			explicitModules = s.dialog.explicitModules
 		}
-		s.Dialog = ConfirmDialog{
-			Kind:            DialogUpdate,
-			ChoiceYes:       choice,
-			UpdateEntries:   i.Entries,
-			Level:           i.Level,
-			Explicit:        i.Explicit,
-			ExplicitModules: explicitModules,
+		s.dialog = depsDialog{
+			kind:            dialogUpdate,
+			choiceYes:       choice,
+			updateEntries:   i.Entries,
+			level:           i.Level,
+			explicit:        i.Explicit,
+			explicitModules: explicitModules,
 		}
 		return nil, depsClearStatus
 	case deps.IntentConfirmChecks:
 		s.syncDepsFromCycle()
 		n := i.UpdatedCount
-		s.Dialog = ConfirmDialog{Kind: DialogChecks, ChoiceYes: i.DefaultYes}
+		s.dialog = depsDialog{kind: dialogChecks, choiceYes: i.DefaultYes}
 		return nil, depsGlobalStatus(fmt.Sprintf(
 			"Updated %d direct %s. Run checks?",
 			n, deps.Pluralize(n, "dependency", "dependencies")), "success")
 	case deps.IntentConfirmRollback:
-		s.Dialog = ConfirmDialog{
-			Kind:         DialogRollback,
-			ChoiceYes:    i.DefaultYes,
-			Inconclusive: i.CheckErr != nil,
-			CheckResult:  i.CheckResult,
+		s.dialog = depsDialog{
+			kind:         dialogRollback,
+			choiceYes:    i.DefaultYes,
+			inconclusive: i.CheckErr != nil,
+			checkResult:  i.CheckResult,
 		}
 		if i.CheckErr != nil {
 			return nil, depsGlobalStatus(fmt.Sprintf("Checks could not run: %s", i.CheckErr), "error")
@@ -78,13 +78,13 @@ func (s *DepsState) applyCycleIntent(intent deps.Intent) (tea.Cmd, depsStatus) {
 		}
 		return nil, depsStatus{}
 	}
-	s.Cycle = deps.NewUpdateCycle()
+	s.cycle = deps.NewUpdateCycle()
 	return nil, depsGlobalStatus(fmt.Sprintf("Unhandled dependency cycle intent %T", intent), "error")
 }
 
 // applyCycleOperational sets the progress status and returns the tea.Cmd
 // that runs the operational intent through the execution seam.
-func (s *DepsState) applyCycleOperational(intent deps.Intent) (tea.Cmd, depsStatus) {
+func (s *depsTab) applyCycleOperational(intent deps.Intent) (tea.Cmd, depsStatus) {
 	status := depsStatus{}
 	switch intent.(type) {
 	case deps.IntentApplyUpdates:
@@ -101,13 +101,13 @@ func (s *DepsState) applyCycleOperational(intent deps.Intent) (tea.Cmd, depsStat
 
 // applyCycleTerminal renders the terminal outcome as a status message,
 // syncs the dependency table, and resets the Cycle to idle.
-func (s *DepsState) applyCycleTerminal() (tea.Cmd, depsStatus) {
-	c := s.Cycle
+func (s *depsTab) applyCycleTerminal() (tea.Cmd, depsStatus) {
+	c := s.cycle
 	// Marks describe the next update; once a cycle has run its course
 	// they are spent. Cancelling in the apply dialog keeps them so the
 	// user can adjust and retry.
 	if c.Outcome() != deps.OutcomeApplyCanceled {
-		s.ClearMarks()
+		s.clearMarks()
 		s.updateDependencyTable()
 	}
 	if c.Outcome() != deps.OutcomeRecoveryRequired && c.Outcome() != deps.OutcomeFailed {
@@ -138,7 +138,7 @@ func (s *DepsState) applyCycleTerminal() (tea.Cmd, depsStatus) {
 			status = depsGlobalStatus("Update failed.", "error")
 		}
 	}
-	s.Cycle = deps.NewUpdateCycle()
+	s.cycle = deps.NewUpdateCycle()
 	return nil, status
 }
 
@@ -186,7 +186,7 @@ func cycleRecoveryRequiredMessage(c deps.UpdateCycle) string {
 
 // cycleExecuteCmd builds the tea.Cmd that runs an operational intent
 // through the dependency executor.
-func (s DepsState) cycleExecuteCmd(intent deps.Intent) tea.Cmd {
+func (s depsTab) cycleExecuteCmd(intent deps.Intent) tea.Cmd {
 	executor := s.executor()
 	return func() tea.Msg {
 		event, err := executor.Execute(intent)
@@ -200,10 +200,10 @@ func (s DepsState) cycleExecuteCmd(intent deps.Intent) tea.Cmd {
 // syncDepsFromCycle copies the Cycle's current dependency list into the
 // presentation table when the Cycle has one (post-check, post-apply,
 // post-rollback). It is a no-op when the Cycle has no dependencies.
-func (s *DepsState) syncDepsFromCycle() {
-	d := s.Cycle.Dependencies()
+func (s *depsTab) syncDepsFromCycle() {
+	d := s.cycle.Dependencies()
 	if d != nil {
-		s.Dependencies = d
+		s.dependencies = d
 		s.updateDependencyTable()
 	}
 }

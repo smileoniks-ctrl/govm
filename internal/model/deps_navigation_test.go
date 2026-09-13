@@ -8,14 +8,10 @@ import (
 )
 
 func TestDepsTabArrowAndVimKeysMoveTableCursor(t *testing.T) {
-	m := newTestModel(t)
-	m.CurrentTab = DepsTab
-	m.Deps.Dependencies = []coredeps.ModuleDependency{
+	m := loadDeps(t, newTestModel(t), []coredeps.ModuleDependency{
 		{Path: "example.com/first", Version: "v1.0.0"},
 		{Path: "example.com/second", Version: "v1.0.0"},
-	}
-	m.updateDependencyTable()
-	m.Deps.Table.Focus()
+	})
 
 	for _, tt := range []struct {
 		name string
@@ -31,7 +27,7 @@ func TestDepsTabArrowAndVimKeysMoveTableCursor(t *testing.T) {
 			updated, _ := m.Update(tt.key)
 			m = updated.(Model)
 
-			if got := m.Deps.Table.Cursor(); got != tt.want {
+			if got := m.deps.table.Cursor(); got != tt.want {
 				t.Fatalf("expected deps table cursor to move to index %d, got %d", tt.want, got)
 			}
 		})
@@ -39,40 +35,31 @@ func TestDepsTabArrowAndVimKeysMoveTableCursor(t *testing.T) {
 }
 
 func TestDepsTabDownDoesNotMoveTableCursorWhileConfirmingUpdate(t *testing.T) {
-	m := newTestModel(t)
-	m.CurrentTab = DepsTab
-	m.Deps.Dependencies = []coredeps.ModuleDependency{
-		{Path: "example.com/first", Version: "v1.0.0"},
+	m := openUpdateDialog(t, loadDeps(t, newTestModel(t), []coredeps.ModuleDependency{
+		{Path: "example.com/first", Version: "v1.0.0", Latest: "v1.1.0"},
 		{Path: "example.com/second", Version: "v1.0.0"},
-	}
-	m.updateDependencyTable()
-	m.Deps.Table.Focus()
-	m.Deps.Dialog = ConfirmDialog{Kind: DialogUpdate, ChoiceYes: true}
+	}))
 
-	before := m.Deps.Table.Cursor()
+	before := m.deps.table.Cursor()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	m = updated.(Model)
 
-	if got := m.Deps.Table.Cursor(); got != before {
+	if got := m.deps.table.Cursor(); got != before {
 		t.Fatalf("expected deps table cursor to remain at index %d while update dialog is open, got %d", before, got)
 	}
 }
 
 func TestDepsTabGlobalUOpensUpdateConfirmationForDirectUpdate(t *testing.T) {
-	m := newTestModel(t)
-	m.CurrentTab = DepsTab
-	m.Deps.Loaded = true
-	m.Deps.Dependencies = []coredeps.ModuleDependency{
+	m := loadDeps(t, newTestModel(t), []coredeps.ModuleDependency{
 		{Path: "example.com/direct", Version: "v1.0.0", Latest: "v1.1.0"},
-	}
-	m.updateDependencyTable()
+	})
 
 	updated, _ := m.Update(tea.KeyPressMsg{Code: 'u'})
 	m = updated.(Model)
-	updated, _ = m.Update(coredeps.CheckUpdatesDoneEvent{Dependencies: m.Deps.Dependencies})
+	updated, _ = m.Update(coredeps.CheckUpdatesDoneEvent{Dependencies: m.deps.dependencies})
 	m = updated.(Model)
 
-	if m.Deps.Dialog.Kind != DialogUpdate {
+	if m.deps.dialog.kind != dialogUpdate {
 		t.Fatal("expected fresh preflight to open the update confirmation")
 	}
 }

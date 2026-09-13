@@ -59,7 +59,7 @@ func (m Model) View() tea.View {
 			components = append(components, renderInstalledSummary(m.DiskUsage))
 		}
 	case DepsTab:
-		components = append(components, renderContentCanvas(m.Deps.view(), width, height))
+		components = append(components, renderContentCanvas(m.deps.view(), width, height))
 	case SettingsTab:
 		components = append(components, renderContentCanvas(renderSettingsView(m.Settings), width, height))
 	}
@@ -81,7 +81,7 @@ func (m Model) View() tea.View {
 			rendered = overlayDialog(rendered, renderDepsBackupLimitDialog(t, m.Settings, viewport), viewport)
 		}
 	case inputDepsDialog:
-		rendered = overlayDialog(rendered, m.Deps.dialogView(t, viewport), viewport)
+		rendered = overlayDialog(rendered, m.deps.dialogView(t, viewport), viewport)
 	case inputPruneConfirm:
 		rendered = overlayDialog(rendered, renderPruneDialog(t, m.Prune, viewport), viewport)
 	}
@@ -183,7 +183,7 @@ func (m Model) composeStatus() (string, string) {
 	status := m.Status.Text()
 	statusType := m.Status.Kind()
 	activity := m.projection.activityState()
-	if activity.kind != catalogActivityIdle || m.Deps.operationInProgress() {
+	if activity.kind != catalogActivityIdle || m.deps.busy() {
 		statusType = "info"
 		switch activity.kind {
 		case catalogActivityInstalling:
@@ -205,7 +205,7 @@ func (m Model) composeStatus() (string, string) {
 				status = fmt.Sprintf("%s Verifying catalog", m.Spinner.View())
 			}
 		}
-		if text := m.Deps.SpinnerText(); status == "" && text != "" {
+		if text := m.deps.spinnerText(); status == "" && text != "" {
 			status = fmt.Sprintf("%s %s", m.Spinner.View(), text)
 		}
 		if status == "" {

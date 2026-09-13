@@ -10,7 +10,7 @@ import (
 func TestDependenciesMsgPopulatesTable(t *testing.T) {
 	m := newTestModel(t)
 
-	deps := DependenciesMsg{
+	deps := dependenciesMsg{
 		{Path: "github.com/example/lib", Version: "v1.0.0", Latest: "v1.1.0"},
 		{Path: "github.com/example/indirect", Version: "v0.5.0", Indirect: true},
 		{Path: "github.com/example/current", Version: "v2.0.0", Latest: "v2.0.0"},
@@ -19,15 +19,15 @@ func TestDependenciesMsgPopulatesTable(t *testing.T) {
 	updated, _ := m.Update(deps)
 	got := updated.(Model)
 
-	if !got.Deps.Loaded {
+	if !got.deps.loaded {
 		t.Fatal("expected DependenciesLoaded to be true")
 	}
 
-	if len(got.Deps.Dependencies) != 3 {
-		t.Fatalf("expected 3 dependencies, got %d", len(got.Deps.Dependencies))
+	if len(got.deps.dependencies) != 3 {
+		t.Fatalf("expected 3 dependencies, got %d", len(got.deps.dependencies))
 	}
 
-	rows := got.Deps.Table.Rows()
+	rows := got.deps.table.Rows()
 	if len(rows) != 2 {
 		t.Fatalf("expected 2 direct rows in table, got %d", len(rows))
 	}
@@ -57,14 +57,14 @@ func TestDependencyTableIndirectUpdateStatus(t *testing.T) {
 	m.Settings.Values.DepsDisplay = config.DepsDisplayAll
 	m.syncDepsSettings()
 
-	deps := DependenciesMsg{
+	deps := dependenciesMsg{
 		{Path: "indirect-with-update", Version: "v0.5.0", Latest: "v0.6.0", Indirect: true},
 	}
 
 	updated, _ := m.Update(deps)
 	got := updated.(Model)
 
-	rows := got.Deps.Table.Rows()
+	rows := got.deps.table.Rows()
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
@@ -128,7 +128,7 @@ func TestUpdateDependencyTable_StatusPriorities(t *testing.T) {
 	m.Settings.Values.DepsDisplay = config.DepsDisplayAll
 	m.syncDepsSettings()
 
-	deps := DependenciesMsg{
+	deps := dependenciesMsg{
 		{Path: "err", Version: "v1.0.0", Latest: "v1.1.0", Error: "boom"},
 		{Path: "dep", Version: "v1.0.0", Latest: "v1.1.0", Deprecated: "use v2"},
 		{Path: "indirect-update", Version: "v1.0.0", Latest: "v1.1.0", Indirect: true},
@@ -138,7 +138,7 @@ func TestUpdateDependencyTable_StatusPriorities(t *testing.T) {
 	}
 	updated, _ := m.Update(deps)
 	got := updated.(Model)
-	rows := got.Deps.Table.Rows()
+	rows := got.deps.table.Rows()
 	if len(rows) != len(deps) {
 		t.Fatalf("expected %d rows, got %d", len(deps), len(rows))
 	}
