@@ -395,7 +395,7 @@ func assertDependencyBackupDirectoryEmpty(t *testing.T, modulePath string) {
 	}
 }
 
-func TestApplyModuleUpdates_ResolvesContextOnce(t *testing.T) {
+func TestDefaultOperations_ApplyUpdates_PassesEntriesAndLimit(t *testing.T) {
 	context := moduleContext{Root: t.TempDir(), Path: "example.com/app"}
 	writeFile(t, context.Root, "go.mod", "module example.com/app\n\ngo 1.26\n")
 	entries := []DependencyUpdateEntry{{Path: "example.com/dep", OldVersion: "v1.0.0", NewVersion: "v1.1.0"}}
@@ -424,9 +424,9 @@ func TestApplyModuleUpdates_ResolvesContextOnce(t *testing.T) {
 		},
 	}
 
-	snap, _, deps, err := applyModuleUpdates(context.Root, entries, backupLimit, operation)
+	snap, _, deps, err := defaultOperations{operation: operation}.ApplyUpdates(context, entries, backupLimit)
 	if err != nil {
-		t.Fatalf("applyModuleUpdates: %v", err)
+		t.Fatalf("ApplyUpdates: %v", err)
 	}
 	if len(deps) != 0 || snap == nil {
 		t.Fatalf("apply result = snap=%v deps=%v, want non-nil snapshot", snap, deps)

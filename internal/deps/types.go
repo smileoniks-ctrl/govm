@@ -16,19 +16,6 @@ type ModuleDependency struct {
 	Versions []string
 }
 
-// DependencyUpdateResult describes a completed direct-dependency update.
-type DependencyUpdateResult struct {
-	Updated      int
-	Dependencies []ModuleDependency
-	Snapshot     *DependencySnapshot
-}
-
-// DependencyRollbackResult describes a completed dependency rollback.
-type DependencyRollbackResult struct {
-	Snapshot     *DependencySnapshot
-	Dependencies []ModuleDependency
-}
-
 // DependencyRestoreResult describes a completed dependency backup restore.
 type DependencyRestoreResult struct {
 	BackupName    string

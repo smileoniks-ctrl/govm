@@ -55,7 +55,7 @@ func NewExecutor(moduleDir string, ops Operations, backupLimit int) (*Executor, 
 		return nil, err
 	}
 	if ops == nil {
-		ops = defaultOperations{}
+		ops = newDefaultOperations()
 	}
 	if backupLimit < 1 {
 		backupLimit = DefaultBackupLimit
@@ -71,7 +71,7 @@ func NewExecutor(moduleDir string, ops Operations, backupLimit int) (*Executor, 
 // moduleContext. Used by tests to inject a fake context.
 func NewExecutorWithContext(context moduleContext, ops Operations, backupLimit int) *Executor {
 	if ops == nil {
-		ops = defaultOperations{}
+		ops = newDefaultOperations()
 	}
 	if backupLimit < 1 {
 		backupLimit = DefaultBackupLimit
@@ -136,16 +136,23 @@ func (e *Executor) executeRollback(i IntentRollback) Event {
 	return RollbackDoneEvent{Dependencies: deps, Err: err}
 }
 
-// Default production Operations. defaultOperations delegates to
-// internal orchestration functions that accept moduleContext.
-type defaultOperations struct{}
-
-func (defaultOperations) CheckUpdates(context moduleContext) ([]ModuleDependency, error) {
-	operation := defaultDependencyOperation()
-	return operation.load(context, true)
+// defaultOperations is the production Operations. Every exec/fs call
+// goes through its dependencyOperation seam, so the orchestration
+// (backup, go get, go mod tidy, refresh) is testable without a go
+// toolchain: tests build defaultOperations{operation: fake} directly.
+type defaultOperations struct {
+	operation dependencyOperation
 }
 
-func (defaultOperations) ApplyUpdates(
+func newDefaultOperations() defaultOperations {
+	return defaultOperations{operation: defaultDependencyOperation()}
+}
+
+func (o defaultOperations) CheckUpdates(context moduleContext) ([]ModuleDependency, error) {
+	return o.operation.load(context, true)
+}
+
+func (o defaultOperations) ApplyUpdates(
 	context moduleContext,
 	entries []DependencyUpdateEntry,
 	backupLimit int,
@@ -154,7 +161,7 @@ func (defaultOperations) ApplyUpdates(
 		return nil, nil, nil, fmt.Errorf("no direct dependency updates available")
 	}
 
-	operation := defaultDependencyOperation()
+	operation := o.operation
 	snap, err := SnapshotModuleFiles(context.Root)
 	if err != nil {
 		return nil, nil, nil, err
@@ -189,19 +196,19 @@ func (defaultOperations) ApplyUpdates(
 // RestoreExact performs an exact byte restore of the snapshot files
 // (no `go mod tidy`) and refreshes the dependency list offline. It is
 // shared by rollback and compensation.
-func (defaultOperations) RestoreExact(
+func (o defaultOperations) RestoreExact(
 	context moduleContext,
 	snapshot *DependencySnapshot,
 ) ([]ModuleDependency, error) {
-	operation := defaultDependencyOperation()
+	operation := o.operation
 	if err := operation.restore(context, snapshot); err != nil {
 		return nil, err
 	}
 	return operation.load(context, false)
 }
 
-func (defaultOperations) RunChecks(context moduleContext) (DependencyCheckResult, error) {
-	operation := defaultDependencyOperation()
+func (o defaultOperations) RunChecks(context moduleContext) (DependencyCheckResult, error) {
+	operation := o.operation
 	checks := []struct {
 		args    []string
 		command string

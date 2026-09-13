@@ -5,10 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
-	"github.com/smileoniks-ctrl/govm/internal/deps"
 	"github.com/smileoniks-ctrl/govm/internal/install"
 	"github.com/smileoniks-ctrl/govm/internal/utils"
 )
@@ -160,64 +158,4 @@ func findMatchingVersion(load loadCatalogFunc, version string) (utils.GoVersion,
 		}
 	}
 	return utils.GoVersion{}, fmt.Errorf("no version matching '%s' found", version)
-}
-
-// DepsList prints the current dependencies of moduleDir.
-func DepsList(moduleDir string) {
-	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
-	if err != nil {
-		fmt.Printf("❌ %s\n", err)
-		return
-	}
-	if err := svc.RunList(); err != nil {
-		fmt.Printf("❌ %s\n", err)
-	}
-}
-
-// DepsCheck prints the dependencies along with any available updates.
-func DepsCheck(moduleDir string) {
-	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
-	if err != nil {
-		fmt.Printf("❌ %s\n", err)
-		return
-	}
-	if err := svc.RunCheck(deps.LevelLatest); err != nil {
-		fmt.Printf("❌ %s\n", err)
-	}
-}
-
-// DepsUpdate runs the interactive update workflow.
-func DepsUpdate(moduleDir string) {
-	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
-	if err != nil {
-		fmt.Printf("❌ %s\n", err)
-		return
-	}
-	if err := svc.RunUpdate(UpdateOptions{}); err != nil {
-		fmt.Printf("❌ %s\n", err)
-	}
-}
-
-// DepsBackups lists saved dependency backups.
-func DepsBackups(moduleDir string) {
-	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
-	if err != nil {
-		fmt.Printf("❌ %s\n", err)
-		return
-	}
-	if err := svc.RunBackups(); err != nil {
-		fmt.Printf("❌ %s\n", err)
-	}
-}
-
-// DepsRestore restores a saved dependency backup.
-func DepsRestore(moduleDir, name string) {
-	svc, err := NewDepsService(moduleDir, os.Stdout, os.Stdin)
-	if err != nil {
-		fmt.Printf("❌ %s\n", err)
-		return
-	}
-	if err := svc.RunRestore(name); err != nil {
-		fmt.Printf("❌ %s\n", err)
-	}
 }

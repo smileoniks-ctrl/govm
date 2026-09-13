@@ -109,10 +109,10 @@ func TestRestoreDependencyBackup_RestoresOfflineWithoutTidy(t *testing.T) {
 	}
 }
 
-// TestRollbackModuleDependencies_RefreshesOffline verifies rollback
-// restores verbatim and refreshes offline without running
+// TestDefaultOperations_RestoreExact_RefreshesOffline verifies a
+// rollback restores verbatim and refreshes offline without running
 // `go mod tidy`.
-func TestRollbackModuleDependencies_RefreshesOffline(t *testing.T) {
+func TestDefaultOperations_RestoreExact_RefreshesOffline(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n")
 	snap, err := SnapshotModuleFiles(root)
@@ -122,7 +122,7 @@ func TestRollbackModuleDependencies_RefreshesOffline(t *testing.T) {
 
 	var offline bool
 	tidyCalled := false
-	_, err = rollbackModuleDependencies(root, snap, dependencyOperation{
+	ops := defaultOperations{operation: dependencyOperation{
 		runCommand: func(_ moduleContext, _ ...string) ([]byte, error) {
 			tidyCalled = true
 			return nil, nil
@@ -137,9 +137,10 @@ func TestRollbackModuleDependencies_RefreshesOffline(t *testing.T) {
 			offline = true
 			return []ModuleDependency{{Path: "example.com/restored", Version: "v1.0.0"}}, nil
 		},
-	})
+	}}
+	_, err = ops.RestoreExact(moduleContext{Root: root, Path: "example.com/app"}, snap)
 	if err != nil {
-		t.Fatalf("rollbackModuleDependencies: %v", err)
+		t.Fatalf("RestoreExact: %v", err)
 	}
 
 	if !offline {

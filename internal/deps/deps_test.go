@@ -525,7 +525,7 @@ func TestRestoreModuleFiles_RemovesGoSumWhenOriginallyMissing(t *testing.T) {
 // verbatim from the snapshot (an exact byte restore) and NO
 // `go mod tidy` runs, so stale go.sum entries are retained. The
 // persistent pre-update backup captured during apply stays on disk.
-func TestRollbackModuleDependencies_RestoresExactlyWithoutTidy(t *testing.T) {
+func TestDefaultOperations_RestoreExact_RestoresExactlyWithoutTidy(t *testing.T) {
 	root := t.TempDir()
 	originalMod := "module example.com/rollback-tidy\n\ngo 1.20\n"
 	originalSum := strings.Join([]string{
@@ -552,9 +552,7 @@ func TestRollbackModuleDependencies_RestoresExactlyWithoutTidy(t *testing.T) {
 	}
 
 	tidyCalls := 0
-	rolled, err := rollbackModuleDependencies(root, snap, dependencyOperation{
-		// restoreFiles left nil so the real RestoreModuleFiles runs an
-		// exact byte restore.
+	ops := defaultOperations{operation: dependencyOperation{
 		restoreFiles: func(ctx moduleContext, snap *DependencySnapshot) error {
 			return RestoreModuleFiles(ctx.Root, snap)
 		},
@@ -568,15 +566,16 @@ func TestRollbackModuleDependencies_RestoresExactlyWithoutTidy(t *testing.T) {
 			}
 			return []ModuleDependency{{Path: "example.com/restored", Version: "v1.0.0"}}, nil
 		},
-	})
+	}}
+	rolled, err := ops.RestoreExact(moduleContext{Root: root, Path: "example.com/rollback-tidy"}, snap)
 	if err != nil {
-		t.Fatalf("rollbackModuleDependencies: %v", err)
+		t.Fatalf("RestoreExact: %v", err)
 	}
 	if tidyCalls != 0 {
 		t.Fatalf("rollback must not run go mod tidy, got %d call(s)", tidyCalls)
 	}
-	if rolled.Snapshot == nil {
-		t.Fatal("expected snapshot to be propagated in DependencyRollbackResult")
+	if len(rolled) != 1 || rolled[0].Path != "example.com/restored" {
+		t.Fatalf("dependencies = %+v, want the offline refresh result", rolled)
 	}
 
 	gotMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
